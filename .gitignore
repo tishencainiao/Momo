@@ -1,0 +1,12 @@
+node_modules/
+__pycache__/
+*.pyc
+bridge.log*
+*.lock
+*.bak*
+backups/
+.env
+data/
+versions/
+config.json
+stickers/*.db*

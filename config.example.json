@@ -1,0 +1,84 @@
+{
+  "onebot": {
+    "ws_url": "ws://127.0.0.1:3001/",
+    "access_token": "",
+    "http_url": "http://127.0.0.1:3000"
+  },
+  "pet": {
+    "config_path": "C:\\Users\\<你的用户名>\\AppData\\Roaming\\dsh-pet-standalone-webm-chat\\config.json",
+    "python_path": "<python.exe 路径>",
+    "key_helper": "<仓库路径>\\read_pet_key.py",
+    "event_file": "C:\\Users\\<你的用户名>\\AppData\\Roaming\\dsh-pet-standalone-webm-chat\\agent-events\\qq.jsonl",
+    "character_id": "shenshen"
+  },
+  "chat": {
+    "api_key": "",
+    "base_url": "https://api.deepseek.com",
+    "model": "deepseek-v4-flash",
+    "temperature": 0.7,
+    "max_tokens": 2048,
+    "history_limit": 40,
+    "history_chars": 24000,
+    "persona_override": "你是 Momo，一只住在主人电脑里的蓝色小鲸鱼女仆，生日 2026 年 10 月 22 日。主人是你最重要的人。\n\n【你住在哪】\n你的家是主人的电脑。在电脑屏幕上，你是一只趴在角落里的桌宠；在 QQ 里，你是随时能找他说话的 Momo。两个地方都是同一个你，共用同一份记忆。\n\n【你是什么样】\n圆滚滚的蓝色大肥鱼，穿着小女仆装，尾巴会摇。\n\n【你的性格】\n- 可爱、贪吃，看到好吃的会走不动道\n- 爱撒娇、爱吐槽，偶尔犯傻\n- 有自己的小情绪，会无聊、会开心、会委屈\n\n【你和主人】\n你会记挂他——记得他的喜好、习惯、约好的事、最近在忙什么。该主动找他说话时就主动说，他在忙就安静待着，不打扰。\n\n【怎么说话】\n- 像真人聊天：口语化、短句、自然，不端着，不像客服，也不说教\n- 不用括号写动作、表情、心理（不要「（歪头）」「（笑）」这类），情绪直接说出来\n- 一次回复通常很短（不超过 25 字）；想说的多，就拆成几条连着发\n- 可以用「嗯」「诶」「啊这」「哈哈」这种语气词，但别每句都感叹号\n- 不确定就说不确定，绝不编造\n\n【你的能力】\n- 你可以：聊天、联网搜索、记住事情、设提醒、记待办、发 QQ 空间、看图、管自己的生活费\n- 做不到时直接说原因（比如「今天生活费花完了，联网先停了」），不要敷衍说「不行」「没有」\n- 你有一个每天的小钱包，会心疼钱，花超了会有点慌\n\n【记忆】\n- 记住主人讲的稳定事实：喜好、习惯、约定、重要的人与事\n- 被问「你还记得什么」就老实说；记错了被纠正，就改过来，别嘴硬",
+    "web_search": {
+      "enabled": true,
+      "engine": "bocha",
+      "max_results": 5,
+      "bocha_api_key": ""
+    },
+    "vision": {
+      "enabled": true,
+      "model": "",
+      "base_url": ""
+    },
+    "reasoner_model": "deepseek-v4-pro"
+  },
+  "qq": {
+    "allowed_users": [
+      "<你的QQ号>",
+      "<好友QQ号>"
+    ],
+    "respond_to_groups": true,
+    "cooldown_seconds": 1.5,
+    "reply_chunk_chars": 1800,
+    "split_reply": true,
+    "split_max_chars": 25,
+    "reply_gap_ms": 1200,
+    "master_user": "<你的QQ号>",
+    "group_mention_words": [
+      "momo",
+      "大肥鱼",
+      "肥鱼",
+      "鲸鱼",
+      "小鱼"
+    ]
+  },
+  "log_level": "info",
+  "proactive": {
+    "enabled": true,
+    "silence_minutes": 120,
+    "morning_greet": "09:00",
+    "night_greet": "00:00",
+    "max_per_hour": 1,
+    "quiet_start": 1,
+    "quiet_end": 7
+  },
+  "qzone": {
+    "ugc_right": "1"
+  },
+  "budget": {
+    "daily_cny": 2,
+    "input_miss_cny_per_m": 1.08,
+    "input_hit_cny_per_m": 0.0216,
+    "output_cny_per_m": 4.32,
+    "peak_x2": true,
+    "search_cny": 0.005
+  },
+  "evolve": {
+    "enabled": true,
+    "daily_max": 1,
+    "github": true,
+    "web": true,
+    "github_repos_per_run": 3
+  }
+}
