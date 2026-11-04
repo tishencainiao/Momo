@@ -451,3 +451,12 @@ module.exports = {
 | 主动搭话/浅心跳 | proactive | 主动状态 + proactiveAgentTurn |
 | 进化/反思/愿望/技能 | evolution | self IO + mindLoop 调用 |
 
+## 公开同步（镜像仓库 Momo-public）
+
+公开仓库：Gitee panMou666/momo + GitHub tishencainiao/Momo（双远程），历史 = 每版本一个提交 + 一个 tag。
+
+- 发布流程：大功能完成、升 BASE_VERSION、提交本地后，在 E:\Learn\Momo 下跑 `powershell -File sync-to-public.ps1`（脚本自动：复制干净文件集 → 脱敏替换 → 提交 → 打 tag → 推双平台）
+- 永不进公开仓库：data/、.env、config.json（只放 config.example.json）、stickers/*.db*、*.bak、versions/、archive/、self/ 个人数据（只放模板 + skills.json）、docs/remote-backup-gitee.md；README 用公开版（本地 README 不同步）
+- 脱敏靠脚本统一替换：真实 QQ 号/机器人 QQ → 假号、用户名路径 → 占位符、文档里的求职相关段落 → 项目版措辞（见 sync-to-public.ps1 第 3 步，新增敏感类型时在脚本里补一条）
+- 红线：公开仓库永远不回拉覆盖本地；推送永远只从 Momo-public 出，本地 master 的完整历史绝不外推
+

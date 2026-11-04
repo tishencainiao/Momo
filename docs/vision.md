@@ -45,6 +45,7 @@
 - 第一个大功能：记忆消化（已定，用 Python 实现；走完整方案流程）。
 - 活物感展示渠道：QQ 空间 + 私聊为主，桌宠为辅。
 - 群聊活跃度：允许比现在更活跃（现限每天主动插话 10 次）。
+- 公开仓库：镜像目录 Momo-public（Gitee panMou666/momo + GitHub tishencainiao/Momo 双远程），每版本用 sync-to-public.ps1 同步一次；内容规则见 development.md「公开同步」。
 
 ## 6. 设计原则：她的一天不完全依赖主人在线
 

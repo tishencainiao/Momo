@@ -137,7 +137,7 @@ E:\Learn\Momo\
 | `chat.model` / `chat.reasoner_model` | 日常 / 推理模型 | `deepseek-v4-flash` / `deepseek-v4-pro` |
 | `chat.base_url` | **必须指向 DeepSeek**，别指向桌宠接口（会自环） | `https://api.deepseek.com` |
 | `budget.daily_cny` | 每日生活费上限 | `2` |
-| `qq.master_user` | 主人 QQ | `<你的QQ号>` |
+| `qq.master_user` | 主人 QQ | `100000001` |
 | `qq.allowed_users` | 白名单 | 主人 + 1 位朋友 |
 | `qq.group_mention_words` | 群里触发词 | momo / 大肥鱼 / 肥鱼 … |
 | `pet.character_id` | 桌宠人设 | `shenshen` |
