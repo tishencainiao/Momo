@@ -161,7 +161,7 @@ const SELF_AWARENESS = "【你怎么看自己】你心里清楚几个事实（�
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.50.0";
+const BASE_VERSION = "1.51.0";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -449,7 +449,21 @@ function saveMemories(userId, items) {
     } catch (e) { log("warn", "写桌宠记忆失败: " + e.message.slice(0, 120)); }
     return;
   }
-  try { fs.mkdirSync(MEM_DIR, { recursive: true }); fs.writeFileSync(memPath(userId), JSON.stringify({ updated: Date.now(), items })); } catch (e) {}
+  try {
+    fs.mkdirSync(MEM_DIR, { recursive: true });
+    /* 访客记忆封顶（阶段 4）：只保留最近 N 条，防陌生人刷存储 */
+    let outItems = items || [];
+    /* 记忆条目带 from（阶段 4）：标明属于谁，方便以后消化/审计 */
+    outItems = outItems.map((it) => Object.assign({}, it, { from: Number(it.from) || Number(userId) || 0 }));
+    try {
+      const _ra = host && host.apis.get("roles");
+      if (_ra && _ra.resolveRole(userId) === "visitor") {
+        const cap = Math.max(0, Number(_ra.rateCfg().memoryCap) || 200);
+        if (outItems.length > cap) outItems = outItems.slice(outItems.length - cap);
+      }
+    } catch (e) {}
+    fs.writeFileSync(memPath(userId), JSON.stringify({ updated: Date.now(), items: outItems }));
+  } catch (e) {}
 }
 function memoryPrompt(items, call) {
   const c = call || "主人";
@@ -3106,7 +3120,6 @@ async function processGroupChat(groupId, userId, text, images, msgTime, direct) 
     if (msgTime) saveMsgTime(gKey, msgTime);
     const timeCtx = timeAwarenessCtx(gapMs);
     const gMemberCtx = groupMemberCtx(groupId, userId);
-    const _privCtx = userPrivateContext(userId);
     const gLogCtx = groupLogCtx(groupId);
     const gMemeCtx = groupMemesCtx(groupId);
     let gInfoCtx = "";
@@ -3118,7 +3131,7 @@ async function processGroupChat(groupId, userId, text, images, msgTime, direct) 
     const _gTeachCtx = _gTeachApi ? _gTeachApi.teachCtx(text) : "";
     let _gWeatherCtx = "";
     try { const _gW = host && host.apis.get("weather"); if (_gW) _gWeatherCtx = await _gW.weatherCtx(); } catch (e) {}
-    const gCtx = [GROUP_DIRECTIVE, gInfoCtx, timeCtx, gMemberCtx, gLogCtx, gMemeCtx, _privCtx, _gLifeCtx, _gWeatherCtx, _gTeachCtx, "注意：有些事是对方在私聊里告诉你的，别在群里随便说。"].filter(Boolean).join("\n") || undefined;
+    const gCtx = [GROUP_DIRECTIVE, gInfoCtx, timeCtx, gMemberCtx, gLogCtx, gMemeCtx, _gLifeCtx, _gWeatherCtx, _gTeachCtx, "注意：有些事是对方在私聊里告诉你的，别在群里随便说。"].filter(Boolean).join("\n") || undefined;
     const gSettings = Object.assign({}, settings, { max_tokens: Math.min(settings.max_tokens || 2048, 250) });
     setActivity("在群里陪" + gCall + "聊天");
     const gRes = await agentChatOnce(history, text, gSettings, gMemories, gPersona, gCall, userId, gCtx, gShort, gKey, { groupId, messageId: GROUP_LAST_MSGID.get(Number(groupId) + "_" + Number(userId)) });
