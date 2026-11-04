@@ -83,6 +83,17 @@ Momo/
 
 本项目**仅供个人学习与技术交流使用**，不得用于任何商业用途或对外提供服务。项目基于 OneBot v11 标准接口与第三方协议端（如 NapCatQQ）对接，请自行遵守相关平台的服务条款与所在地法律法规；因使用第三方协议端产生的账号风险（如风控、封号）由使用者自行承担。本仓库不含任何协议端实现代码、密钥或真实用户数据。
 
+## 借鉴与致谢
+
+本项目在实现中使用/参考了以下开源项目，详见 [docs/credits.md](docs/credits.md)：
+
+- **GPT-SoVITS**（MIT，RVC-Boss）—— 本地语音克隆引擎
+- **dsh-qqbot-muu**（MIT，wuwo1979）—— GPT-SoVITS 安装与显存调参、音色 profile 设计参考
+- **LLM-live2d / CyberWaifu**（MIT，HPUhushicheng）—— edge-tts 发语音条的做法参考
+- **edge-tts**（rany2）—— 兜底 TTS（仅调用，未复制代码）
+
+各项目许可证文本见 [docs/licenses/](docs/licenses/)。
+
 ## License
 
 [MIT](LICENSE) © 2026 tishencainiao
