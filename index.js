@@ -161,7 +161,7 @@ const SELF_AWARENESS = "【你怎么看自己】你心里清楚几个事实（�
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.47.4";
+const BASE_VERSION = "1.48.0";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -762,9 +762,13 @@ function userPersona(userId, settings) {
   const rule = _isM
     ? `【称呼】你称呼对方为「主人」，语气亲昵。`
     : `【称呼】对方不是你的主人，称呼他「${call}」或「你」，语气自然友好。\n【权限认知】找文件、截图、开软件、代发QQ等电脑/QQ操作只有主人能用；对方要求这类事时自然婉拒（如「这个只有我主人能用哦～」），不要答应、也不要假装做过了。`;
-  const growth = evolIdentityText(userId);
-  const lessons = evolReflectionText();
+  /* 记忆消化：有「认识」就用认识替代流水账（默认关，settings 打开） */
+  let _mdText = null;
+  try { const _md = host && host.apis.get("memoryDigest"); _mdText = _md ? _md.digestText(userId) : null; } catch (e) {}
+  const growth = _mdText ? null : evolIdentityText(userId);
+  const lessons = _mdText ? null : evolReflectionText();
   return [settings.persona, rule, identity,
+    _mdText || "",
     growth ? `【我自己的成长记忆】\n${growth}` : "",
     lessons ? `【我自己复盘出的经验（请体现在行为里）】\n${lessons}` : ""
   ].filter(Boolean).join("\n");

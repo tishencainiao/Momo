@@ -1,0 +1,107 @@
+/* 插件：记忆消化（读取消化后的「认识」，替换流水账注入）
+ * 数据：data/memory-digest/<uid>.json 与 global.json（由 digest.py 生成）
+ * 设计：本人桶 → 对「这个人」的认识；global → 对自己/世界的通用认识。
+ * 默认关闭（mem.digest.enabled=false），确认效果后由管理员在 QQ 上打开。
+ */
+const fs = require("fs");
+const path = require("path");
+const { spawn } = require("child_process");
+let _ctx = null;
+
+function digestDir() { return path.join(_ctx.DATA_DIR, "memory-digest"); }
+function loadBucket(name) {
+  try { return JSON.parse(fs.readFileSync(path.join(digestDir(), name + ".json"), "utf8")); } catch (e) { return null; }
+}
+function enabled() { try { return _ctx.getSetting("mem.digest.enabled", false) === true; } catch (e) { return false; } }
+function maxTopics() { try { return Math.max(3, Number(_ctx.getSetting("mem.digest.max_topics", 12)) || 12); } catch (e) { return 12; } }
+
+function fmtTopics(bucket, limit) {
+  const topics = (bucket && Array.isArray(bucket.topics)) ? bucket.topics : [];
+  return topics.slice(0, limit).map((t) => `- ${t.insight || t.theme || ""}`).filter((s) => s.length > 2);
+}
+
+/* 给提示词用的消化文本：本人桶 + 通用桶；没开或没文件返回 null */
+function digestText(userId) {
+  if (!enabled()) return null;
+  const limit = maxTopics();
+  const person = loadBucket(String(userId));
+  const global = loadBucket("global");
+  const parts = [];
+  if (global) {
+    const lines = fmtTopics(global, limit);
+    if (lines.length) parts.push(`【你对自己的认识（消化后，比流水账更稳定）】\n${lines.join("\n")}`);
+  }
+  if (person) {
+    const lines = fmtTopics(person, limit);
+    if (lines.length) parts.push(`【你对对方的认识（消化后）】\n${lines.join("\n")}`);
+  }
+  return parts.length ? parts.join("\n") : null;
+}
+
+function info() {
+  const out = { enabled: enabled(), global: null, persons: [] };
+  try {
+    const g = loadBucket("global");
+    if (g) out.global = { source: g.source_count, topics: (g.topics || []).length, updated: g.updated };
+    for (const f of fs.readdirSync(digestDir())) {
+      if (!/^\d+\.json$/.test(f)) continue;
+      const d = loadBucket(f.replace(/\.json$/, ""));
+      out.persons.push({ uid: f.replace(/\.json$/, ""), source: d.source_count, topics: (d.topics || []).length });
+    }
+  } catch (e) {}
+  return out;
+}
+
+function runDigest(args) {
+  return new Promise((resolve) => {
+    const py = (_ctx.config.pet && _ctx.config.pet.python_path) || "python";
+    const script = path.join(__dirname, "..", "digest.py");
+    let out = "", err = "";
+    let p;
+    try {
+      p = spawn(py, [script].concat(args || []), { cwd: path.join(__dirname, ".."), windowsHide: true });
+    } catch (e) {
+      return resolve({ ok: false, msg: "启动 digest.py 失败：" + e.message });
+    }
+    p.stdout.on("data", (d) => { out += d.toString(); });
+    p.stderr.on("data", (d) => { err += d.toString(); });
+    p.on("close", (code) => {
+      resolve({ ok: code === 0, code, out: out.trim(), err: err.trim().slice(0, 400) });
+    });
+    p.on("error", (e) => resolve({ ok: false, msg: e.message }));
+  });
+}
+
+module.exports = {
+  name: "memoryDigest",
+  version: "1.0.0",
+  init(ctx) { _ctx = ctx; },
+  settings: [
+    { key: "mem.digest.enabled", label: "注入消化后的认识", type: "boolean", default: false, desc: "打开后用「记忆消化」产出的认识替代流水账注入（需先跑一次 memory_digest）" },
+    { key: "mem.digest.max_topics", label: "最多注入几条认识", type: "number", default: 12, min: 3, max: 30, desc: "本人桶和通用桶各自的上限" },
+  ],
+  api: { memoryDigest: { digestText, info, runDigest, enabled } },
+  tools: [
+    {
+      def: {
+        type: "function",
+        function: {
+          name: "memory_digest",
+          description: "整理（消化）自己的记忆：把最近的成长记忆和反思合成稳定的「认识」，替换流水账注入。只在主人明确说「整理一下记忆」「消化记忆」时调用。",
+          parameters: { type: "object", properties: { uid: { type: "number", description: "可选，只消化某个人的桶" } } },
+        },
+      },
+      async handler(args, info2) {
+        if (!_ctx.isMaster(info2.userId)) return "（只有主人能让我整理记忆哦）";
+        const a = [];
+        if (args && Number(args.uid)) a.push("--uid", String(Number(args.uid)));
+        const r = await runDigest(a);
+        if (!r.ok) return `整理没成功：${r.msg || r.err || "未知错误"}`;
+        const lines = (r.out || "").split("\n").filter(Boolean);
+        const detail = lines.slice(0, 6).join("；");
+        _ctx.log("info", `记忆消化完成：${detail}`);
+        return `整理好啦～${detail ? "结果：" + detail : "已生成新的认识"}（用 settings_set 打开 mem.digest.enabled 后生效）`;
+      },
+    },
+  ],
+};
