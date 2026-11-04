@@ -161,7 +161,7 @@ const SELF_AWARENESS = "【你怎么看自己】你心里清楚几个事实（�
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.51.0";
+const BASE_VERSION = "1.52.0";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -195,7 +195,7 @@ function evolIdentityText(userId) {
 /* 自我反思产出的经验（取最近几条注入人格，之前只写盘不生效） */
 function evolReflectionText() {
   const items = (evolve && Array.isArray(evolve.reflections)) ? evolve.reflections : [];
-  return items.slice(-4).join("\n");
+  return items.slice(-4).map((r) => (typeof r === "string" ? r : (r && r.text) || "")).filter(Boolean).join("\n");
 }
 
 /* ---------------- 生活费预算（默认 1 元/天；deepseek-flash 官方价：输入未命中 $0.15/M、命中 $0.003/M、输出 $0.6/M，高峰 ×2） ---------------- */
@@ -1062,10 +1062,11 @@ try {
   if (_sr) _dyn.push(_sr);
 } catch (e) {}
   if (_pending) _dyn.push(`【你之前攒着想说的（合适就自然提，不用全说，也别硬提）】\n${_pending}`);
+  const _mdHas = (() => { try { const a = host && host.apis.get("memoryDigest"); return a ? a.hasDigest(userId) : false; } catch (e) { return false; } })();
   if (memories && memories.length) {
-    _dyn.push(memoryIndexPrompt(memories, call));
-    const _rel = retrieveMemories(memories, userText, 6);
-    if (_rel.length && _rel.length !== memories.length) _dyn.push(memoryPrompt(_rel, call));
+    if (!_mdHas) _dyn.push(memoryIndexPrompt(memories, call));
+    const _rel = retrieveMemories(memories, userText, _mdHas ? 4 : 6);
+    if (_rel.length && (_mdHas || _rel.length !== memories.length)) _dyn.push(memoryPrompt(_rel, call));
   }
   if (shortMemories && shortMemories.length) {
     _dyn.push(memoryIndexPrompt(shortMemories, call));

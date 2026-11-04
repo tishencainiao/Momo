@@ -239,6 +239,7 @@ async function selfReflection(settings) {
   let refl = [];
   try { refl = JSON.parse(fs.readFileSync(path.join(_ctx.SELF_DIR, "reflections.json"), "utf8")); } catch (e) {}
   if (!Array.isArray(refl)) refl = [];
+  const reflText = (r) => (typeof r === "string" ? r : (r && r.text) || "");
   /* 取「最近没做到 / 被纠正」的事，让反思针对具体问题，而不是空泛感想 */
   const _wishes = (() => { try { return JSON.parse(fs.readFileSync(path.join(_ctx.DATA_DIR, "wishes.json"), "utf8")); } catch (e) { return []; } })();
   const _fails = (Array.isArray(_wishes) ? _wishes : [])
@@ -247,7 +248,7 @@ async function selfReflection(settings) {
   const prompt = `你是 Momo（大肥鱼桌宠），现在是你定期「自我反思」的时间。
 你的成长记忆（最近）：${ids.slice(-8).join("；") || "（还没有）"}
 最近没做到 / 被纠正的事：${_fails.length ? _fails.join("；") : "（没有记录）"}
-最近反思过：${refl.slice(-4).join("；") || "（还没有）"}
+最近反思过：${refl.slice(-4).map(reflText).join("；") || "（还没有）"}
 
 请针对上面「没做到 / 被纠正」或成长记忆里的具体问题，输出 1 条可执行的反思：
 - 用「我该…」「以后遇到…就…」「我学到了…」开头
@@ -263,8 +264,8 @@ async function selfReflection(settings) {
     s = s.replace(/^["'「『“]|["'」』”]$/g, "").trim();
     if (!s) { _ctx.log("warn", "反思：模型没返回有效内容"); return; }
     if (s.length > 60) s = s.slice(0, 60);
-    if (refl.some((r) => _ctx.textSimilar(r, s))) { _ctx.log("info", `反思：与已有重复，跳过（${s.slice(0, 30)}）`); return; }
-    refl.push(s);
+    if (refl.some((r) => _ctx.textSimilar(reflText(r), s))) { _ctx.log("info", `反思：与已有重复，跳过（${s.slice(0, 30)}）`); return; }
+    refl.push({ text: s, from: 0, ts: Date.now() });
     while (refl.length > REFLECT_MAX) refl.shift();
     fs.mkdirSync(_ctx.SELF_DIR, { recursive: true });
     fs.writeFileSync(path.join(_ctx.SELF_DIR, "reflections.json"), JSON.stringify(refl));

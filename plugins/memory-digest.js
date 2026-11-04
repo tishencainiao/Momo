@@ -50,6 +50,7 @@ function loadBucket(name) {
   try { return JSON.parse(fs.readFileSync(path.join(digestDir(), name + ".json"), "utf8")); } catch (e) { return null; }
 }
 function enabled() { try { return _ctx.getSetting("mem.digest.enabled", false) === true; } catch (e) { return false; } }
+function hasDigest(userId) { return !!loadBucket(String(userId)); }
 function maxTopics() { try { return Math.max(3, Number(_ctx.getSetting("mem.digest.max_topics", 12)) || 12); } catch (e) { return 12; } }
 
 function fmtTopics(bucket, limit) {
@@ -119,7 +120,7 @@ module.exports = {
     { key: "mem.digest.daily", label: "每晚自动消化", type: "boolean", default: true, desc: "每天到点自动跑一次消化（依赖下面那个小时）" },
     { key: "mem.digest.hour", label: "每天几点消化", type: "number", default: 22, min: 0, max: 23, desc: "整点，默认 22 点" },
   ],
-  api: { memoryDigest: { digestText, info, runDigest, enabled, dailyDue, tick } },
+  api: { memoryDigest: { digestText, info, runDigest, enabled, hasDigest, dailyDue, tick } },
   tools: [
     {
       def: {
