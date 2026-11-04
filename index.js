@@ -161,7 +161,7 @@ const SELF_AWARENESS = "【你怎么看自己】你心里清楚几个事实（�
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.49.0";
+const BASE_VERSION = "1.50.0";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -703,6 +703,20 @@ function isMaster(userId) {
   try { const a = host && host.apis.get("roles"); if (a) return a.resolveRole(userId) === "admin"; } catch (e) {}
   return Number(userId) === Number((cfg.qq && cfg.qq.master_user) || 0);
 }
+/* 能力鉴权（阶段 3）：没登记的工具/命令默认只给管理员 */
+const capsTable = require("./caps");
+function canDo(userId, cap) {
+  try { const a = host && host.apis.get("roles"); if (a) return !!a.can(userId, cap); } catch (e) {}
+  return isMaster(userId);
+}
+function toolAllowed(userId, name) {
+  const cap = capsTable.toolCap(name);
+  return cap ? canDo(userId, cap) : isMaster(userId);
+}
+function cmdAllowed(userId, key) {
+  const cap = capsTable.cmdCap(key);
+  return cap ? canDo(userId, cap) : isMaster(userId);
+}
 function appsPath() { return path.join(DATA_DIR, "appellations.json"); }
 function loadAppellations() { try { return JSON.parse(fs.readFileSync(appsPath(), "utf8")); } catch (e) { return {}; } }
 function saveAppellations(apps) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(appsPath(), JSON.stringify(apps)); } catch (e) {} }
@@ -1093,6 +1107,11 @@ try {
       messages.push({ role: "assistant", content: msg.content || "", tool_calls: msg.tool_calls });
       for (const tc of msg.tool_calls) {
         let result = "（工具执行失败）";
+        if (!toolAllowed(userId, tc.function.name)) {
+          result = "（这个功能只有主人能用哦～你自然婉拒对方，别答应也别假装做了）";
+          messages.push({ role: "tool", tool_call_id: tc.id, content: result });
+          continue;
+        }
         try {
           const pTool = host && host.toolRegistry.get(tc.function.name);
           if (pTool) {
@@ -2654,6 +2673,7 @@ async function handlePrivateMessage(event) {
     for (const [key, c] of host.commandRegistry) {
       try {
         if (c.regex && c.regex.test(text)) {
+          if (!cmdAllowed(userId, key)) { await sendPrivate(userId, "（这个只有主人能用哦～）"); return; }
           const r = await c.handler({ userId, text, master, call });
           if (r != null) await sendPrivate(userId, String(r));
           return;
@@ -2854,12 +2874,16 @@ async function processPrivateChat(userId, text, images, voiceRequested, msgTime)
     }
     if (images && images.length && !budgetOut) {
       const descs = [];
-      for (const img of images.slice(0, 3)) {
-        log("info", "图片字段 file=" + String(img.file || "").slice(0, 100) + " url=" + String(img.url || "").slice(0, 160));
-        try { const d = await describeImage(img, settings); if (d) descs.push(d); } catch (e) { log("warn", "图片识别失败: " + e.message.slice(0, 120)); }
+      if (!canDo(userId, "vision")) {
+        text = text ? text + "\n【图片内容】（对方发了图片，但看图的权限只有主人有）" : "[对方发了一张图片]";
+      } else {
+        for (const img of images.slice(0, 3)) {
+          log("info", "图片字段 file=" + String(img.file || "").slice(0, 100) + " url=" + String(img.url || "").slice(0, 160));
+          try { const d = await describeImage(img, settings); if (d) descs.push(d); } catch (e) { log("warn", "图片识别失败: " + e.message.slice(0, 120)); }
+        }
+        if (descs.length) text = text + (text ? "\n" : "") + "【图片内容】" + descs.join("；");
+        else if (!text) text = "[对方发了一张图片，但我暂时看不清]";
       }
-      if (descs.length) text = text + (text ? "\n" : "") + "【图片内容】" + descs.join("；");
-      else if (!text) text = "[对方发了一张图片，但我暂时看不清]";
     }
     let valence = 0;
     if (!budgetOut) {
@@ -3060,12 +3084,16 @@ async function processGroupChat(groupId, userId, text, images, msgTime, direct) 
     const settings = resolveChatSettings();
     const history = loadSession("g" + groupId + "_" + userId);
     if (images && images.length) {
-      const descs = [];
-      for (const img of images.slice(0, 3)) {
-        try { const d = await describeImage(img, settings); if (d) descs.push(d); } catch (e) {}
+      if (!canDo(userId, "vision")) {
+        text = text ? text + "\n【图片内容】（对方发了图片，但看图的权限只有主人有）" : "[对方发了一张图片]";
+      } else {
+        const descs = [];
+        for (const img of images.slice(0, 3)) {
+          try { const d = await describeImage(img, settings); if (d) descs.push(d); } catch (e) {}
+        }
+        if (descs.length) text = text + (text ? "\n" : "") + "【图片内容】" + descs.join("；");
+        else if (!text) text = "[对方发了一张图片]";
       }
-      if (descs.length) text = text + (text ? "\n" : "") + "【图片内容】" + descs.join("；");
-      else if (!text) text = "[对方发了一张图片]";
     }
     const gCall = resolveCall(userId);
     const gPersona = userPersona(userId, settings);
