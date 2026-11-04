@@ -161,7 +161,7 @@ const SELF_AWARENESS = "【你怎么看自己】你心里清楚几个事实（�
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.47.3";
+const BASE_VERSION = "1.47.4";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -699,7 +699,10 @@ async function sendVoice(userId, text) {
 }
 
 /* ---------------- 角色与称呼（主人/访客） ---------------- */
-function isMaster(userId) { return Number(userId) === Number((cfg.qq && cfg.qq.master_user) || 0); }
+function isMaster(userId) {
+  try { const a = host && host.apis.get("roles"); if (a) return a.resolveRole(userId) === "admin"; } catch (e) {}
+  return Number(userId) === Number((cfg.qq && cfg.qq.master_user) || 0);
+}
 function appsPath() { return path.join(DATA_DIR, "appellations.json"); }
 function loadAppellations() { try { return JSON.parse(fs.readFileSync(appsPath(), "utf8")); } catch (e) { return {}; } }
 function saveAppellations(apps) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(appsPath(), JSON.stringify(apps)); } catch (e) {} }
@@ -728,6 +731,15 @@ const WISH_FILE = path.join(DATA_DIR, "wishes.json");
 function loadWishes() { try { const a = host && host.apis.get("evolution"); return a ? a.loadWishes() : []; } catch (e) { return []; } }
 function addWish(text, source) { try { const a = host && host.apis.get("evolution"); if (a) a.addWish(text, source); } catch (e) {} }
 function resolveCall(userId) {
+  try {
+    const a = host && host.apis.get("roles");
+    if (a) {
+      const p = a.person(userId);
+      if (p.role === "admin") return "主人";
+      if (p.appellation) return p.appellation;
+      return p.role === "user" ? "朋友" : "陌生人";
+    }
+  } catch (e) {}
   if (isMaster(userId)) return "主人";
   const apps = loadAppellations();
   const c = String((apps[userId] || "") || "").trim();
