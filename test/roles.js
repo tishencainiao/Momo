@@ -55,4 +55,20 @@ check("person 字段", () => {
   assert.strictEqual(p.favor, 42);
   assert.strictEqual(p.isFriend, true);
 });
+check("访客限速：窗口内超限拒绝", () => {
+  ROLES.init(makeCtx({ settings: { "perm.visitor.enabled": true, "perm.visitor.max_per_window": 2 } }));
+  const R = ROLES.api.roles;
+  R.resetRate();
+  assert.strictEqual(R.rateOk(199999999), true);
+  assert.strictEqual(R.rateOk(199999999), true);
+  assert.strictEqual(R.rateOk(199999999), false);
+});
+check("访客限速：每日上限", () => {
+  ROLES.init(makeCtx({ settings: { "perm.visitor.enabled": true, "perm.visitor.max_per_window": 100, "perm.visitor.daily_cap": 2 } }));
+  const R = ROLES.api.roles;
+  R.resetRate();
+  assert.strictEqual(R.rateOk(199999998), true);
+  assert.strictEqual(R.rateOk(199999998), true);
+  assert.strictEqual(R.rateOk(199999998), false);
+});
 console.log(`\n✓ 全部 ${n} 个断言通过`);

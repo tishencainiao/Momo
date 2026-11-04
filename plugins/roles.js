@@ -116,6 +116,23 @@ function person(uid) {
   };
 }
 
+/* 访客限速：时间窗 + 每日上限（内存态，重启清零） */
+const _visits = new Map();
+function rateOk(uid) {
+  const id = Number(uid) || 0;
+  if (!id) return false;
+  const r = rateCfg();
+  const now = Date.now();
+  const day = new Date().toDateString();
+  let st = _visits.get(id);
+  if (!st || st.day !== day) st = { day, winStart: now, winCount: 0, dayCount: 0 };
+  if (now - st.winStart >= r.windowSec * 1000) { st.winStart = now; st.winCount = 0; }
+  if (st.winCount >= r.maxPerWindow || st.dayCount >= r.dailyCap) { _visits.set(id, st); return false; }
+  st.winCount += 1; st.dayCount += 1; _visits.set(id, st);
+  return true;
+}
+function resetRate() { _visits.clear(); }
+
 function can(uid, capability, opts) {
   const role = resolveRole(uid);
   if (role === ROLE.IGNORED) return false;
@@ -145,5 +162,5 @@ module.exports = {
     { key: "perm.visitor.daily_cap", label: "访客每日上限", type: "number", default: 50, min: 1, max: 500, desc: "每天最多回访客几条" },
     { key: "perm.visitor.memory_cap", label: "访客记忆条数上限", type: "number", default: 200, min: 0, max: 2000, desc: "访客的本人记忆最多存多少条，防刷存储" },
   ],
-  api: { roles: { resolveRole, can, person, ROLE, MATRIX, rateCfg, visitorsEnabled, adminIds, userIds } },
+  api: { roles: { resolveRole, can, person, ROLE, MATRIX, rateCfg, visitorsEnabled, adminIds, userIds, rateOk, resetRate } },
 };

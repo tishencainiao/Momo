@@ -161,7 +161,7 @@ const SELF_AWARENESS = "【你怎么看自己】你心里清楚几个事实（�
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.48.1";
+const BASE_VERSION = "1.49.0";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -2561,8 +2561,13 @@ async function describeImage(image, settings) {
 async function handlePrivateMessage(event) {
   const userId = Number(event.user_id), selfId = Number(event.self_id);
   if (userId === selfId) return;
-  const allowed = (cfg.qq && cfg.qq.allowed_users) || [];
-  if (allowed.length && !allowed.includes(userId)) { log("info", `忽略非白名单用户 ${userId}`); return; }
+  const _allowed = (cfg.qq && cfg.qq.allowed_users) || [];
+  const _rolesApi = host && host.apis.get("roles");
+  const _role = _rolesApi
+    ? _rolesApi.resolveRole(userId)
+    : (_allowed.includes(userId) || isMaster(userId) ? "user" : "ignored");
+  if (_role === "ignored") { log("info", `忽略非白名单用户 ${userId}`); return; }
+  if (_role === "visitor" && _rolesApi && !_rolesApi.rateOk(userId)) { log("info", `访客限速，忽略 ${userId}`); return; }
   if (host && host.hookLists.private_message.length) {
     for (const fn of host.hookLists.private_message) {
       try { if (fn(host.ctx, { userId, event, raw: String(event.raw_message || "") }) === true) return; } catch (e) { log("warn", "插件私聊钩子失败: " + e.message.slice(0, 120)); }
@@ -3194,6 +3199,8 @@ async function handleGroupMessage(event) {
     log("info", `群对话延续-判定为跟她说 群${_gid} 用户${_uid}：${String(text).slice(0, 30)}`);
   }
   if (_dec.reply) {
+    const _gRoles = host && host.apis.get("roles");
+    if (_gRoles && _gRoles.resolveRole(_uid) === "visitor" && !_gRoles.rateOk(_uid)) { log("info", `访客限速，忽略群消息 ${_uid}`); return; }
     GROUP_LAST_AT.set(_gid, { userId: _uid, ts: Date.now() });   // 续期
     if (_continued) log("info", `群对话延续 群${_gid} 用户${_uid}：${String(text).slice(0, 30)}`);
   }
