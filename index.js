@@ -161,7 +161,7 @@ const SELF_AWARENESS = "【你怎么看自己】你心里清楚几个事实（�
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.47.2";
+const BASE_VERSION = "1.47.3";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -1215,9 +1215,20 @@ function timeAwarenessCtx(gapMs) {
 const CURRENT_STATUS_FILE = path.join(DATA_DIR, "current-status.json");
 function loadCurrentStatus() { try { return JSON.parse(fs.readFileSync(CURRENT_STATUS_FILE, "utf8")); } catch (e) { return {}; } }
 function saveCurrentStatus(st) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(CURRENT_STATUS_FILE, JSON.stringify(st)); } catch (e) {} }
-function getCurrentStatus(userId) { return (loadCurrentStatus() || {})[String(userId)] || null; }
+function getCurrentStatus(userId) {
+  const st = (loadCurrentStatus() || {})[String(userId)] || null;
+  if (!st) return null;
+  /* v1.47.3：带 until 的状态过期后不再永挂——过期超过宽限期就自动清掉（修复“以为主人还没起”） */
+  if (st.until && Date.now() > st.until + STATUS_GRACE_MS) {
+    clearCurrentStatus(userId);
+    log("info", `状态自动清除[${userId}]：${st.text}（已过期 ${Math.round((Date.now() - st.until) / 60000)} 分钟）`);
+    return null;
+  }
+  return st;
+}
 function setCurrentStatus(userId, text, meta) { const st = loadCurrentStatus(); st[String(userId)] = Object.assign({ text: String(text).slice(0, 40), since: Date.now() }, meta || {}); saveCurrentStatus(st); }
 function clearCurrentStatus(userId) { const st = loadCurrentStatus(); delete st[String(userId)]; saveCurrentStatus(st); }
+const STATUS_GRACE_MS = 60 * 60 * 1000;   // 状态过期后的宽限期：1 小时
 
 /* 规则层：从用户原话直接判定状态（确定性，不依赖模型） */
 const STATUS_RULES = [
@@ -1233,6 +1244,12 @@ const STATUS_CLEAR_RE = /我(?:醒|回来|起)了|起床了|我醒了|不睡了|
 function applyStatusRule(userId, text) {
   const s = String(text || "");
   if (!s) return false;
+  /* v1.47.3：状态已过期的话，用户一开口就当作"回来了"，顺手清掉（宽限期内不清，留给人自己说"我醒了"） */
+  const _cur0 = getCurrentStatus(userId);
+  if (_cur0 && _cur0.until && Date.now() > _cur0.until) {
+    clearCurrentStatus(userId);
+    log("info", `状态清除[${userId}]：${_cur0.text} → 已过期，对方开口即视为回来了`);
+  }
   if (STATUS_CLEAR_RE.test(s)) {
     const cur = getCurrentStatus(userId);
     if (cur) { clearCurrentStatus(userId); log("info", `状态清除[${userId}]：${cur.text} → 用户回来了`); return true; }
@@ -1275,7 +1292,8 @@ function currentStatusCtx(userId) {
       const left = Math.round((st.until - now) / 60000);
       return `【对方当前状态】${st.text}（已持续 ${formatGap(now - (st.since || now))}，预计还要 ${left} 分钟）。此时不要打扰对方，除非对方主动找你。`;
     }
-    return `【对方当前状态】${st.text}（预计结束时间已过，但不确定对方是否已经起来/忙完）。可以轻轻问一句，不要直接当对方已经空闲。`;
+    /* v1.47.3：过期后只做"软提示"，不再断言对方还在睡/忙 */
+    return `【对方当前状态】上次提到「${st.text}」（已经过了 ${formatGap(now - (st.since || now))}）。时间这么久，对方很可能已经起来了/忙完了，别当成对方还在${String(st.text).replace(/^正在/, "")}；可以轻轻问一句，不要直接当对方空闲。`;
   }
   if (now - (st.since || now) > 2 * 3600e3) return "";
   return `【对方当前状态】${st.text}（已持续 ${formatGap(now - (st.since || now))}）。`;
