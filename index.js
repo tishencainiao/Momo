@@ -161,7 +161,7 @@ const SELF_AWARENESS = "【你怎么看自己】你心里清楚几个事实（�
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.47.1";
+const BASE_VERSION = "1.47.2";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -342,9 +342,10 @@ function summaryFile(userId) { return path.join(SESS_DIR, String(userId) + ".sum
 function loadSummary(userId) { try { const d = JSON.parse(fs.readFileSync(summaryFile(userId), "utf8")); return String(d.summary || ""); } catch (e) { return ""; } }
 function saveSummary(userId, s) { try { fs.mkdirSync(SESS_DIR, { recursive: true }); fs.writeFileSync(summaryFile(userId), JSON.stringify({ summary: String(s).slice(0, 2000), updated: Date.now() })); } catch (e) {} }
 function summaryCtx(userId) { const s = loadSummary(userId); return s ? `【早前对话摘要】${s}` : ""; }
-async function rollSessionSummary(userId, history, settings) {
-  if (!history || history.length <= 40) return null;
-  const old = history.slice(0, history.length - 30);          // 要压缩的最老部分
+async function rollSessionSummary(userId, history, settings, keep) {
+  const k = Math.max(10, Number(keep) || 40);
+  if (!history || history.length <= k) return null;
+  const old = history.slice(0, history.length - k);          // 要压缩的最老部分
   const prev = loadSummary(userId);
   const text = old.map((m) => `${m.role === "user" ? "主人" : "我"}：${String(m.content || "").slice(0, 120)}`).join("\n").slice(0, 2500);
   const prompt = `你是记忆摘要助手。请把下面这段较早的对话，压缩成 1~3 句简短摘要（重点：主人说过的重要信息、约定、喜好、情绪变化、聊过的话题）。只输出摘要本身，不要解释、不要引号。\n${prev ? "之前已有的摘要（在此基础上补充、避免重复）：\n" + prev + "\n" : ""}\n待压缩的对话：\n${text}`;
@@ -357,6 +358,13 @@ async function rollSessionSummary(userId, history, settings) {
     log("info", `会话摘要已滚动 user=${userId}（压缩 ${old.length} 条，剩 ${history.length} 条）`);
     return s;
   } catch (e) { log("warn", "会话摘要失败: " + e.message.slice(0, 120)); return null; }
+}
+/* 保存前调用：历史超过「窗口 + 一批」时，先把最老的一批压进摘要再落盘（v1.47.2 修：之前触发线 45 与 history_limit 40 打架，永不触发） */
+async function maybeRollSummary(key, history, settings) {
+  const lim = Math.max(10, Number(settings && settings.history_limit) || 40);
+  const BATCH = 12;
+  if (!history || history.length <= lim + BATCH) return;
+  await rollSessionSummary(key, history, settings, lim);
 }
 function userPrivateContext(userId) {
   try {
@@ -2487,7 +2495,21 @@ async function describeImage(image, settings) {
     stream: false, max_tokens: 1000, temperature: 0.2,
     thinking: { type: "disabled" },
   });
-  const resp = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + apiKey }, body });
+  let resp = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      resp = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + apiKey },
+        body,
+        signal: AbortSignal.timeout(25000),
+      });
+      break;
+    } catch (e) {
+      if (attempt === 2) throw e;
+      await sleep(1500);
+    }
+  }
   if (!resp.ok) { let d = ""; try { d = (await resp.text()).slice(0, 200); } catch (e) {} throw new Error(`视觉 HTTP ${resp.status}: ${d}`); }
   const data = await resp.json();
   const desc = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
@@ -2873,7 +2895,7 @@ async function processPrivateChat(userId, text, images, voiceRequested, msgTime)
       addWish(text, "user-request-unmet");
     }
     history.push({ role: "user", content: text, ts: Date.now() }, { role: "assistant", content: reply, ts: Date.now() });
-    if (history.length > 45) rollSessionSummary(userId, history, settings).catch(() => {});
+    await maybeRollSummary(userId, history, settings);
     saveSession(userId, trimHistory(history, settings.history_limit, settings.history_chars));
     await sendPrivate(userId, reply);
     if (host) host.runHook("reply", { userId, text, reply, channel: "private" });
@@ -3037,7 +3059,8 @@ async function processGroupChat(groupId, userId, text, images, msgTime, direct) 
     const reply = stripStageDirections(rawReply) || rawReply;
     if (reply) {
       history.push({ role: "user", content: text, ts: Date.now() }, { role: "assistant", content: reply, ts: Date.now() });
-      saveSession("g" + groupId + "_" + userId, history);
+      await maybeRollSummary(gKey, history, settings);
+      saveSession("g" + groupId + "_" + userId, trimHistory(history, settings.history_limit, settings.history_chars));
       const qq = cfg.qq || {};
       const split = !!qq.split_reply;
       const segGap = evolvePref("reply_gap_ms", qq.reply_gap_ms || 1200);
@@ -3064,7 +3087,6 @@ async function processGroupChat(groupId, userId, text, images, msgTime, direct) 
           if (s) { await sendStickerImage(userId, s, "group", groupId); noteStickerSent(stickerSessionKey(userId, groupId), s); log("info", `群自动表情包 群${groupId}: ${gEmo.name}→${s.label}`); }
         }
       } catch (e) { log("warn", "群表情包失败: " + String(e.message).slice(0, 100)); }
-      if (history.length > 45) rollSessionSummary(gKey, history, settings).catch(() => {});
       if (host) host.runHook("reply", { userId, text, reply, channel: "group", groupId });
       recordCrossWindow(userId, groupId, text, reply);
       /* 群聊记忆提炼已由插件 memory 的 reply 钩子接管 */
