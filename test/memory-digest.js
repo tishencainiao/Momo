@@ -50,4 +50,21 @@ check("max_topics 限制条数", () => {
   DIGEST.init(makeCtx({ "mem.digest.enabled": true, "mem.digest.max_topics": 3 }));
   assert.ok(DIGEST.api.memoryDigest.digestText(42));
 });
+check("dailyDue：未到点不跑", () => {
+  DIGEST.init(makeCtx({ "mem.digest.enabled": true, "mem.digest.hour": 22 }));
+  assert.strictEqual(DIGEST.api.memoryDigest.dailyDue(new Date(2026, 10, 4, 10, 0), {}), false);
+});
+check("dailyDue：到点且今天没跑 → 跑", () => {
+  DIGEST.init(makeCtx({ "mem.digest.enabled": true, "mem.digest.hour": 22 }));
+  assert.strictEqual(DIGEST.api.memoryDigest.dailyDue(new Date(2026, 10, 4, 22, 5), {}), true);
+});
+check("dailyDue：今天已经跑过 → 不跑", () => {
+  DIGEST.init(makeCtx({ "mem.digest.enabled": true, "mem.digest.hour": 22 }));
+  const now = new Date(2026, 10, 4, 23, 0);
+  assert.strictEqual(DIGEST.api.memoryDigest.dailyDue(now, { lastDate: now.toDateString() }), false);
+});
+check("dailyDue：关掉每晚消化 → 不跑", () => {
+  DIGEST.init(makeCtx({ "mem.digest.enabled": true, "mem.digest.hour": 22, "mem.digest.daily": false }));
+  assert.strictEqual(DIGEST.api.memoryDigest.dailyDue(new Date(2026, 10, 4, 23, 0), {}), false);
+});
 console.log(`\n✓ 全部 ${n} 个断言通过`);

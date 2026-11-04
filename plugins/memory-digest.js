@@ -7,6 +7,43 @@ const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
 let _ctx = null;
+let _timer = null;
+
+const STATE_FILE = () => path.join(_ctx.DATA_DIR, "digest-state.json");
+function loadState() { try { return JSON.parse(fs.readFileSync(STATE_FILE(), "utf8")); } catch (e) { return {}; } }
+function saveState(st) { try { fs.writeFileSync(STATE_FILE(), JSON.stringify(st)); } catch (e) {} }
+function dailyEnabled() { try { return _ctx.getSetting("mem.digest.daily", true) !== false; } catch (e) { return true; } }
+function dailyHour() {
+  try {
+    const h = Number(_ctx.getSetting("mem.digest.hour", 22));
+    return Number.isFinite(h) ? Math.min(23, Math.max(0, Math.floor(h))) : 22;
+  } catch (e) { return 22; }
+}
+/* 每天到点跑一次（错过会补跑；同一天只跑一次） */
+function dailyDue(now, st) {
+  if (!enabled() || !dailyEnabled()) return false;
+  if (now.getHours() < dailyHour()) return false;
+  return ((st && st.lastDate) !== now.toDateString());
+}
+function tick() {
+  const now = new Date();
+  const st = loadState();
+  if (!dailyDue(now, st)) return;
+  runDigest([]).then((r) => {
+    if (!r.ok) { try { _ctx.log("warn", "每日记忆消化失败：" + (r.err || r.msg || "")); } catch (e) {} return; }
+    const st2 = loadState();
+    st2.lastDate = now.toDateString();
+    st2.lastTs = Date.now();
+    saveState(st2);
+    try { _ctx.log("info", "每日记忆消化完成：" + String(r.out || "").split("\n")[0]); } catch (e) {}
+  });
+}
+function startTimer() {
+  if (_timer) return;
+  _timer = setInterval(tick, 5 * 60000);
+  if (_timer.unref) _timer.unref();
+  setTimeout(tick, 15000);   // 启动后补跑一次（防止 22:00 时机器没开）
+}
 
 function digestDir() { return path.join(_ctx.DATA_DIR, "memory-digest"); }
 function loadBucket(name) {
@@ -75,12 +112,14 @@ function runDigest(args) {
 module.exports = {
   name: "memoryDigest",
   version: "1.0.0",
-  init(ctx) { _ctx = ctx; },
+  init(ctx) { _ctx = ctx; try { startTimer(); } catch (e) {} },
   settings: [
     { key: "mem.digest.enabled", label: "注入消化后的认识", type: "boolean", default: false, desc: "打开后用「记忆消化」产出的认识替代流水账注入（需先跑一次 memory_digest）" },
     { key: "mem.digest.max_topics", label: "最多注入几条认识", type: "number", default: 12, min: 3, max: 30, desc: "本人桶和通用桶各自的上限" },
+    { key: "mem.digest.daily", label: "每晚自动消化", type: "boolean", default: true, desc: "每天到点自动跑一次消化（依赖下面那个小时）" },
+    { key: "mem.digest.hour", label: "每天几点消化", type: "number", default: 22, min: 0, max: 23, desc: "整点，默认 22 点" },
   ],
-  api: { memoryDigest: { digestText, info, runDigest, enabled } },
+  api: { memoryDigest: { digestText, info, runDigest, enabled, dailyDue, tick } },
   tools: [
     {
       def: {
