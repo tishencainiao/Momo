@@ -43,6 +43,10 @@ const run = async () => {
     const caps = require("../caps.js");
     assert.strictEqual(caps.toolCap("send_voice"), "voice");
   });
+  await check("hasPendingVoice 默认 false / voiceOnlyReply 默认开", () => {
+    assert.strictEqual(api.hasPendingVoice(12345), false);
+    assert.strictEqual(api.voiceOnlyReply(), true);
+  });
   console.log(`\n✓ 全部 ${n} 个断言通过`);
 };
 run().catch((e) => { console.error(e); process.exit(1); });

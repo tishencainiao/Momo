@@ -161,7 +161,7 @@ const SELF_AWARENESS = "【你怎么看自己】你心里清楚几个事实（�
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.59.0";
+const BASE_VERSION = "1.59.1";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -3025,7 +3025,12 @@ async function processPrivateChat(userId, text, images, voiceRequested, msgTime)
     history.push({ role: "user", content: text, ts: Date.now() }, { role: "assistant", content: reply, ts: Date.now() });
     await maybeRollSummary(userId, history, settings);
     saveSession(userId, trimHistory(history, settings.history_limit, settings.history_chars));
-    await sendPrivate(userId, reply);
+    /* 只发语音模式：本回合有语音要发时不再发文字（避免“文字+语音”两条） */
+    const _voiceApi = host && host.apis.get("voice");
+    const _pendingVoice = !!(_voiceApi && _voiceApi.hasPendingVoice && _voiceApi.hasPendingVoice(userId));
+    const _voiceOnly = !!(_voiceApi && _voiceApi.voiceOnlyReply && _voiceApi.voiceOnlyReply() && (voiceRequested || _pendingVoice));
+    if (_voiceOnly) log("info", `只发语音（文字已抑制）user=${userId}${_pendingVoice ? "（工具触发）" : "（关键词触发）"}`);
+    else await sendPrivate(userId, reply);
     if (host) host.runHook("reply", { userId, text, reply, channel: "private" });
     saveSeenMsg(userId, Math.floor(Date.now() / 1000));
     if (msgTime) saveMsgTime(userId, msgTime);
@@ -3044,7 +3049,13 @@ async function processPrivateChat(userId, text, images, voiceRequested, msgTime)
         if (s) { try { await sendStickerImage(userId, s); noteStickerSent(_stkKey, s); log("info", `自动表情包 user=${userId}: ${emo.name}→${s.label}`); } catch (e) { log("warn", "表情包发送失败: " + e.message.slice(0, 120)); } }
       }
     }
-    if (voiceRequested) { try { await sendVoice(userId, reply); } catch (e) { log("warn", "语音发送失败: " + e.message.slice(0, 120)); } }
+    if (voiceRequested && !_pendingVoice) {
+      try { await sendVoice(userId, reply); }
+      catch (e) {
+        log("warn", "语音发送失败: " + e.message.slice(0, 120));
+        if (_voiceOnly) { try { await sendPrivate(userId, reply); } catch (e2) {} }
+      }
+    }
     petEvent("idle");
     log("info", `回复私聊 ${userId}，长度 ${reply.length}`);
     if (_teachApi) _teachApi.markMatched(reply);

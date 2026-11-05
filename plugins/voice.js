@@ -168,6 +168,10 @@ function prepareVoice(userId, text) {
 }
 function takePendingVoice(userId) { return pendingVoice.get(String(userId)) || null; }
 function clearPendingVoice(userId) { const k = String(userId); const p = pendingVoice.get(k); pendingVoice.delete(k); return p; }
+function hasPendingVoice(userId) { return pendingVoice.has(String(userId)); }
+function voiceOnlyReply() {
+  try { return _ctx.getSetting("qq.voice_only", true) !== false; } catch (e) { return true; }
+}
 
 module.exports = {
   name: "voice",
@@ -177,8 +181,9 @@ module.exports = {
     { key: "qq.debounce_ms", label: "等消息窗口（毫秒）", type: "number", default: 20000, min: 3000, max: 60000, desc: "对方最后一条消息后等多久再回复；越大越能让你把话说完" },
     { key: "qq.max_wait_ms", label: "连发时最长等待（毫秒）", type: "number", default: 40000, min: 10000, max: 120000, desc: "无论连发多少条，最多等这么久就回复" },
     { key: "qq.voice_warm", label: "语音预热", type: "boolean", default: true, desc: "收到语音请求时后台先拉起 TTS 服务，减少等待" },
+    { key: "qq.voice_only", label: "发语音时不配文字", type: "boolean", default: true, desc: "开着：语音回复只发语音；关掉：文字+语音两条都发" },
   ],
-  api: { voice: { wantsVoice, sendVoice, warmVoice, transcribeRecords, voiceRateOk, prepareVoice, takePendingVoice, clearPendingVoice } },
+  api: { voice: { wantsVoice, sendVoice, warmVoice, transcribeRecords, voiceRateOk, prepareVoice, takePendingVoice, clearPendingVoice, hasPendingVoice, voiceOnlyReply } },
   tools: [{
     def: {
       type: "function",
@@ -211,7 +216,14 @@ module.exports = {
       if (!p) return;
       clearPendingVoice(userId);
       p.job.then(async (r) => {
-        if (!r.ok) { try { _ctx.log("warn", "语音补发失败: " + (r.error || "")); } catch (e) {} return; }
+        if (!r.ok) {
+          try { _ctx.log("warn", "语音补发失败: " + (r.error || "")); } catch (e) {}
+          /* 只发语音模式下，合成失败就补发文字兜底，别让她哑掉 */
+          try {
+            if (voiceOnlyReply() && payload && payload.reply) await _ctx.sendPrivate(userId, String(payload.reply));
+          } catch (e) {}
+          return;
+        }
         try {
           await _ctx.onebotSend("send_msg", { message_type: "private", user_id: Number(userId), message: [{ type: "record", data: { file: "file:///" + String(r.file).replace(/\\/g, "/") } }] });
           _ctx.log("info", `语音已随回复发出 → ${userId}`);
