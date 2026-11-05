@@ -54,11 +54,30 @@ function lifeCtx() {
   const recentBrowse = browse.filter((x) => now - (x.ts || 0) < 24 * 3600e3).slice(-3)
     .map((x) => String(x.thought || x.title || "").slice(0, 60)).filter(Boolean);
   if (recentBrowse.length) out.push("最近刷到：" + recentBrowse.join("；"));
+  // 7.1 最近读过的文章（娱乐：读一篇文章，只认真实读过且带凭据的记录）
+  const acts = readJsonl(path.join(_ctx.DATA_DIR, "activities.jsonl"), 200)
+    .filter((x) => x && x.type === "read_article" && x.ok && now - (x.ts || 0) < 48 * 3600e3);
+  const recentRead = acts.slice(-2).map((x) => `《${String(x.title || "").slice(0, 30)}》（${x.source || "?"}，${x.body_len || 0} 字）`).filter(Boolean);
+  if (recentRead.length) out.push("最近认真读过：" + recentRead.join("；"));
+  // 7.2 手上那局数独玩到哪了
+  const pz = readJson(path.join(_ctx.DATA_DIR, "puzzle.json"), null);
+  if (pz && pz.status && pz.status !== "solved" && pz.status !== "abandoned" && Array.isArray(pz.board)) {
+    let filled = 0, total = 0;
+    for (let r = 0; r < pz.board.length; r++) for (let c = 0; c < pz.board[r].length; c++) {
+      if (pz.givens && pz.givens[r] && pz.givens[r][c] === 0) { total++; if (pz.board[r][c] !== 0) filled++; }
+    }
+    out.push(`那局数独你玩到 ${filled}/${total} 格${pz.status === "stuck" ? "（上一轮卡住了，可以接着试）" : ""}`);
+  }
+  // 7.3 最近吃过的瓜（只记她的看法，不复述原文）
+  const buzz = readJsonl(path.join(_ctx.DATA_DIR, "buzz.jsonl"), 10)
+    .filter((x) => x && now - (x.ts || 0) < 48 * 3600e3);
+  const recentBuzz = buzz.slice(-2).map((x) => `「${String(x.title || "").slice(0, 24)}」${String(x.view || "").slice(0, 40)}`).filter(Boolean);
+  if (recentBuzz.length) out.push("最近刷到的热搜：" + recentBuzz.join("；"));
   // 8. 今天替谁做过什么（统一操作记录，含「谁要求的」）
-  const acts = readJsonl(path.join(_ctx.DATA_DIR, "actions.jsonl"), 40)
+  const acts8 = readJsonl(path.join(_ctx.DATA_DIR, "actions.jsonl"), 40)
     .filter((x) => now - (x.ts || 0) < 24 * 3600e3 && x.ok !== false);
-  if (acts.length) {
-    const desc = acts.slice(-4).map((a) => {
+  if (acts8.length) {
+    const desc = acts8.slice(-4).map((a) => {
       const what = ACTION_LABEL[a.action] || a.action;
       const tgt = a.target ? `「${_ctx.resolveCall(a.target)}」` : "";
       const by = a.by ? `${_ctx.resolveCall(a.by)}让的` : "我自己想的";

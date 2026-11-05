@@ -71,6 +71,7 @@ function createHost(core) {
     getLastSentSticker: (k) => core.getLastSentSticker(k),
     stickerSessionKey: (u, g) => core.stickerSessionKey(u, g),
     getBoredom: () => core.getBoredom(),
+    addBoredom: (d) => core.addBoredom(d),
     loadBudget: () => core.loadBudget(),
     budgetCfg: () => core.budgetCfg(),
     loadMindState: () => core.loadMindState(),

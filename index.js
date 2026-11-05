@@ -1,4 +1,4 @@
-/* dsh-pet-qq-bridge: 大肥鱼桌宠的 QQ 鱼脑桥接
+﻿/* dsh-pet-qq-bridge: 大肥鱼桌宠的 QQ 鱼脑桥接
  * 零依赖：Node 24 全局 fetch / WebSocket。
  * SnowLuma (OneBot v11 WS) <-> 本桥接 <-> DeepSeek API（复用桌宠人设与密钥）
  * 本桥接 --JSONL状态--> 桌宠 agent-events（thinking/working/attention/error/idle）
@@ -161,7 +161,7 @@ const SELF_AWARENESS = "【你怎么看自己】你心里清楚几个事实（�
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.61.1";
+const BASE_VERSION = "1.62.0";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -271,6 +271,8 @@ function budgetLevel() {
 /* 每个动作的花费档：free 免费 / low 约¥0.001 / mid 约¥0.005 / high 更贵 */
 const ACTION_COST = {
   view_space: "low", share_fun: "low", qzone: "low", browse: "low",
+  play_puzzle: "low", read_buzz: "low",
+  read_article: "mid",
   search: "mid",
   reflect: "high", evolve: "high",
   nothing: "free",
@@ -290,7 +292,7 @@ function budgetLevelText() {
   const { ratio, level, spent, daily } = budgetLevel();
   const pct = Math.round(ratio * 100);
   const name = { rich: "很宽裕", normal: "够用", tight: "紧张", empty: "快没了" }[level] || level;
-  const allowed = ["nothing", "qzone", "search", "view_space", "share_fun", "browse", "reflect", "evolve"]
+  const allowed = ["nothing", "qzone", "search", "view_space", "share_fun", "browse", "read_article", "play_puzzle", "read_buzz", "reflect", "evolve"]
     .filter((a) => canAfford(ACTION_COST[a] || "low"));
   return `今日生活费 ¥${spent.toFixed(3)}/${daily}（还剩 ${pct}%，${name}）。现在还能做：${allowed.join("、")}。`;
 }
@@ -1776,6 +1778,8 @@ async function fetchFunImage() {
   } catch (e) { return null; }
 }
 function setBoredom(v) { const nv = Math.max(0, Math.min(100, v)); try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(BOREDOM_FILE, JSON.stringify({ value: nv, updated: Date.now() })); } catch (e) {} }
+/* 无聊度增减（娱乐活动会用到：填对数/读到东西 → 无聊度降；填错 → 升） */
+function addBoredom(d) { try { setBoredom(getBoredom() + Number(d || 0)); } catch (e) {} }
 
 let lastInteractionTs = 0;
 const MIND_PAUSE_MS = 120000;
@@ -1902,14 +1906,40 @@ function applyThoughtMood(percept) {
   try { log("info", `念头影响情绪 delta=${d} mood=${Math.round(getMood())} 情绪=${moodLabel()}`); } catch (e) {}
 }
 
+/* ---- 娱乐上下文：她的爱好 + 那局数独到哪了 + 今天还能玩几次（给判断层看） ---- */
+function funCtx() {
+  const parts = [];
+  try {
+    const h = host && host.apis.get("hobby");
+    if (h && h.hobbyText) { const t = h.hobbyText(2); if (t) parts.push(t); }
+  } catch (e) {}
+  try {
+    const p = host && host.apis.get("puzzle");
+    if (p && p.puzzleCtx) { const t = p.puzzleCtx(); if (t) parts.push(t); }
+  } catch (e) {}
+  try {
+    const c = host && host.apis.get("fun-core");
+    if (c) {
+      const used = c.todayTotal ? c.todayTotal() : 0;
+      const max = c.dailyTotalMax ? c.dailyTotalMax() : 2;
+      const spent = c.funSpentToday ? c.funSpentToday() : 0;
+      const cap = c.dailyCnyCap ? c.dailyCnyCap() : 0.3;
+      parts.push(`【今天自己的娱乐】已经 ${used}/${max} 次，花了 ¥${spent.toFixed(3)}/${cap}。${used >= max ? "今天的额度用完了，想玩也只能等明天。" : ""}`);
+    }
+  } catch (e) {}
+  return parts.length ? parts.join("\n") : "";
+}
+
 /* ---- 第二层：判断（生活费宽裕用 pro，否则 flash）---- */
 async function deliberateMind(settings, st, percept, ctxBits) {
   const recentThoughts = thoughtTexts(st, 6).join("；") || "（无）";
-  const prompt = `你是 Momo（大肥鱼桌宠）。现在是「自己思考」的时间（不是在回消息）。${goalsCtx()}。当前时间：${todayText()}。${budgetLevelText()}你的念头：${percept.thought || "（无）"}，想做事的程度：${percept.urge}/100。你最近在想：${recentThoughts}。${ctxBits}
+  const fCtx = funCtx();
+  const prompt = `你是 Momo（大肥鱼桌宠）。现在是「自己思考」的时间（不是在回消息）。${goalsCtx()}。当前时间：${todayText()}。${budgetLevelText()}你的念头：${percept.thought || "（无）"}，想做事的程度：${percept.urge}/100。你最近在想：${recentThoughts}。${ctxBits}${fCtx ? "\n" + fCtx : ""}
 请给出 1~3 个「现在可以考虑做的事」，每个都打分，只输出 JSON（不要解释）：
-{"intents":[{"action":"qzone|search|view_space|share_fun|browse|reflect|evolve|nothing","content":"...","relevance":0到1,"gap":0到1,"value":0到1,"timeliness":0到1}]}
+{"intents":[{"action":"qzone|search|view_space|share_fun|browse|read_article|play_puzzle|read_buzz|reflect|evolve|nothing","content":"...","relevance":0到1,"gap":0到1,"value":0到1,"timeliness":0到1}]}
 打分含义：relevance=和主人有多相关；gap=信息缺口有多大；value=做了能带来多少新东西；timeliness=现在做合不合时宜。
-规则：生活费紧张时只能选便宜的（browse/search）；很宽裕才考虑 reflect/evolve；主动找主人说话由另一套负责，你不用操心；真没什么事就只给一个 nothing（这是正常的）。`;
+规则：生活费紧张时只能选便宜的（browse/play_puzzle/read_buzz）；很宽裕才考虑 reflect/evolve；主动找主人说话由另一套负责，你不用操心；真没什么事就只给一个 nothing（这是正常的）。
+关于娱乐（read_article=读一篇文章、play_puzzle=玩那局数独、read_buzz=刷热搜吃瓜）：这些是你自己的事，主人不在也能做。想玩时挑一个，content 写你此刻想读/想玩的原因（一句话）。今天娱乐额度用完了就不要再选。`;
   const lv = budgetLevel().level;
   try {
     const raw = (lv === "rich")
@@ -1985,7 +2015,11 @@ async function mindLoop() {
 
 /* 执行一个心智动作（原 mindLoop 的动作分发） */
 async function runMindAction(action, content, settings, masterUin, now) {
-  const _actMap = { qzone: "在发空间说说", search: "在上网搜好玩的", view_space: "在看空间动态", share_fun: "在给主人找趣图", browse: "在刷视频" };
+  const _actMap = {
+    qzone: "在发空间说说", search: "在上网搜好玩的", view_space: "在看空间动态",
+    share_fun: "在给主人找趣图", browse: "在刷视频",
+    read_article: "在读一篇文章", play_puzzle: "在玩一局数独", read_buzz: "在刷热搜",
+  };
   if (_actMap[action]) setActivity(_actMap[action]);
   try {
     if (action === "qzone" && content) {
@@ -2027,8 +2061,60 @@ async function runMindAction(action, content, settings, masterUin, now) {
       log("info", "心智-选择刷视频");
       const _bApi = host && host.apis.get("browse");
       if (_bApi) { try { await _bApi.browse(settings); } catch (e) { log("warn", "刷视频失败: " + e.message.slice(0, 120)); } }
+    } else if (action === "read_article") {
+      log("info", "心智-选择读一篇文章");
+      const _rApi = host && host.apis.get("read-article");
+      if (_rApi) {
+        try {
+          const r = await _rApi.readArticle(settings);
+          if (r && r.title) queueFunShare(`今天读了《${r.title}》${r.thought ? "，" + String(r.thought).slice(0, 60) : ""}`);
+        } catch (e) { log("warn", "读文章失败: " + e.message.slice(0, 120)); }
+      }
+    } else if (action === "play_puzzle") {
+      log("info", "心智-选择玩数独");
+      const _pApi = host && host.apis.get("puzzle");
+      if (_pApi) {
+        try {
+          const r = await _pApi.playPuzzle(settings);
+          if (r) {
+            if (r.status === "solved") queueFunShare(`我把那局六宫格数独解出来了，${r.progress}`);
+            else if (r.ok) queueFunShare(`刚玩了会儿数独，${r.progress}`);
+          }
+        } catch (e) { log("warn", "玩数独失败: " + e.message.slice(0, 120)); }
+      }
+    } else if (action === "read_buzz") {
+      log("info", "心智-选择刷热搜");
+      const _zApi = host && host.apis.get("buzz");
+      if (_zApi) {
+        try {
+          const r = await _zApi.readBuzz(settings);
+          if (r && r.title) queueFunShare(`热搜上「${r.title}」那个，我有点想跟你说${r.view ? "：" + String(r.view).slice(0, 50) : ""}`);
+        } catch (e) { log("warn", "刷热搜失败: " + e.message.slice(0, 120)); }
+      }
     }
   } catch (e) { log("warn", "心智动作失败: " + e.message.slice(0, 120)); }
+}
+
+/* ---- 娱乐产出分享：进静默准备池，一天最多 1 条（她自己决定什么时候提，不许刷屏） ---- */
+const FUN_SHARE_FILE = path.join(DATA_DIR, "fun-share.json");
+function funShareCountToday() {
+  try {
+    const d = JSON.parse(fs.readFileSync(FUN_SHARE_FILE, "utf8"));
+    const day = new Date().toDateString();
+    return (d && d.day === day) ? (Number(d.count) || 0) : 0;
+  } catch (e) { return 0; }
+}
+function queueFunShare(text) {
+  try {
+    if (funShareCountToday() >= 1) return false;
+    const ok = addPendingNudge({ kind: "fun", content: String(text || "").slice(0, 150), score: 0.6 });
+    if (ok) {
+      const day = new Date().toDateString();
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+      fs.writeFileSync(FUN_SHARE_FILE, JSON.stringify({ day, count: funShareCountToday() + 1 }));
+    }
+    return ok;
+  } catch (e) { return false; }
 }
 
 /* ---------------- 主动聊天频率偏好（按用户） ---------------- */
@@ -3545,7 +3631,7 @@ host = createHost({
   todayText, periodOfDay, nowHM, formatGap, dayStr, todayMMDD, parseMemoryJson,
   loadAppellations, saveAppellations, loadMute, addMute, removeMute, resolveTargetId, loadWishes, addWish,
   completeOnce, reasonComplete, mimeOf, qzoneHttp, bochaSearch, bochaKey, formatResults,
-  getEmotion, getMood, addMood, setMood, getBoredom, loadBudget, budgetCfg, loadMindState, textSimilar,
+  getEmotion, getMood, addMood, setMood, getBoredom, addBoredom, loadBudget, budgetCfg, loadMindState, textSimilar,
   getLastSentSticker, stickerSessionKey,
   loadEvolution, reloadEvolution, pickStickerByIds, SELF_DIR, BASE_VERSION,
   proactive: {
@@ -3577,3 +3663,4 @@ host.runHook("startup", {});
 host.watchPlugins();
 log("info", `插件平台就绪：${host.plugins.length} 个插件（工具 ${host.toolRegistry.size} 个 / 命令 ${host.commandRegistry.size} 个）`);
 setInterval(() => { petSessionRelayCheck().catch(() => {}); }, 5000);
+
