@@ -116,7 +116,8 @@ function createHost(core) {
   function runHook(kind, payload) {
     for (const fn of hookLists[kind] || []) {
       try {
-        const r = fn(ctx, payload || {});
+        /* 与 docs/development.md 一致：钩子签名是 xxx(payload)；插件需要 ctx 用模块内 _ctx */
+        const r = fn(payload || {});
         if (r && typeof r.then === "function") r.catch((e) => core.log("warn", `插件钩子 ${kind} 失败: ${e.message.slice(0, 120)}`));
       } catch (e) { core.log("warn", `插件钩子 ${kind} 失败: ${e.message.slice(0, 120)}`); }
     }
