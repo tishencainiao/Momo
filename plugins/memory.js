@@ -77,6 +77,20 @@ function pruneMemories(items, uid) {
   }
   return kept;
 }
+/* 防捏造：Momo 第一人称的"动作/能力"自述不许变成"关于对方的事实"
+ * （2026-11-05 事故：提炼出「主人…接受大肥鱼放轻音乐助眠」，把她的表演写成了关于主人的长期记忆） */
+const AGENT_DEED_RE = /(大肥鱼|Momo)[^。；]{0,12}(放|唱|播|给|发|送|下载)|接受[^。；]{0,8}(放|听)|我能(放|唱|播)|我(已经)?(放|唱|播)了/;
+function dropAgentDeeds(arr) {
+  const kept = [];
+  let dropped = 0;
+  for (const it of arr) {
+    const c = String((it && it.content) || it || "");
+    if (AGENT_DEED_RE.test(c)) { dropped++; continue; }
+    kept.push(it);
+  }
+  return { kept, dropped };
+}
+
 async function extractMemoriesBatch(userId, batch, settings) {
   if (!_ctx.apiKey || !batch || !batch.length) return;
   try {
@@ -90,8 +104,11 @@ async function extractMemoriesBatch(userId, batch, settings) {
     const arr = _ctx.parseMemoryJson(raw);
     _ctx.log("info", `记忆提炼-解析条数=${arr.length}`);
     if (!arr.length) return;
+    const _f = dropAgentDeeds(arr);
+    if (_f.dropped) _ctx.log("warn", `记忆提炼-丢弃 ${_f.dropped} 条「Momo 自己的动作」自述（不许当关于对方的事实）`);
+    if (!_f.kept.length) return;
     const before = items.length;
-    const merged = mergeMemories(items, arr, batch[0] && batch[0].channel, batch[0] && batch[0].groupId);
+    const merged = mergeMemories(items, _f.kept, batch[0] && batch[0].channel, batch[0] && batch[0].groupId);
     _ctx.log("info", `记忆提炼-合并后=${merged.length}（原来 ${before}）`);
     if (merged.length === before) return;
     _ctx.saveShortMemories(userId, merged);
@@ -131,8 +148,9 @@ let lastConsolidate = 0;
 
 module.exports = {
   name: "memory",
-  version: "1.0.0",
+  version: "1.1.0",
   init(ctx) { _ctx = ctx; },
+  api: { memory: { dropAgentDeeds, mergeMemories, pruneMemories, extractMemoriesBatch, consolidateUserMemories } },
   tools: [
     {
       def: { type: "function", function: { name: "memory_view", description: "查看记住的关于某人的长期记忆。当对方说「你记得我什么」「看看你记得我啥」「我的记忆」时调用。", parameters: { type: "object", properties: {} } } },

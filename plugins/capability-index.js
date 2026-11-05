@@ -84,6 +84,70 @@ function scan(userId) {
 
 const TIER_LABEL = { master: "对主人", friend: "对熟人", guest: "对陌生人" };
 
+/* ---------------- 负清单：她做不到的事（防"能发语音"外溢成"能放音乐"）----------------
+ * triggers 是"输出后审计"用的触发短语（确定性匹配，特意不含单字「放」，
+ * 因为她常说「先放一边/放过自己」，会被误伤）。
+ * 主人确认后可写进 data/capability-limits.json 追加自定义条目。 */
+const LIMITS = [
+  {
+    id: "audio-play", label: "播放音乐/音频",
+    triggers: ["放歌", "放音乐", "放首", "放点轻的", "放给你听", "放首歌", "点歌", "播放音乐", "播放歌曲", "控制播放器", "外放", "调大音量", "音乐软件"],
+    /* 这些句子只有和"歌/音乐/这首"等上下文同句（或紧邻下一句）时才算"我在放歌"，否则会误伤"把钥匙放好了" */
+    contextTriggers: ["放啦", "开始放了", "正在放", "放给你了", "放好了", "那我开始了", "我开始了"],
+    desc: "你没有音频播放能力，不能给别人放歌、点歌、控制播放器或调音量。",
+  },
+  { id: "sing", label: "真的唱歌", triggers: ["唱给你听", "唱首歌给你", "我给你唱"], desc: "你不能真正演唱；你能发语音消息（TTS 合成），但发语音不等于唱歌，也不等于放音乐。" },
+  { id: "see-video", label: "看视频画面", triggers: ["看了这个视频", "视频里那个画面"], desc: "你看不到视频画面，只能读标题、简介、评论里的文字。" },
+];
+
+function limitsFile() { return _ctx && _ctx.DATA_DIR ? require("path").join(_ctx.DATA_DIR, "capability-limits.json") : ""; }
+/* 主人确认后追加的条目（存在则与内置合并） */
+function loadExtraLimits() {
+  try { const fs = require("fs"); const arr = JSON.parse(fs.readFileSync(limitsFile(), "utf8")); return Array.isArray(arr) ? arr : []; } catch (e) { return []; }
+}
+function allLimits() {
+  const extra = loadExtraLimits().filter((x) => x && x.id && Array.isArray(x.triggers) && x.triggers.length);
+  return LIMITS.concat(extra);
+}
+function limitsText() {
+  const list = allLimits();
+  if (!list.length) return "";
+  const names = list.map((x) => x.label).join("、");
+  return `【你做不到的（别答应，也别演）】${names}。其中"发语音消息"你能做，但发语音 ≠ 放音乐/唱歌。`;
+}
+/* 输出后审计用的触发短语表（contextOnly=true 的必须配合音频上下文才算数） */
+function limitTriggers() {
+  const out = [];
+  for (const l of allLimits()) {
+    for (const t of (l.triggers || [])) out.push({ phrase: String(t), id: l.id, label: l.label, contextOnly: false });
+    for (const t of (l.contextTriggers || [])) out.push({ phrase: String(t), id: l.id, label: l.label, contextOnly: true });
+  }
+  return out;
+}
+
+/* 命中计数：同一能力被拦/被纠正 2 次 → 生成一条"建议写进负清单"的提案（主人确认才生效） */
+function proposalsFile() { return require("path").join(_ctx.DATA_DIR, "capability-proposals.json"); }
+function loadHits() { try { return JSON.parse(require("fs").readFileSync(require("path").join(_ctx.DATA_DIR, "capability-hits.json"), "utf8")) || {}; } catch (e) { return {}; } }
+function saveHits(h) { try { require("fs").mkdirSync(_ctx.DATA_DIR, { recursive: true }); require("fs").writeFileSync(require("path").join(_ctx.DATA_DIR, "capability-hits.json"), JSON.stringify(h)); } catch (e) {} }
+function loadProposals() { try { const a = JSON.parse(require("fs").readFileSync(proposalsFile(), "utf8")); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
+function saveProposals(a) { try { require("fs").mkdirSync(_ctx.DATA_DIR, { recursive: true }); require("fs").writeFileSync(proposalsFile(), JSON.stringify(a.slice(-20))); } catch (e) {} }
+/* 记一次"超出能力的声称"（审计拦截或主人纠正时调） */
+function noteOverclaim(capabilityLabel, sample) {
+  const key = String(capabilityLabel || "unknown").slice(0, 40);
+  const hits = loadHits();
+  hits[key] = (Number(hits[key]) || 0) + 1;
+  saveHits(hits);
+  if (hits[key] >= 2) {
+    const props = loadProposals();
+    if (!props.some((p) => p.label === key && p.status === "pending")) {
+      props.push({ label: key, count: hits[key], sample: String(sample || "").slice(0, 60), ts: Date.now(), status: "pending" });
+      saveProposals(props);
+      if (_ctx && _ctx.log) _ctx.log("info", `能力负清单提案：${key}（已 ${hits[key]} 次）等待主人确认`);
+    }
+  }
+  return hits[key];
+}
+
 /* 常驻精简摘要（只放能力名，不放细节） */
 function capabilityCtx(userId) {
   const { tier, tools, cmds } = scan(userId);
@@ -94,6 +158,8 @@ function capabilityCtx(userId) {
   if (tl) lines.push("工具：" + tl);
   if (cl) lines.push("命令：" + cl);
   if (il) lines.push("内部能力：" + il);
+  const lt = limitsText();
+  if (lt) lines.push(lt);
   lines.push("（不确定某项能力时，调 capability_view 查详情）");
   return lines.join("\n");
 }
@@ -115,17 +181,22 @@ function capabilityView(userId, keyword) {
   for (const it of INTERNAL) {
     if (match(it.name) || match(it.desc)) out.push(`- ${it.name}：${it.desc}`);
   }
-  if (!out.length) {
-    return k ? `（我没找到和「${k}」相关的能力，可以试试更短的关键词）` : capabilityCtx(userId);
+  const limits = allLimits().filter((l) => match(l.label) || match(l.desc) || (l.triggers || []).some(match));
+  if (limits.length) {
+    out.push("【我做不到的】");
+    for (const l of limits) out.push(`- ${l.label}：${l.desc}`);
   }
-  return `【能力详情${k ? "（" + k + "）" : ""}】\n` + out.slice(0, 20).join("\n");
+  if (!out.length) {
+    return k ? `（我没找到和「${k}」相关的能力，也不在"做不到"清单里。不确定的事别答应，先说实话）` : capabilityCtx(userId);
+  }
+  return `【能力详情${k ? "（" + k + "）" : ""}】\n` + out.slice(0, 24).join("\n");
 }
 
 module.exports = {
   name: "capability-index",
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },
-  api: { capability: { capabilityCtx, capabilityView, scan, tierOf } },
+  api: { capability: { capabilityCtx, capabilityView, scan, tierOf, allLimits, limitsText, limitTriggers, noteOverclaim, loadProposals, saveProposals, loadHits } },
   tools: [{
     def: {
       type: "function",

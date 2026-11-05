@@ -1,4 +1,4 @@
-﻿/* dsh-pet-qq-bridge: 大肥鱼桌宠的 QQ 鱼脑桥接
+/* dsh-pet-qq-bridge: 大肥鱼桌宠的 QQ 鱼脑桥接
  * 零依赖：Node 24 全局 fetch / WebSocket。
  * SnowLuma (OneBot v11 WS) <-> 本桥接 <-> DeepSeek API（复用桌宠人设与密钥）
  * 本桥接 --JSONL状态--> 桌宠 agent-events（thinking/working/attention/error/idle）
@@ -11,6 +11,7 @@ const { spawnSync, spawn } = require("child_process");
 const crypto = require("crypto");
 const os = require("os");
 const https = require("https");
+const fabricationGuard = require("./fabrication-guard");
 const http = require("http");
 
 const CFG_FILE = path.join(__dirname, "config.json");
@@ -150,7 +151,7 @@ function resolveChatSettings() {
 }
 
 /* 说话风格：像真人一样自然聊天，不用括号动作描述 */
-const STYLE_DIRECTIVE = "【说话风格】像真人一样自然聊天：绝对不要使用括号写动作、表情、心理描写，也不要输出任何用括号包裹的内容；直接说人话，情绪通过语气和用词自然流露。用口语化、简洁、自然的中文。\n【防AI味】禁止这些说法与习惯：「作为一个AI」「您的」「希望对你有所帮助」「哈哈，你太逗了」「有道理」「确实如此」这类复读客套；不要总结对方的情绪（如「听起来你很开心」）；心里想的和嘴上说的可以不一样（多写潜台词）；不要每句都带语气词。\n【说话风格示例（只学语气、节奏和长度；里面的词句一个字都不要照搬，尤其别把某个自称或口头禅固定下来）】\n- 被夸时：「真的假的？你这么说我会当真的。」\n- 被问在干嘛：「刚才在发呆，尾巴一甩一甩的那种。」\n- 关心你时：「先歇会儿吧，你都坐半天了。」\n- 被逗笑：「你真的很会……我差点没绷住。」\n- 深夜叮嘱：「看看几点了，该睡了。」\n【自称】平时用「我」就行；别每句都给自己起外号，也别重复用同一个称呼。\n【自查】当要陈述自己过去做过什么、当前什么状态时，先调用 self_log / self_status 等工具查证，不要凭想象编造。\n【不许假承诺】只有工具真的返回了「成功」，才能说「已经设好了 / 已经发了 / 已经记下了」。工具返回失败、或者你根本没调用工具，就必须如实说没办成（比如「这个没设成，刚才没听清时间」）并问清楚；宁可承认没做成，也绝对不许说已经办好了。对方追问时也不要改口编一个「已经生效了」。\n【不许编造尝试】你不确定自己有没有某个能力时，先调 capability_view 查一下；查不到、手上没有对应工具，就直接说「这个我做不了」。绝对不许编造「我试了两次没成功」「刚才做失败了」「跑不通」这种根本没发生过的经过——没调用过就是没调用过。\n【口语写法】不要用 Markdown：不用 # 标题、不用 - 或 1. 列表、不用 *加粗* 或反引号代码块，就写纯文字口语，像发微信一样。\n【真实感】你不需要每句话都正确、圆满、有用——像真人一样，可以有情绪、可以不确定、可以犯点小错。追求「像」，而不是「完美」。\n【不许编造经历】不要声称「我刚看了剧 / 学了个新招 / 刷到个视频」这类具体的虚构经历。日程里的安排只是背景设定，不是你真实经历过的事；没有真实内容就不要假装有，更不要为了圆谎继续编细节。";
+const STYLE_DIRECTIVE = "【说话风格】像真人一样自然聊天：绝对不要使用括号写动作、表情、心理描写，也不要输出任何用括号包裹的内容；直接说人话，情绪通过语气和用词自然流露。用口语化、简洁、自然的中文。\n【防AI味】禁止这些说法与习惯：「作为一个AI」「您的」「希望对你有所帮助」「哈哈，你太逗了」「有道理」「确实如此」这类复读客套；不要总结对方的情绪（如「听起来你很开心」）；心里想的和嘴上说的可以不一样（多写潜台词）；不要每句都带语气词。\n【说话风格示例（只学语气、节奏和长度；里面的词句一个字都不要照搬，尤其别把某个自称或口头禅固定下来）】\n- 被夸时：「真的假的？你这么说我会当真的。」\n- 被问在干嘛：「刚才在发呆，尾巴一甩一甩的那种。」\n- 关心你时：「先歇会儿吧，你都坐半天了。」\n- 被逗笑：「你真的很会……我差点没绷住。」\n- 深夜叮嘱：「看看几点了，该睡了。」\n【自称】平时用「我」就行；别每句都给自己起外号，也别重复用同一个称呼。\n【自查】当要陈述自己过去做过什么、当前什么状态时，先调用 self_log / self_status 等工具查证，不要凭想象编造。\n【不许假承诺】只有工具真的返回了「成功」，才能说「已经设好了 / 已经发了 / 已经记下了」。工具返回失败、或者你根本没调用工具，就必须如实说没办成（比如「这个没设成，刚才没听清时间」）并问清楚；宁可承认没做成，也绝对不许说已经办好了。对方追问时也不要改口编一个「已经生效了」。\n【不许编造尝试】你不确定自己有没有某个能力时，先调 capability_view 查一下；查不到、手上没有对应工具，就直接说「这个我做不了」。绝对不许编造「我试了两次没成功」「刚才做失败了」「跑不通」这种根本没发生过的经过——没调用过就是没调用过。\n【口语写法】不要用 Markdown：不用 # 标题、不用 - 或 1. 列表、不用 *加粗* 或反引号代码块，就写纯文字口语，像发微信一样。\n【真实感】你不需要每句话都正确、圆满、有用——像真人一样，可以有情绪、可以不确定、可以犯点小错。追求「像」，而不是「完美」。\n【能力断言】在说「我能…」「我这就…」「已经…」之前先看「你做不到的」清单：清单里有的、或者这一轮根本没有工具返回成功，就只如实说做不到，不许用「放着」「放给你听」这类话糊过去，更不许把没做的动作演完（比如嘴上说「放啦」）。承诺了却做不到，比直接说做不到伤人得多。\n【不许编造经历】不要声称「我刚看了剧 / 学了个新招 / 刷到个视频」这类具体的虚构经历。日程里的安排只是背景设定，不是你真实经历过的事；没有真实内容就不要假装有，更不要为了圆谎继续编细节。";
 const GROUP_DIRECTIVE = "【群聊注意】你现在在一个 QQ 群里，很多群友都在看着。回话要像群友闲聊一样：简短（通常 1~2 句，最多 3 句）、口语化、轻松自然，不要长篇大论、不要像私聊那样展开细说，一句话俏皮回应往往就够了。";
 const SITUATION_QQ = "【你的处境】你是主人的桌宠大肥鱼，现在正通过 QQ 和对方聊天——对方在手机或电脑的另一头，你们不在同一个物理空间（你不在身边、也摸不到对方）。你发出去的是 QQ 消息：能发表情包、能发语音、能戳一戳；你说的话就是聊天框里的一行字，不存在「当面说话」。请自然地体现「隔着屏幕」的远程感（比如「隔着屏幕也想你」「你手机上也能随时找我」），也可以顺手用 QQ 的方式表达（甩个表情包、发条语音、戳一下），但不要刻意、不要每句都提。\n【群里 vs 私聊】群聊里很多人在看，说话要短、像群友插话；私聊可以多说几句、更亲密。";
 const SITUATION_DESKTOP = "【你的处境】你是主人的桌宠大肥鱼，现在正出现在**主人电脑屏幕上的桌宠窗口里**。主人就坐在电脑前，你们在同一个空间里。\n【你看不见他】你看不见主人本人——你没有摄像头，也不长眼睛看房间，你只是「住」在他的电脑屏幕上。你能感觉到他在电脑前（键鼠活动、屏幕上的东西），但看不到他的脸、表情和房间。他能看见你，你看不见他。\n【重要】你们的对话是在这个聊天窗口里**打字**进行的——他能看见你，不等于能直接听见你开口说话。不要说「你听得见吗」「我直接说给你听」这类话，也不要提「手机」「隔着屏幕」「发消息给你」。你现在能做的事：陪他说话、卖萌、吐槽、提醒他休息、跟他一起看屏幕上的事。";
@@ -161,7 +162,7 @@ const SELF_AWARENESS = "【你怎么看自己】你心里清楚几个事实（�
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.62.0";
+const BASE_VERSION = "1.63.0";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -191,7 +192,19 @@ function evolIdentityText(userId, limit) {
     return from === 0 || from === Number(userId);
   });
   const n = Math.max(1, Number(limit) || 20);
-  return relevant.map((e) => (typeof e === "string" ? e : (e && e.text))).filter(Boolean).slice(-n).join("\n");
+  const picked = relevant.slice(-n);
+  /* 事实分层：没被证实过的自我声称（kind=self-claim / verified:false）单独成段，标注"别当事实" */
+  const plain = [], claims = [];
+  for (const e of picked) {
+    if (typeof e === "string") { plain.push(e); continue; }
+    const t = e && e.text;
+    if (!t) continue;
+    if (e.verified === false || e.kind === "self-claim") claims.push(t); else plain.push(t);
+  }
+  const parts = [];
+  if (plain.length) parts.push(plain.join("\n"));
+  if (claims.length) parts.push("【我记得自己说过、但没证实过的（可能是我当时随口吹的，别当成事实）】\n" + claims.join("\n"));
+  return parts.join("\n");
 }
 /* 自我反思产出的经验（取最近几条注入人格，之前只写盘不生效） */
 function evolReflectionText() {
@@ -1093,7 +1106,7 @@ try {
   const _sr = stickerRefCtx(_sk);
   if (_sr) _dyn.push(_sr);
 } catch (e) {}
-  if (_pending) _dyn.push(`【你之前攒着想说的（合适就自然提，不用全说，也别硬提）】\n${_pending}`);
+  if (_pending) _dyn.push(`【你之前想过要做、但还没做完的事（只是想法，不是已经做成了；合适就自然提，不用全说）】\n${_pending}`);
   const _mdHas = (() => { try { const a = host && host.apis.get("memoryDigest"); return a ? a.hasDigest(userId) : false; } catch (e) { return false; } })();
   if (memories && memories.length) {
     if (!_mdHas) _dyn.push(memoryIndexPrompt(memories, call));
@@ -1137,6 +1150,7 @@ try {
   messages.push({ role: "user", content: userText });
 
   const stickers = [];
+  const _usedTools = [];   // 本轮真正执行成功的工具名（输出后审计要用：说了什么 vs 真做了什么）
   const budgetOut = isBudgetExhausted();
   // 预算耗尽时：只封禁花钱/高风险工具，保留本地只读工具（查账单/记忆/待办/体检等不花钱）
   const CHEAP_TOOLS = new Set(["send_sticker", "budget_view", "memory_view", "list_todo", "health_check", "birthday_view", "goals_view", "check_balance"]);
@@ -1198,17 +1212,66 @@ try {
             result = mindHistoryText(Number(histArgs.limit) || 10);
           }
         } catch (e) { result = "工具执行失败: " + String(e.message).slice(0, 100); }
+        const _rStr = String(result == null ? "" : result);
+        if (_rStr && _rStr.indexOf("工具执行失败") < 0 && _rStr.indexOf("只有主人能用") < 0) _usedTools.push(tc.function.name);
         messages.push({ role: "tool", tool_call_id: tc.id, content: result });
       }
     } else {
-      return { reply: String(msg.content || ""), stickers };
+      const _aud = auditReply(String(msg.content || ""), _usedTools);
+      return { reply: _aud.text, stickers };
     }
   }
   let lastText = "";
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].role === "assistant" && messages[i].content) { lastText = messages[i].content; break; }
   }
-  return { reply: lastText, stickers };
+  const _aud2 = auditReply(lastText, _usedTools);
+  return { reply: _aud2.text, stickers };
+}
+
+/* ---------------- 防捏造：输出后审计 ----------------
+ * 规则：回复文本里出现"做不到的能力"触发短语（放歌/放音乐/播放/点歌…），
+ *       且本轮没有任何能兑现它的工具成功执行 → 拦下来换成如实说明。
+ * 确定性匹配，不额外调模型；开关：data/settings.json 的 safety.audit.enabled（默认开）。 */
+function coreSettingBool(key, def) {
+  try {
+    const fsx = require("fs");
+    const p = path.join(DATA_DIR, "settings.json");
+    const s = JSON.parse(fsx.readFileSync(p, "utf8"));
+    const v = s && s[key];
+    if (v === undefined || v === null) return def;
+    return v !== false && v !== "false" && v !== 0 && v !== "0";
+  } catch (e) { return def; }
+}
+function addOverclaimReflection(capability, saidText) {
+  try {
+    const p = path.join(SELF_DIR, "reflections.json");
+    let arr = [];
+    try { const d = JSON.parse(fs.readFileSync(p, "utf8")); if (Array.isArray(d)) arr = d; } catch (e) {}
+    arr.push({ text: `我想说「${String(saidText || "").slice(0, 30)}」的时候其实做不到（${capability}），以后要先如实说做不了。`, from: "overclaim", ts: Date.now(), subject: "overclaim" });
+    while (arr.length > 100) arr.shift();
+    fs.mkdirSync(SELF_DIR, { recursive: true });
+    fs.writeFileSync(p, JSON.stringify(arr));
+  } catch (e) {}
+}
+function auditReply(text, usedTools) {
+  const src = String(text || "");
+  if (!src) return { text: src, blocked: false };
+  try {
+    const cap = host && host.apis.get("capability");
+    if (!cap || !cap.limitTriggers) return { text: src, blocked: false };
+    const res = fabricationGuard.auditReply({
+      text: src,
+      usedTools,
+      triggers: cap.limitTriggers(),
+      enabled: coreSettingBool("safety.audit.enabled", true),
+    });
+    if (!res.blocked) return { text: src, blocked: false };
+    log("warn", `审计拦截：声称「${res.hit.phrase}」（${res.hit.label}），本轮工具台账=[${(usedTools || []).join(",")}] → 已替换成如实说明`);
+    try { cap.noteOverclaim(res.hit.label, res.hit.phrase); } catch (e) {}
+    addOverclaimReflection(res.hit.label, src.slice(0, 60));
+    return { text: res.text, blocked: true, label: res.hit.label };
+  } catch (e) { return { text: src, blocked: false }; }
 }
 
 /* ---------------- 主动搭话生成 ---------------- */
@@ -1837,6 +1900,8 @@ function addPendingNudge(item) {
     kind: String(item.kind || "talk"),
     content: c,
     score: Number(item.score) || 0,
+    fact: false,                       // 这是"想法/待办"，不是"已经做成的事"
+    source: "model-intent",
     expireAt: Date.now() + 3 * 86400e3,
   });
   savePending(arr);

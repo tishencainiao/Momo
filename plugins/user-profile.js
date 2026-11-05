@@ -40,6 +40,10 @@ function uniqCap(arr, cap) {
   return out;
 }
 
+/* 防捏造：画像里不许出现"Momo 自己的动作/能力"（那是她的表演，不是对方的偏好）
+ * 事故来源：提炼把「接受大肥鱼放轻音乐助眠」写进了对方画像。 */
+const PROFILE_AGENT_DEED_RE = /(大肥鱼|Momo)[^。；]{0,10}(放|唱|播|给|发|送|下载)|接受[^。；]{0,8}(放|听)|我能(放|唱|播)/;
+
 /* 合并：新的覆盖旧的，数组并集并限量 */
 function mergeProfile(oldP, fresh) {
   const p = Object.assign({}, oldP || {});
@@ -48,9 +52,11 @@ function mergeProfile(oldP, fresh) {
   }
   for (const k of ["interests", "personality", "preferences"]) {
     const cap = k === "personality" ? 4 : 5;
-    const merged = uniqCap([...(oldP && oldP[k] || []), ...(Array.isArray(fresh[k]) ? fresh[k] : [])], cap);
+    const incoming = (Array.isArray(fresh[k]) ? fresh[k] : []).filter((x) => !PROFILE_AGENT_DEED_RE.test(String(x || "")));
+    const merged = uniqCap([...(oldP && oldP[k] || []), ...incoming], cap);
     if (merged.length) p[k] = merged;
   }
+  p._src = "inferred";     // 来源标记：这份画像由对话推断而来，不是对方逐条确认过的
   p.updated = Date.now();
   return p;
 }

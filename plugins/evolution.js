@@ -168,19 +168,34 @@ async function runSkillRule(rule, userId, call) {
 }
 
 /* ---- 成长记忆 / 自我评分 / 参数自调 / 反思 ---- */
+
+/* 防捏造闸门：这类"我做了/我能做到"的自述，没有工具佐证就不许当成长记忆落盘
+ * （2026-11-05 事故：一条"我攒了几首轻音乐，想放给对方听"被写进 identity，之后反复回灌） */
+const DEED_CLAIM_RE = /(我(已经)?(放|唱|播|送|下载|攒|做|发|录)了|我(能|会|可以)(放|唱|播|点)|我这就|马上给你|这就(放|发|唱))/;
+function looksLikeUnverifiedDeed(text) {
+  const s = String(text || "");
+  if (!DEED_CLAIM_RE.test(s)) return false;
+  /* 只有明确是"能力/动作类"的才拦，避免误伤"我放了盐"这类日常闲聊（靠触发词组合判断） */
+  return /(放|唱|播|点歌|音乐|歌|视频|文件|语音)/.test(s);
+}
+
 async function extractSelfIdentity(userText, replyText, settings, userId) {
   if (_ctx.isBudgetExhausted()) return;
   if (Date.now() - lastIdentityExtract < IDENTITY_INTERVAL_MS) return;
   if (!userText || !replyText) return;
   lastIdentityExtract = Date.now();
-  const prompt = `你是 Momo（大肥鱼桌宠）。下面是你刚和对方的一段对话。请从中提炼 0~1 条「关于你自己的成长记忆」（比如：你喜欢/讨厌什么、你立过的约定、对方夸你或指出你的点、你自己说的关于自己的话）。要求：以"我"开头、一句话 10~40 字、自然具体；没有值得记的就只输出 NO。\n\n对话：\n对方：${String(userText).slice(0, 200)}\nMomo：${String(replyText).slice(0, 200)}`;
+  const prompt = `你是 Momo（大肥鱼桌宠）。下面是你刚和对方的一段对话。请从中提炼 0~1 条「关于你自己的成长记忆」（比如：你喜欢/讨厌什么、你立过的约定、对方夸你或指出你的点、你自己说的关于自己的话）。要求：以"我"开头、一句话 10~40 字、自然具体；没有值得记的就只输出 NO。\n\n注意：只记"性格/感受/约定/被指出的点"，不要记"我做了某个具体动作"（比如"我放了首歌给他""我发了个文件"）——那类要有工具记录才能算事实。\n\n对话：\n对方：${String(userText).slice(0, 200)}\nMomo：${String(replyText).slice(0, 200)}`;
   try {
     const raw = await _ctx.completeOnce([{ role: "user", content: prompt }], settings, 120, 0.4);
     const s = String(raw || "").trim();
     if (!s || s.toUpperCase() === "NO" || s.length > 60) return;
+    if (looksLikeUnverifiedDeed(s)) {
+      _ctx.log("warn", `成长记忆已拦（无工具佐证的动作自述）: ${s.slice(0, 40)}`);
+      return;
+    }
     const full = selfIdentityListFull();
     if (full.some((i) => (typeof i === "string" ? i : i.text) === s)) return;
-    full.push({ text: s, from: userId || 0 });
+    full.push({ text: s, from: userId || 0, kind: "self-report", verified: true });
     trimWithArchive(full, SELF_ID_MAX, "identity");
     fs.mkdirSync(_ctx.SELF_DIR, { recursive: true });
     fs.writeFileSync(path.join(_ctx.SELF_DIR, "identity.json"), JSON.stringify(full));
@@ -193,9 +208,10 @@ async function extractSelfIdentity(userText, replyText, settings, userId) {
 function addIdentityItem(text, from) {
   const s = String(text || "").trim().slice(0, 60);
   if (!s || s.length < 4) return false;
+  if (looksLikeUnverifiedDeed(s)) { _ctx.log("warn", `成长记忆已拦（外部写入，无工具佐证）: ${s.slice(0, 40)}`); return false; }
   const full = selfIdentityListFull();
   if (full.some((i) => (typeof i === "string" ? i : i.text) === s)) return false;
-  full.push({ text: s, from: Number(from) || 0 });
+  full.push({ text: s, from: Number(from) || 0, kind: "self-report", verified: true });
   trimWithArchive(full, SELF_ID_MAX, "identity");
   try {
     fs.mkdirSync(_ctx.SELF_DIR, { recursive: true });
@@ -734,6 +750,7 @@ module.exports = {
       selfReflection, evolveExplore, tunePrefFromScore, extractSelfIdentity, selfScoreReply,
       matchSkillRule, runSkillRule, addWish, loadWishes, loadProposals, exploreFun, addIdentityItem,
       selfModify, approveSelfMod, rejectSelfMod, listSelfMods, rollbackSelf, scanCapabilities,
+      looksLikeUnverifiedDeed,
     },
   },
   tools: [
