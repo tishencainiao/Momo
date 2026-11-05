@@ -53,24 +53,38 @@ function enabled() { try { return _ctx.getSetting("mem.digest.enabled", false) =
 function hasDigest(userId) { return !!loadBucket(String(userId)); }
 function maxTopics() { try { return Math.max(3, Number(_ctx.getSetting("mem.digest.max_topics", 12)) || 12); } catch (e) { return 12; } }
 
-function fmtTopics(bucket, limit) {
+function fmtTopics(bucket, limit, opts) {
+  const o = opts || {};
   const topics = (bucket && Array.isArray(bucket.topics)) ? bucket.topics : [];
-  return topics.slice(0, limit).map((t) => `- ${t.insight || t.theme || ""}`).filter((s) => s.length > 2);
+  return topics
+    .filter((t) => !(o.dedupFor && t.duplicate_of === o.dedupFor))
+    .filter((t) => !(o.hideMaster && /主人/.test(String(t.insight || "") + String(t.theme || ""))))
+    .slice(0, limit)
+    .map((t) => `- ${t.insight || t.theme || ""}`)
+    .filter((s) => s.length > 2);
+}
+function isAdmin(uid) {
+  try {
+    const r = _ctx.getApi && _ctx.getApi("roles");
+    return r ? r.resolveRole(uid) === "admin" : false;
+  } catch (e) { return false; }
 }
 
 /* 给提示词用的消化文本：本人桶 + 通用桶；没开或没文件返回 null */
 function digestText(userId) {
   if (!enabled()) return null;
   const limit = maxTopics();
+  const admin = isAdmin(userId);
   const person = loadBucket(String(userId));
   const global = loadBucket("global");
   const parts = [];
   if (global) {
-    const lines = fmtTopics(global, limit);
+    /* 跨桶去重：只有当浏览者自己的桶里有同一条时，才跳过 global 那条（别把通用特质藏掉） */
+    const lines = fmtTopics(global, limit, { dedupFor: String(userId), hideMaster: !admin });
     if (lines.length) parts.push(`【你对自己的认识（消化后，比流水账更稳定）】\n${lines.join("\n")}`);
   }
   if (person) {
-    const lines = fmtTopics(person, limit);
+    const lines = fmtTopics(person, limit, { skipDup: false });
     if (lines.length) parts.push(`【你对对方的认识（消化后）】\n${lines.join("\n")}`);
   }
   return parts.length ? parts.join("\n") : null;
@@ -117,6 +131,11 @@ module.exports = {
   settings: [
     { key: "mem.digest.enabled", label: "注入消化后的认识", type: "boolean", default: false, desc: "打开后用「记忆消化」产出的认识替代流水账注入（需先跑一次 memory_digest）" },
     { key: "mem.digest.max_topics", label: "最多注入几条认识", type: "number", default: 12, min: 3, max: 30, desc: "本人桶和通用桶各自的上限" },
+    { key: "mem.digest.prefilter", label: "消化前规则预筛", type: "boolean", default: true, desc: "先剔掉空白/纯符号/字面重复的条目，省 token" },
+    { key: "mem.digest.dedup", label: "跨桶去重（规则）", type: "boolean", default: true, desc: "相同认识只保留更具体的桶（个人桶优先于通用）" },
+    { key: "mem.digest.dedup_llm", label: "跨桶去重（模型复核）", type: "boolean", default: true, desc: "额外 1 次调用，找出规则漏掉的语义重复" },
+    { key: "mem.digest.temperature", label: "消化温度", type: "number", default: 0, min: 0, max: 1, desc: "0 = 最稳定，越低越不飘" },
+    { key: "mem.digest.seed", label: "消化随机种子", type: "number", default: 42, min: 0, max: 999999, desc: "0 = 不用；固定值可降低波动（不保证完全复现）" },
     { key: "mem.digest.daily", label: "每晚自动消化", type: "boolean", default: true, desc: "每天到点自动跑一次消化（依赖下面那个小时）" },
     { key: "mem.digest.hour", label: "每天几点消化", type: "number", default: 22, min: 0, max: 23, desc: "整点，默认 22 点" },
   ],
