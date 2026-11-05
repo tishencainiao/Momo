@@ -161,7 +161,7 @@ const SELF_AWARENESS = "【你怎么看自己】你心里清楚几个事实（�
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.55.0";
+const BASE_VERSION = "1.56.0";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -2900,6 +2900,16 @@ async function processPrivateChat(userId, text, images, voiceRequested, msgTime)
       } else {
         for (const img of images.slice(0, 3)) {
           log("info", "图片字段 file=" + String(img.file || "").slice(0, 100) + " url=" + String(img.url || "").slice(0, 160));
+          /* 收图先反查表情包库：是库里的图就直接用标注，省一次视觉调用 */
+          let _known = null;
+          try {
+            const _stk = host && host.apis.get("stickers");
+            if (_stk && _stk.findByHash) {
+              const _buf = await imageBytes(img);
+              _known = _stk.findByHash(_buf);
+            }
+          } catch (e) {}
+          if (_known && _known.meaning) { descs.push("[表情包] " + host.apis.get("stickers").meaningText(_known)); continue; }
           try { const d = await describeImage(img, settings); if (d) descs.push(d); } catch (e) { log("warn", "图片识别失败: " + e.message.slice(0, 120)); }
         }
         if (descs.length) text = text + (text ? "\n" : "") + "【图片内容】" + descs.join("；");
@@ -3110,6 +3120,12 @@ async function processGroupChat(groupId, userId, text, images, msgTime, direct) 
       } else {
         const descs = [];
         for (const img of images.slice(0, 3)) {
+          let _known = null;
+          try {
+            const _stk = host && host.apis.get("stickers");
+            if (_stk && _stk.findByHash) _known = _stk.findByHash(await imageBytes(img));
+          } catch (e) {}
+          if (_known && _known.meaning) { descs.push("[表情包] " + host.apis.get("stickers").meaningText(_known)); continue; }
           try { const d = await describeImage(img, settings); if (d) descs.push(d); } catch (e) {}
         }
         if (descs.length) text = text + (text ? "\n" : "") + "【图片内容】" + descs.join("；");

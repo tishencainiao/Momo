@@ -1,6 +1,6 @@
 # 0004 · 表情包语义理解（画面 / 文字 / 梗 / 场景）
 
-- 状态：v1 已落地（2026-11-05），v2 已落地（2026-11-05），v3 待做
+- 状态：v1 / v2 / v3 均已落地（2026-11-05）
 - 相关：`sticker-store.js`、`plugins/stickers.js`、`scripts/annotate-stickers.js`、`docs/decisions/0002-sticker-semantic-store.md`
 
 ## 背景
@@ -33,6 +33,14 @@
 - `send_sticker` 结果附「这张的含义/场景」，模型可顺势接一句；`stickerRefCtx` 也带含义
 - 新增 `test/sticker-semantic.js`（4 断言），42 个测试文件全过
 - 未做：收图接话与增量标注（v3）
+
+## v3 实测（2026-11-05）
+
+- `img_hash`（sha256）已补齐 128/128；收图先按 hash 反查库，命中直接用标注、省一次视觉调用
+- 实测反查 b.005 → 命中「亏麻了，深夜盯盘破防，求市场把钱还我」
+- 增量标注：timer 每 10 分钟最多一次、每次 5 张（预算 low 才跑）
+- `/表情包 review / fix 编号 含义=xxx / lock 编号` 复核闭环
+- 新增 `test/sticker-hash.js`（4 断言），43 个测试文件全过
 
 ## 验证方式（v2 起）
 

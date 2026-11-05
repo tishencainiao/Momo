@@ -72,6 +72,7 @@ const DEFAULT_ROW = {
   annotated_at: 0,
   annotate_model: "",
   annotate_status: "",
+  img_hash: "",
   used: 0,
   matched: 0,
   last_used: 0,
@@ -127,7 +128,7 @@ function init(file) {
 const EXTRA_COLUMNS = [
   ["what", "TEXT"], ["text_in_image", "TEXT"], ["meaning", "TEXT"], ["usage", "TEXT"],
   ["tags", "TEXT"], ["annotate_confidence", "REAL"], ["annotated_at", "INTEGER"],
-  ["annotate_model", "TEXT"], ["annotate_status", "TEXT"],
+  ["annotate_model", "TEXT"], ["annotate_status", "TEXT"], ["img_hash", "TEXT"],
 ];
 function migrateStickerSchema() {
   try {
@@ -200,6 +201,7 @@ function rowToSticker(r) {
     annotatedAt: Number(r.annotated_at || 0),
     annotateModel: r.annotate_model || "",
     annotateStatus: r.annotate_status || "",
+    imgHash: r.img_hash || "",
   };
 }
 
@@ -209,6 +211,13 @@ function get(fname) {
 }
 function getByPublicId(pid) {
   try { return rowToSticker(db.prepare("SELECT * FROM stickers WHERE public_id = ?").get(String(pid))); }
+  catch (e) { return null; }
+}
+/* 按图片内容 hash 反查（对方发来的表情包是否在库里） */
+function findByImgHash(hash) {
+  const h = String(hash || "");
+  if (!h) return null;
+  try { return rowToSticker(db.prepare("SELECT * FROM stickers WHERE img_hash = ? LIMIT 1").get(h)); }
   catch (e) { return null; }
 }
 function all() {
@@ -234,8 +243,8 @@ function upsert(fname, patch) {
         source, status, confidence, source_count, manual_locked, scope, group_id,
         used, matched, last_used, added_at, reverify_after, updated_at,
         what, text_in_image, meaning, usage, tags, annotate_confidence, annotated_at,
-        annotate_model, annotate_status
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        annotate_model, annotate_status, img_hash
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(fname) DO UPDATE SET
         public_id=excluded.public_id, tier=excluded.tier, desc_=excluded.desc_,
         mood_tag=excluded.mood_tag, scene_tag=excluded.scene_tag, risk=excluded.risk,
@@ -248,7 +257,7 @@ function upsert(fname, patch) {
         what=excluded.what, text_in_image=excluded.text_in_image, meaning=excluded.meaning,
         usage=excluded.usage, tags=excluded.tags, annotate_confidence=excluded.annotate_confidence,
         annotated_at=excluded.annotated_at, annotate_model=excluded.annotate_model,
-        annotate_status=excluded.annotate_status`)
+        annotate_status=excluded.annotate_status, img_hash=excluded.img_hash`)
       .run(
         fn, next.publicId, next.tier, next.desc, next.mood_tag, next.scene_tag, next.risk,
         next.allowProactive ? 1 : 0, next.source, next.status, Number(next.confidence) || 0,
@@ -257,7 +266,7 @@ function upsert(fname, patch) {
         Number(next.addedAt) || 0, Number(next.reverifyAfter) || 0, next.updatedAt,
         next.what || "", next.textInImage || "", next.meaning || "", next.usage || "",
         next.tags || "", Number(next.annotateConfidence) || 0, Number(next.annotatedAt) || 0,
-        next.annotateModel || "", next.annotateStatus || ""
+        next.annotateModel || "", next.annotateStatus || "", next.imgHash || ""
       );
     return get(fn);
   } catch (e) { return null; }
@@ -472,7 +481,7 @@ function riskFromText(text) { return RISK_RE.test(String(text || "")) ? "high" :
 
 module.exports = {
   init, ready, close,
-  get, getByPublicId, all, upsert, del,
+  get, getByPublicId, findByImgHash, all, upsert, del,
   addAuto, applyManual, nextStatus,
   recordSend, recentSends, lastSendTs,
   getKV, setKV,

@@ -314,6 +314,23 @@ function pickForText(text) {
   return all.length ? all[Math.floor(Math.random() * all.length)] : null;
 }
 
+/* 收图反查：对方发来的图是不是库里的表情包（按 sha256 内容 hash） */
+function hashBuf(buf) { return crypto.createHash("sha256").update(buf).digest("hex"); }
+function findByHash(buf) {
+  try {
+    if (!store.ready() || !buf || !buf.length) return null;
+    return store.findByImgHash(hashBuf(buf));
+  } catch (e) { return null; }
+}
+function meaningText(s) {
+  if (!s) return "";
+  const parts = [];
+  if (s.what) parts.push("画面：" + s.what);
+  if (s.textInImage) parts.push("图上文字：" + s.textInImage);
+  if (s.meaning) parts.push("含义：" + s.meaning);
+  return parts.join("；");
+}
+
 /* ---------- 发送记账 ---------- */
 function recordSent(sticker, sessionKey) {
   if (!sticker || !sticker.fname) return;
@@ -576,7 +593,7 @@ module.exports = {
     stickers: {
       stickerPrompt, parseStickerMarkers, pickStickerByEmotion, pickStickerSmart, candidatesByEmotion,
       pickForText, maybeCollect, pickStickerByIds, generateStickerImage, listStickers, listAll,
-      semanticLine, semanticHaystack,
+      semanticLine, semanticHaystack, findByHash, meaningText,
     setLastMeaning, teachSticker, resolveStickerTarget, recordSent, recentFnames,
       canProactive, canExplicit, getLastCollected, maintain, stickerStats,
       store: () => store,
@@ -629,6 +646,25 @@ module.exports = {
       if (now - (module.exports._lastMaintain || 0) < 6 * 3600e3) return;
       module.exports._lastMaintain = now;
       try { maintain(); } catch (e) { _ctx.log("warn", "表情包维护失败: " + String(e.message).slice(0, 100)); }
+      /* 增量标注：新收的表情包每 10 分钟最多跑一次，一次 5 张 */
+      if (now - (module.exports._lastAnnotate || 0) > 10 * 60000) {
+        module.exports._lastAnnotate = now;
+        try {
+          const pending = store.all().filter((r) => r.tier !== "trash" && !r.annotatedAt && !r.manualLocked);
+          if (pending.length && (!_ctx.canAfford || _ctx.canAfford("low"))) {
+            const { spawn } = require("child_process");
+            const py = (_ctx.config.pet && _ctx.config.pet.python_path) || "python";
+            const script = path.join(__dirname, "..", "scripts", "annotate-stickers.js");
+            const child = spawn(process.execPath, [script, "--limit", "5"], {
+              cwd: path.join(__dirname, ".."), windowsHide: true,
+              env: Object.assign({}, process.env, { PYTHON: py }),
+            });
+            child.stdout.on("data", () => {});
+            child.stderr.on("data", (d) => _ctx.log("warn", "表情包增量标注: " + String(d).slice(0, 120)));
+            child.on("close", (code) => _ctx.log("info", `表情包增量标注完成（待标 ${pending.length} 张，code=${code}）`));
+          }
+        } catch (e) {}
+      }
     },
   },
   commands: [{
@@ -648,10 +684,46 @@ module.exports = {
     },
   }, {
     key: "/表情包",
-    regex: /^\/表情包$/,
+    regex: /^\/表情包(\s+[\s\S]*)?$/,
     handler(msg) {
       if (!_ctx.isMaster(msg.userId)) { _ctx.sendPrivate(msg.userId, "只有主人能看表情包统计哦～"); return; }
-      _ctx.sendPrivate(msg.userId, stickerStats());
+      const arg = String(msg.text || "").replace(/^\/表情包\s*/, "").trim();
+      if (!arg) { _ctx.sendPrivate(msg.userId, stickerStats()); return; }
+      const sub = arg.split(/\s+/)[0];
+      if (sub === "review") {
+        const rows = store.all()
+          .filter((r) => r.tier !== "trash" && (r.annotateStatus === "low_conf"))
+          .slice(0, 10);
+        if (!rows.length) { _ctx.sendPrivate(msg.userId, "没有待复核的标注～"); return; }
+        const lines = rows.map((r) => `${r.publicId}：${String(r.desc || r.fname).slice(0, 16)} → ${String(r.meaning || "（无含义）").slice(0, 28)}`).join("\n");
+        _ctx.sendPrivate(msg.userId, `待复核（${rows.length}）：\n${lines}\n改：/表情包 fix 编号 含义=xxx\n锁：/表情包 lock 编号`);
+        return;
+      }
+      if (sub === "fix") {
+        const m = arg.match(/^fix\s+(\S+)\s+(\S+?)=([\s\S]+)$/);
+        if (!m) { _ctx.sendPrivate(msg.userId, "用法：/表情包 fix 编号 含义=xxx（字段：画面/图上字/含义/场景）"); return; }
+        const st = store.getByPublicId(m[1]) || store.get(m[1]);
+        if (!st) { _ctx.sendPrivate(msg.userId, "没找到这个编号"); return; }
+        const fieldMap = { 画面: "what", 图上字: "textInImage", 含义: "meaning", 场景: "usage" };
+        const f = fieldMap[m[2]] || m[2];
+        if (!["what", "textInImage", "meaning", "usage"].includes(f)) {
+          _ctx.sendPrivate(msg.userId, "字段只能是：画面 / 图上字 / 含义 / 场景");
+          return;
+        }
+        store.upsert(st.fname, { [f]: m[3].trim().slice(0, 120), annotateStatus: "ok", annotatedAt: Date.now() });
+        _ctx.log("info", `表情包标注修正 ${m[1]} ${m[2]}=${m[3].slice(0, 30)}`);
+        _ctx.sendPrivate(msg.userId, `已更新 ${m[1]} 的「${m[2]}」：${m[3].trim().slice(0, 40)}`);
+        return;
+      }
+      if (sub === "lock") {
+        const pid = arg.replace(/^lock\s*/, "").trim();
+        const st = store.getByPublicId(pid) || store.get(pid);
+        if (!st) { _ctx.sendPrivate(msg.userId, "没找到这个编号"); return; }
+        store.upsert(st.fname, { manualLocked: true, status: "manual_locked", annotateStatus: "ok" });
+        _ctx.sendPrivate(msg.userId, `已锁定 ${pid}（以后自动流程不会覆盖它）`);
+        return;
+      }
+      _ctx.sendPrivate(msg.userId, "用法：/表情包 [review | fix 编号 含义=xxx | lock 编号]");
     },
   }],
 };
