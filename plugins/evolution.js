@@ -9,6 +9,16 @@ let evolve = {};
 function refreshEvolve() { try { evolve = _ctx.loadEvolution(); } catch (e) { evolve = {}; } }
 const SELF_ID_MAX = 200;
 const REFLECT_MAX = 100;
+/* 裁掉超量条目时先归档原文（data/archive/），保证细节不物理消失 */
+function trimWithArchive(list, max, kind) {
+  const dropped = [];
+  while (list.length > max) dropped.push(list.shift());
+  if (dropped.length) {
+    try { require("../self-archive").appendArchive(_ctx.DATA_DIR, kind, dropped); } catch (e) {}
+    try { _ctx.log("info", `归档 ${dropped.length} 条（${kind}，超出上限 ${max}）`); } catch (e) {}
+  }
+  return dropped.length;
+}
 let lastReflectTs = 0;
 const IDENTITY_INTERVAL_MS = 30 * 60000;
 const SCORE_INTERVAL_MS = 5 * 60000;
@@ -171,7 +181,7 @@ async function extractSelfIdentity(userText, replyText, settings, userId) {
     const full = selfIdentityListFull();
     if (full.some((i) => (typeof i === "string" ? i : i.text) === s)) return;
     full.push({ text: s, from: userId || 0 });
-    while (full.length > SELF_ID_MAX) full.shift();
+    trimWithArchive(full, SELF_ID_MAX, "identity");
     fs.mkdirSync(_ctx.SELF_DIR, { recursive: true });
     fs.writeFileSync(path.join(_ctx.SELF_DIR, "identity.json"), JSON.stringify(full));
     _ctx.reloadEvolution(); refreshEvolve();
@@ -186,7 +196,7 @@ function addIdentityItem(text, from) {
   const full = selfIdentityListFull();
   if (full.some((i) => (typeof i === "string" ? i : i.text) === s)) return false;
   full.push({ text: s, from: Number(from) || 0 });
-  while (full.length > SELF_ID_MAX) full.shift();
+  trimWithArchive(full, SELF_ID_MAX, "identity");
   try {
     fs.mkdirSync(_ctx.SELF_DIR, { recursive: true });
     fs.writeFileSync(path.join(_ctx.SELF_DIR, "identity.json"), JSON.stringify(full));
@@ -266,7 +276,7 @@ async function selfReflection(settings) {
     if (s.length > 60) s = s.slice(0, 60);
     if (refl.some((r) => _ctx.textSimilar(reflText(r), s))) { _ctx.log("info", `反思：与已有重复，跳过（${s.slice(0, 30)}）`); return; }
     refl.push({ text: s, from: 0, ts: Date.now() });
-    while (refl.length > REFLECT_MAX) refl.shift();
+    trimWithArchive(refl, REFLECT_MAX, "reflection");
     fs.mkdirSync(_ctx.SELF_DIR, { recursive: true });
     fs.writeFileSync(path.join(_ctx.SELF_DIR, "reflections.json"), JSON.stringify(refl));
     _ctx.reloadEvolution(); refreshEvolve();
@@ -367,7 +377,7 @@ function adoptSmall(prop) {
     const full = selfIdentityListFull();
     if (full.some((i) => (typeof i === "string" ? i : i.text) === s)) return false;
     full.push({ text: s, from: 0 });   // 进化提案采纳的成长记忆不绑定具体人
-    while (full.length > SELF_ID_MAX) full.shift();
+    trimWithArchive(full, SELF_ID_MAX, "identity");
     fs.mkdirSync(_ctx.SELF_DIR, { recursive: true });
     fs.writeFileSync(path.join(_ctx.SELF_DIR, "identity.json"), JSON.stringify(full));
     _ctx.reloadEvolution(); refreshEvolve();

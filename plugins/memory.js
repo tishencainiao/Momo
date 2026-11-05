@@ -58,8 +58,9 @@ function mergeMemories(items, newOnes, channel, groupId, cap) {
   if (out.length > limit) return out.slice(-limit);
   return out;
 }
-/* 遗忘机制：超 60 天且从未被访问的低价值记忆自动清除（主人教的 source=taught 永不遗忘） */
-function pruneMemories(items) {
+/* 遗忘机制：超 60 天且从未被访问的低价值记忆自动清除（主人教的 source=taught 永不遗忘）
+ * 清除前先把原文归档到 data/archive/memory-<uid>-YYYY-MM.jsonl，细节不物理消失 */
+function pruneMemories(items, uid) {
   const nowSec = Math.floor(Date.now() / 1000);
   const cutoff = nowSec - 60 * 86400;
   const before = items.length;
@@ -69,7 +70,11 @@ function pruneMemories(items) {
     if (m.created > cutoff) return true;
     return (m.hits || 0) > 0;
   });
-  if (kept.length < before) _ctx.log("info", `记忆遗忘：清理 ${before - kept.length} 条（超 60 天且从未被访问）`);
+  const removed = items.filter((m) => !kept.includes(m));
+  if (removed.length) {
+    try { require("../self-archive").appendArchive(_ctx.DATA_DIR, "memory-" + (uid || "all"), removed); } catch (e) {}
+    _ctx.log("info", `记忆遗忘：归档 ${removed.length} 条（超 60 天且从未被访问，已存 data/archive/）`);
+  }
   return kept;
 }
 async function extractMemoriesBatch(userId, batch, settings) {
@@ -107,7 +112,7 @@ async function consolidateUserMemories(userId, settings) {
       const long = _ctx.loadMemories(userId);
       const before = long.length;
       const merged = mergeMemories(long, arr, undefined, undefined, 400);
-      const pruned = pruneMemories(merged);
+      const pruned = pruneMemories(merged, userId);
       _ctx.saveMemories(userId, pruned);
       _ctx.log("info", `记忆固化 user=${userId}: 短期 ${fresh.length} 条 → 长期新增 ${merged.length - before} 条`);
       const moved = new Set(arr.map((x) => String(x).trim()));

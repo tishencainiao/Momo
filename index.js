@@ -161,7 +161,7 @@ const SELF_AWARENESS = "【你怎么看自己】你心里清楚几个事实（�
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.57.0";
+const BASE_VERSION = "1.58.0";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -183,14 +183,15 @@ function evolvePref(key, fallback) {
   const p = (evolve && evolve.pref) || {};
   return (p[key] === undefined || p[key] === null) ? fallback : p[key];
 }
-function evolIdentityText(userId) {
+function evolIdentityText(userId, limit) {
   const items = (evolve && Array.isArray(evolve.identity)) ? evolve.identity : [];
   // 按当前对话的人过滤：from=0（通用/旧数据）或 from=当前用户 才注入；其他用户的不注入，避免串人
   const relevant = items.filter((e) => {
     const from = (typeof e === "string") ? 0 : (Number(e && e.from) || 0);
     return from === 0 || from === Number(userId);
   });
-  return relevant.map((e) => (typeof e === "string" ? e : (e && e.text))).filter(Boolean).slice(-20).join("\n");
+  const n = Math.max(1, Number(limit) || 20);
+  return relevant.map((e) => (typeof e === "string" ? e : (e && e.text))).filter(Boolean).slice(-n).join("\n");
 }
 /* 自我反思产出的经验（取最近几条注入人格，之前只写盘不生效） */
 function evolReflectionText() {
@@ -821,8 +822,11 @@ function userPersona(userId, settings) {
   try { const _md = host && host.apis.get("memoryDigest"); _mdText = _md ? _md.digestText(userId) : null; } catch (e) {}
   const growth = _mdText ? null : evolIdentityText(userId);
   const lessons = _mdText ? null : evolReflectionText();
+  /* 双轨注入：消化摘要（长期认识）+ 最近 8 条原文（近期鲜活细节） */
+  const recentDetail = _mdText ? evolIdentityText(userId, 8) : "";
   return [settings.persona, rule, identity,
     _mdText || "",
+    recentDetail ? `【最近的具体细节（原文）】\n${recentDetail}` : "",
     growth ? `【我自己的成长记忆】\n${growth}` : "",
     lessons ? `【我自己复盘出的经验（请体现在行为里）】\n${lessons}` : ""
   ].filter(Boolean).join("\n");

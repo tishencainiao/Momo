@@ -51,7 +51,7 @@ function loadBucket(name) {
 }
 function enabled() { try { return _ctx.getSetting("mem.digest.enabled", false) === true; } catch (e) { return false; } }
 function hasDigest(userId) { return !!loadBucket(String(userId)); }
-function maxTopics() { try { return Math.max(3, Number(_ctx.getSetting("mem.digest.max_topics", 12)) || 12); } catch (e) { return 12; } }
+function maxTopics() { try { return Math.max(3, Number(_ctx.getSetting("mem.digest.max_topics", 20)) || 20); } catch (e) { return 20; } }
 
 function fmtTopics(bucket, limit, opts) {
   const o = opts || {};
@@ -130,7 +130,8 @@ module.exports = {
   init(ctx) { _ctx = ctx; try { startTimer(); } catch (e) {} },
   settings: [
     { key: "mem.digest.enabled", label: "注入消化后的认识", type: "boolean", default: false, desc: "打开后用「记忆消化」产出的认识替代流水账注入（需先跑一次 memory_digest）" },
-    { key: "mem.digest.max_topics", label: "最多注入几条认识", type: "number", default: 12, min: 3, max: 30, desc: "本人桶和通用桶各自的上限" },
+    { key: "mem.digest.max_topics", label: "最多注入几条认识", type: "number", default: 20, min: 3, max: 40, desc: "本人桶和通用桶各自的上限" },
+    { key: "mem.digest.max_merge", label: "每个主题最多合并几条", type: "number", default: 2, min: 2, max: 6, desc: "越小越细（2=只合并两两相近的条目）" },
     { key: "mem.digest.prefilter", label: "消化前规则预筛", type: "boolean", default: true, desc: "先剔掉空白/纯符号/字面重复的条目，省 token" },
     { key: "mem.digest.dedup", label: "跨桶去重（规则）", type: "boolean", default: true, desc: "相同认识只保留更具体的桶（个人桶优先于通用）" },
     { key: "mem.digest.dedup_llm", label: "跨桶去重（模型复核）", type: "boolean", default: true, desc: "额外 1 次调用，找出规则漏掉的语义重复" },
