@@ -161,7 +161,7 @@ const SELF_AWARENESS = "【你怎么看自己】你心里清楚几个事实（�
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.56.0";
+const BASE_VERSION = "1.57.0";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -710,6 +710,32 @@ async function sendVoice(userId, text) {
   const a = host && host.apis.get("voice");
   if (!a) throw new Error("语音插件未加载");
   await a.sendVoice(userId, text);
+}
+/* 运行参数（可在 QQ 上用 settings_set 调）：等消息窗口 / 语音预热 */
+function qqSettingNum(key, def) {
+  try {
+    const d = JSON.parse(fs.readFileSync(path.join(DATA_DIR, "settings.json"), "utf8"));
+    const v = d && Object.prototype.hasOwnProperty.call(d, key) ? d[key] : undefined;
+    if (v === undefined || v === null || v === "") return def;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : def;
+  } catch (e) { return def; }
+}
+function qqSettingBool(key, def) {
+  try {
+    const d = JSON.parse(fs.readFileSync(path.join(DATA_DIR, "settings.json"), "utf8"));
+    const v = d && Object.prototype.hasOwnProperty.call(d, key) ? d[key] : undefined;
+    if (v === undefined || v === null) return def;
+    return v === true || v === "true" || v === 1 || v === "1";
+  } catch (e) { return def; }
+}
+/* 语音预热：收到语音请求就后台先拉起 TTS 服务，和聊天并行，减少等待 */
+function warmVoice() {
+  try {
+    if (!qqSettingBool("qq.voice_warm", true)) return;
+    const a = host && host.apis.get("voice");
+    if (a && a.warmVoice) a.warmVoice();
+  } catch (e) {}
 }
 
 /* ---------------- 角色与称呼（主人/访客） ---------------- */
@@ -1836,8 +1862,9 @@ async function perceiveMind(settings, st, boredomV, masterStatusLine) {
   const flowLine = lastThought
     ? `你上一条念头是：「${lastThought}」。**接着这条往下想**，像人一样把想法续上（可以更具体、可以怀疑、可以跑偏），不要每次重新开一个话题。`
     : `你还没有明确的念头，起一个。`;
+  const screenLine = petScreenContext();
   const prompt = `你是 Momo（大肥鱼桌宠）。现在 ${todayText()}。你的情绪：${moodLabel()}（无聊度 ${Math.round(boredomV)}/100）。${budgetLevelText()}${flowLine}
-你最近在想：${recentThoughts}。${masterStatusLine}${openLoopsText(st) ? "\n" + openLoopsText(st) : ""}
+你最近在想：${recentThoughts}。${masterStatusLine}${screenLine ? "\n" + screenLine : ""}${openLoopsText(st) ? "\n" + openLoopsText(st) : ""}
 请用一句话说出你此刻的念头，并判断你有多想做点什么、这条念头让你的心情往哪边走。只输出 JSON（不要解释）：
 {"thought":"一句念头（10~30字）","urge":0到100的数字,"mood_delta":-10到10的数字,"open_loop":"如果这条念头里有个你还没想明白的点，写成一句；没有就省略这个字段"}
 urge 含义：0=只想安静待着，100=非常想找人说话或做点事。
@@ -2639,6 +2666,7 @@ async function handlePrivateMessage(event) {
   const master = isMaster(userId);
   const call = resolveCall(userId);
   let voiceRequested = wantsVoice(text);
+  if (voiceRequested) warmVoice();
   if (text === "/语音" || text.startsWith("/语音 ")) {
     text = text.replace(/^\/语音\s*/, "").trim() || "想听我用语音说点什么呀？";
     voiceRequested = true;
@@ -2803,8 +2831,8 @@ async function handlePrivateMessage(event) {
 }
 
 /* ---------------- 闲聊防抖合并 ---------------- */
-const DEBOUNCE_MS = 6000;
-const MAX_WAIT_MS = 8000;
+const DEBOUNCE_MS = 20000;   // 最后一条消息后等 20 秒（可在 QQ 上调 qq.debounce_ms）
+const MAX_WAIT_MS = 40000;   // 连发时最多等 40 秒（qq.max_wait_ms）
 const pendingChat = new Map();
 function enqueuePrivateChat(userId, text, images, voiceRequested, msgTime) {
   let p = pendingChat.get(userId);
@@ -2815,7 +2843,9 @@ function enqueuePrivateChat(userId, text, images, voiceRequested, msgTime) {
   if (msgTime) p.msgTime = msgTime;
   if (p.timer) clearTimeout(p.timer);
   const elapsed = Date.now() - p.firstTs;
-  const delay = Math.min(DEBOUNCE_MS, Math.max(0, MAX_WAIT_MS - elapsed));
+  const debounce = qqSettingNum("qq.debounce_ms", DEBOUNCE_MS);
+  const maxWait = qqSettingNum("qq.max_wait_ms", MAX_WAIT_MS);
+  const delay = Math.min(debounce, Math.max(0, maxWait - elapsed));
   p.timer = setTimeout(() => firePrivateChat(userId), delay);
   petEvent("thinking");
 }

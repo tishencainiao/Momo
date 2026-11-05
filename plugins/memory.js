@@ -39,8 +39,9 @@ function bufferExchange(userId, text, reply, channel, groupId) {
 function fingerprint(s) {
   return String(s || "").toLowerCase().replace(/[^\w\u4e00-\u9fff]+/g, "");
 }
-function mergeMemories(items, newOnes, channel, groupId) {
+function mergeMemories(items, newOnes, channel, groupId, cap) {
   /* 纯函数：不改动传入数组（之前原地 push 导致「合并后长度恒等于原长度」，保存永远被跳过） */
+  const limit = Number(cap) > 0 ? Number(cap) : 200;
   const out = Array.isArray(items) ? items.slice() : [];
   const seen = new Map();
   for (const i of out) { const f = fingerprint(i.content); if (f) seen.set(f, i); }
@@ -54,7 +55,7 @@ function mergeMemories(items, newOnes, channel, groupId) {
     seen.set(f, item);
     out.push(item);
   }
-  if (out.length > 200) return out.slice(-200);
+  if (out.length > limit) return out.slice(-limit);
   return out;
 }
 /* 遗忘机制：超 60 天且从未被访问的低价值记忆自动清除（主人教的 source=taught 永不遗忘） */
@@ -105,7 +106,7 @@ async function consolidateUserMemories(userId, settings) {
     if (arr.length) {
       const long = _ctx.loadMemories(userId);
       const before = long.length;
-      const merged = mergeMemories(long, arr);
+      const merged = mergeMemories(long, arr, undefined, undefined, 400);
       const pruned = pruneMemories(merged);
       _ctx.saveMemories(userId, pruned);
       _ctx.log("info", `记忆固化 user=${userId}: 短期 ${fresh.length} 条 → 长期新增 ${merged.length - before} 条`);

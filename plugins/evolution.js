@@ -7,8 +7,8 @@ let _ctx = null;
 let evolve = {};
 
 function refreshEvolve() { try { evolve = _ctx.loadEvolution(); } catch (e) { evolve = {}; } }
-const SELF_ID_MAX = 50;
-const REFLECT_MAX = 30;
+const SELF_ID_MAX = 200;
+const REFLECT_MAX = 100;
 let lastReflectTs = 0;
 const IDENTITY_INTERVAL_MS = 30 * 60000;
 const SCORE_INTERVAL_MS = 5 * 60000;

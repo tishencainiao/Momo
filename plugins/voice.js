@@ -65,9 +65,42 @@ async function transcribeRecords(messageId, records) {
   return "";
 }
 
+/* 语音预热：后台先拉起 TTS 服务（和聊天并行），减少真正发语音时的冷启动等待 */
+let _lastWarm = 0;
+function voiceName() {
+  return (_ctx.config && _ctx.config.chat && _ctx.config.chat.tts && _ctx.config.chat.tts.voice) || "zh-CN-XiaoxiaoNeural";
+}
+function warmVoice() {
+  const now = Date.now();
+  if (now - _lastWarm < 5 * 60000) return { ok: false, skipped: true, reason: "throttled" };
+  _lastWarm = now;
+  try {
+    const pet = (_ctx.config && _ctx.config.pet) || {};
+    const py = pet.python_path;
+    const ttsScript = path.join(__dirname, "..", "tts.py");
+    if (!py) return { ok: false, reason: "no python_path" };
+    if (!fs.existsSync(py)) return { ok: false, reason: "python not found" };
+    if (!fs.existsSync(ttsScript)) return { ok: false, reason: "tts.py missing" };
+    const { spawn } = require("child_process");
+    const tmp = path.join(_ctx.DATA_DIR, "voice-warm-" + now + ".mp3");
+    const child = spawn(py, [ttsScript, "嗯", tmp, voiceName()], { detached: true, stdio: "ignore", windowsHide: true });
+    child.unref();
+    setTimeout(() => { try { fs.unlinkSync(tmp); } catch (e) {} }, 180000);
+    _ctx.log("info", "语音预热：已在后台拉起 TTS 服务");
+    return { ok: true, pid: child.pid };
+  } catch (e) {
+    return { ok: false, reason: String(e.message).slice(0, 100) };
+  }
+}
+
 module.exports = {
   name: "voice",
-  version: "1.0.0",
+  version: "1.1.0",
   init(ctx) { _ctx = ctx; },
-  api: { voice: { wantsVoice, sendVoice, transcribeRecords } },
+  settings: [
+    { key: "qq.debounce_ms", label: "等消息窗口（毫秒）", type: "number", default: 20000, min: 3000, max: 60000, desc: "对方最后一条消息后等多久再回复；越大越能让你把话说完" },
+    { key: "qq.max_wait_ms", label: "连发时最长等待（毫秒）", type: "number", default: 40000, min: 10000, max: 120000, desc: "无论连发多少条，最多等这么久就回复" },
+    { key: "qq.voice_warm", label: "语音预热", type: "boolean", default: true, desc: "收到语音请求时后台先拉起 TTS 服务，减少等待" },
+  ],
+  api: { voice: { wantsVoice, sendVoice, warmVoice, transcribeRecords } },
 };
