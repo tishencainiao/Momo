@@ -40,8 +40,10 @@ function fingerprint(s) {
   return String(s || "").toLowerCase().replace(/[^\w\u4e00-\u9fff]+/g, "");
 }
 function mergeMemories(items, newOnes, channel, groupId) {
+  /* 纯函数：不改动传入数组（之前原地 push 导致「合并后长度恒等于原长度」，保存永远被跳过） */
+  const out = Array.isArray(items) ? items.slice() : [];
   const seen = new Map();
-  for (const i of items) { const f = fingerprint(i.content); if (f) seen.set(f, i); }
+  for (const i of out) { const f = fingerprint(i.content); if (f) seen.set(f, i); }
   for (const c of newOnes) {
     const s = String(c || "").trim();
     if (!s || s.length > 300) continue;
@@ -50,10 +52,10 @@ function mergeMemories(items, newOnes, channel, groupId) {
     if (seen.has(f)) { seen.get(f).importance = (seen.get(f).importance || 1) + 1; continue; }
     const item = { content: s, created: Math.floor(Date.now() / 1000), channel: channel || "", groupId: groupId ? String(groupId) : "", importance: 1 };
     seen.set(f, item);
-    items.push(item);
+    out.push(item);
   }
-  if (items.length > 200) items = items.slice(-200);
-  return items;
+  if (out.length > 200) return out.slice(-200);
+  return out;
 }
 /* 遗忘机制：超 60 天且从未被访问的低价值记忆自动清除（主人教的 source=taught 永不遗忘） */
 function pruneMemories(items) {
@@ -82,11 +84,12 @@ async function extractMemoriesBatch(userId, batch, settings) {
     const arr = _ctx.parseMemoryJson(raw);
     _ctx.log("info", `记忆提炼-解析条数=${arr.length}`);
     if (!arr.length) return;
+    const before = items.length;
     const merged = mergeMemories(items, arr, batch[0] && batch[0].channel, batch[0] && batch[0].groupId);
-    _ctx.log("info", `记忆提炼-合并后=${merged.length}（原来 ${items.length}）`);
-    if (merged.length === items.length) return;
+    _ctx.log("info", `记忆提炼-合并后=${merged.length}（原来 ${before}）`);
+    if (merged.length === before) return;
     _ctx.saveShortMemories(userId, merged);
-    _ctx.log("info", `短期记忆提炼 user=${userId}: 新增 ${merged.length - items.length} 条（共 ${merged.length} 条）`);
+    _ctx.log("info", `短期记忆提炼 user=${userId}: 新增 ${merged.length - before} 条（共 ${merged.length} 条）`);
   } catch (e) { _ctx.log("warn", "记忆提炼失败: " + e.message.slice(0, 160)); }
 }
 async function consolidateUserMemories(userId, settings) {
@@ -101,10 +104,11 @@ async function consolidateUserMemories(userId, settings) {
     const arr = _ctx.parseMemoryJson(raw);
     if (arr.length) {
       const long = _ctx.loadMemories(userId);
+      const before = long.length;
       const merged = mergeMemories(long, arr);
       const pruned = pruneMemories(merged);
       _ctx.saveMemories(userId, pruned);
-      _ctx.log("info", `记忆固化 user=${userId}: 短期 ${fresh.length} 条 → 长期新增 ${merged.length - long.length} 条`);
+      _ctx.log("info", `记忆固化 user=${userId}: 短期 ${fresh.length} 条 → 长期新增 ${merged.length - before} 条`);
       const moved = new Set(arr.map((x) => String(x).trim()));
       _ctx.saveShortMemories(userId, fresh.filter((m) => !moved.has(String(m.content).trim())));
     }

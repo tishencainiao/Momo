@@ -64,14 +64,14 @@ vm.runInContext(fpSrc + "\n" + mmSrc + "\nthis.mergeMemories = mergeMemories;", 
 const merge = ctx2.mergeMemories;
 
 let items = [];
-merge(items, ["感冒了点了山药粥"], "group", G1);
+items = merge(items, ["感冒了点了山药粥"], "group", G1);
 check("新记忆写了 groupId", items[0].groupId === G1, JSON.stringify(items[0]));
 check("新记忆也写了 channel", items[0].channel === "group");
 
-merge(items, ["喜欢冰美式"], "private", "");
+items = merge(items, ["喜欢冰美式"], "private", "");
 check("私聊记忆 groupId 为空", items[1].groupId === "", JSON.stringify(items[1]));
 
-merge(items, ["感冒了点了山药粥"], "group", G2);
+items = merge(items, ["感冒了点了山药粥"], "group", G2);
 check("重复内容不重复记", items.length === 2, "实际 " + items.length);
 
 console.log(`\n通过 ${pass} / 失败 ${fail}`);
