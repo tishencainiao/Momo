@@ -161,7 +161,7 @@ const SELF_AWARENESS = "【你怎么看自己】你心里清楚几个事实（�
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.60.0";
+const BASE_VERSION = "1.61.0";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -270,7 +270,7 @@ function budgetLevel() {
 }
 /* 每个动作的花费档：free 免费 / low 约¥0.001 / mid 约¥0.005 / high 更贵 */
 const ACTION_COST = {
-  view_space: "low", share_fun: "low", qzone: "low", browse: "low",
+  view_space: "low", share_fun: "low", qzone: "low", browse: "low", music_review: "low",
   search: "mid",
   reflect: "high", evolve: "high",
   nothing: "free",
@@ -290,7 +290,7 @@ function budgetLevelText() {
   const { ratio, level, spent, daily } = budgetLevel();
   const pct = Math.round(ratio * 100);
   const name = { rich: "很宽裕", normal: "够用", tight: "紧张", empty: "快没了" }[level] || level;
-  const allowed = ["nothing", "qzone", "search", "view_space", "share_fun", "browse", "reflect", "evolve"]
+  const allowed = ["nothing", "qzone", "search", "view_space", "share_fun", "browse", "music_review", "reflect", "evolve"]
     .filter((a) => canAfford(ACTION_COST[a] || "low"));
   return `今日生活费 ¥${spent.toFixed(3)}/${daily}（还剩 ${pct}%，${name}）。现在还能做：${allowed.join("、")}。`;
 }
@@ -1907,7 +1907,7 @@ async function deliberateMind(settings, st, percept, ctxBits) {
   const recentThoughts = thoughtTexts(st, 6).join("；") || "（无）";
   const prompt = `你是 Momo（大肥鱼桌宠）。现在是「自己思考」的时间（不是在回消息）。${goalsCtx()}。当前时间：${todayText()}。${budgetLevelText()}你的念头：${percept.thought || "（无）"}，想做事的程度：${percept.urge}/100。你最近在想：${recentThoughts}。${ctxBits}
 请给出 1~3 个「现在可以考虑做的事」，每个都打分，只输出 JSON（不要解释）：
-{"intents":[{"action":"qzone|search|view_space|share_fun|browse|reflect|evolve|nothing","content":"...","relevance":0到1,"gap":0到1,"value":0到1,"timeliness":0到1}]}
+{"intents":[{"action":"qzone|search|view_space|share_fun|browse|music_review|reflect|evolve|nothing","content":"...","relevance":0到1,"gap":0到1,"value":0到1,"timeliness":0到1}]}
 打分含义：relevance=和主人有多相关；gap=信息缺口有多大；value=做了能带来多少新东西；timeliness=现在做合不合时宜。
 规则：生活费紧张时只能选便宜的（browse/search）；很宽裕才考虑 reflect/evolve；主动找主人说话由另一套负责，你不用操心；真没什么事就只给一个 nothing（这是正常的）。`;
   const lv = budgetLevel().level;
@@ -1985,7 +1985,7 @@ async function mindLoop() {
 
 /* 执行一个心智动作（原 mindLoop 的动作分发） */
 async function runMindAction(action, content, settings, masterUin, now) {
-  const _actMap = { qzone: "在发空间说说", search: "在上网搜好玩的", view_space: "在看空间动态", share_fun: "在给主人找趣图", browse: "在刷视频" };
+  const _actMap = { qzone: "在发空间说说", search: "在上网搜好玩的", view_space: "在看空间动态", share_fun: "在给主人找趣图", browse: "在刷视频", music_review: "在听歌写乐评" };
   if (_actMap[action]) setActivity(_actMap[action]);
   try {
     if (action === "qzone" && content) {
@@ -2027,6 +2027,10 @@ async function runMindAction(action, content, settings, masterUin, now) {
       log("info", "心智-选择刷视频");
       const _bApi = host && host.apis.get("browse");
       if (_bApi) { try { await _bApi.browse(settings); } catch (e) { log("warn", "刷视频失败: " + e.message.slice(0, 120)); } }
+    } else if (action === "music_review") {
+      log("info", "心智-选择听歌写乐评");
+      const _eApi = host && host.apis.get("entertainment");
+      if (_eApi) { try { await _eApi.musicReview(settings); } catch (e) { log("warn", "听歌写乐评失败: " + e.message.slice(0, 120)); } }
     }
   } catch (e) { log("warn", "心智动作失败: " + e.message.slice(0, 120)); }
 }
