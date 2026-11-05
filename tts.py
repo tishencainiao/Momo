@@ -186,7 +186,9 @@ def ffmpeg_bin():
 
 def wav_to_mp3(wav_path, mp3_path):
     r = subprocess.run(
-        [ffmpeg_bin(), "-y", "-loglevel", "error", "-i", wav_path, "-codec:a", "libmp3lame", "-q:a", "4", mp3_path],
+        [ffmpeg_bin(), "-y", "-loglevel", "error", "-i", wav_path,
+         "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
+         "-codec:a", "libmp3lame", "-q:a", "4", mp3_path],
         capture_output=True, timeout=60,
         creationflags=0x08000000,
     )
