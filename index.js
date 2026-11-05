@@ -161,7 +161,7 @@ const SELF_AWARENESS = "【你怎么看自己】你心里清楚几个事实（�
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.54.0";
+const BASE_VERSION = "1.55.0";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -1151,8 +1151,11 @@ try {
             const emo = String(args.emotion || "开心");
             const _sk = stickerSessionKey(userId, _extraInfo && _extraInfo.groupId);
             const s = await pickStickerSmart(emo, userText, { sessionKey: _sk });
-            if (s) { stickers.push(s); result = `已记录表情包「${s.label}」（编号 ${s.publicId || s.fname}）`; }
-            else result = "（没有合适的表情包，这次别发了）";
+            if (s) {
+              stickers.push(s);
+              const _hint = s.meaning ? `（这张的含义：${String(s.meaning).slice(0, 40)}${s.usage ? "；适合：" + String(s.usage).slice(0, 24) : ""}。可以顺着含义自然接一句）` : "";
+              result = `已记录表情包「${s.label}」（编号 ${s.publicId || s.fname}）${_hint}`;
+            } else result = "（没有合适的表情包，这次别发了）";
           } else if (tc.function.name === "check_balance") {
             const b = await fetchBalance();
             result = b ? `账户余额 ¥${b.total}（充值 ¥${b.topped} / 赠送 ¥${b.granted}）` : "（余额查询失败）";
@@ -2270,6 +2273,8 @@ function noteStickerSent(sessionKey, sticker) {
     fname: sticker.fname,
     publicId: sticker.publicId || "",
     desc: String(sticker.label || sticker.desc || "").slice(0, 60),
+    meaning: String(sticker.meaning || "").slice(0, 80),
+    usage: String(sticker.usage || "").slice(0, 60),
     risk: sticker.risk || "low",
     allowProactive: !!sticker.allowProactive,
     ts: Date.now(),
@@ -2286,7 +2291,8 @@ function getLastSentSticker(sessionKey) {
 function stickerRefCtx(sessionKey) {
   const e = getLastSentSticker(sessionKey);
   if (!e) return "";
-  return `【刚才发的表情包】你上一条发的是「${e.desc}」（编号 ${e.publicId || e.fname}）。对方说「这张 / 这个」时默认指它；要教它什么意思就直接用编号说。`;
+  const _m = e.meaning ? `这张图的含义是「${e.meaning}」${e.usage ? "，适合：" + e.usage : ""}。` : "";
+  return `【刚才发的表情包】你上一条发的是「${e.desc}」（编号 ${e.publicId || e.fname}）。${_m}对方说「这张 / 这个」时默认指它；要教它什么意思就直接用编号说。`;
 }
 function bumpStickerUsed(sticker) {
   try { const a = host && host.apis.get("stickers"); if (a && a.bumpMeta && sticker && sticker.fname) a.bumpMeta(sticker.fname, "used"); } catch (e) {}

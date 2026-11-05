@@ -116,6 +116,8 @@ function synthRow(fname, tier) {
     risk: "low", allowProactive: trusted,
     status: trusted ? "verified" : "observed",
     source: trusted ? "builtin" : "auto", manualLocked: false,
+    what: "", textInImage: "", meaning: "", usage: "", tags: [],
+    annotateStatus: "", annotateConfidence: 0,
   };
 }
 
@@ -143,6 +145,13 @@ function scanDir(dir, tier) {
       status: s.status,
       source: s.source,
       manualLocked: s.manualLocked,
+      what: s.what || "",
+      textInImage: s.textInImage || "",
+      meaning: s.meaning || "",
+      usage: s.usage || "",
+      tags: (() => { try { const t = JSON.parse(s.tags || "[]"); return Array.isArray(t) ? t : []; } catch (e) { return []; } })(),
+      annotateStatus: s.annotateStatus || "",
+      annotateConfidence: Number(s.annotateConfidence || 0),
     });
   }
   return out;
@@ -201,13 +210,29 @@ const EMOTION_STICKER_KW = {
 };
 const BAD_LABEL = /早上好|早安|晚安|中午好|下午好|晚上好|早/;
 
-/* 按情绪取候选：先按语义库的 mood_tag 精确命中，再退回文本关键词 */
+/* 语义文本：给召回/精排用的一句话「画面+图上字+含义+场景」 */
+function semanticHaystack(s) {
+  const tags = Array.isArray(s.tags) ? s.tags.join(" ") : String(s.tags || "");
+  return [s.label, s.what, s.textInImage, s.meaning, s.usage, tags].filter(Boolean).join(" ");
+}
+function semanticLine(s) {
+  const parts = [];
+  if (s.what) parts.push("画面：" + s.what);
+  if (s.textInImage) parts.push("图上字：" + s.textInImage);
+  if (s.meaning) parts.push("含义：" + s.meaning);
+  if (s.usage) parts.push("场景：" + s.usage);
+  const line = parts.join("；");
+  return line || String(s.label || "").slice(0, 60);
+}
+
+/* 按情绪取候选：先按语义库的 mood_tag 精确命中，再退回语义/文本关键词 */
 function candidatesByEmotion(emotionName) {
   const kw = EMOTION_STICKER_KW[emotionName] || [emotionName];
   return listStickers().filter((s) => {
     if (BAD_LABEL.test(String(s.label || ""))) return false;
     if (s.mood === emotionName) return true;
-    return kw.some((k) => String(s.label || "").includes(k));
+    const hay = semanticHaystack(s);
+    return kw.some((k) => hay.includes(k));
   });
 }
 
@@ -246,6 +271,8 @@ async function pickStickerSmart(emotionName, contextText, opts) {
   let pool = candidatesByEmotion(emotionName);
   if (explicit) pool = pool.filter(canExplicit);
   else pool = pool.filter(canProactive);
+  /* 语义标注低置信的：不主动发（被点名时仍可发） */
+  if (!explicit) pool = pool.filter((s) => s.annotateStatus !== "low_conf");
 
   const recent = sessionKey ? recentFnames(sessionKey) : [];
   let deduped = pool.filter((s) => !recent.includes(s.fname));
@@ -255,14 +282,15 @@ async function pickStickerSmart(emotionName, contextText, opts) {
 
   const info = { emotion: emotionName, scene: o.scene || "" };
   const ranked = deduped.slice().sort((a, b) => scoreSticker(b, info) - scoreSticker(a, info));
-  const top = ranked.slice(0, 6);
+  const poolN = Math.max(4, cfgNum("stickers.rank_pool", 8));
+  const top = ranked.slice(0, poolN);
   if (top.length === 1) return top[0];
 
   const affordable = !_ctx.canAfford || _ctx.canAfford("low");
   if (!affordable) return top[Math.floor(Math.random() * top.length)];
   try {
-    const lines = top.map((s, i) => `${i + 1}. [${s.publicId}] ${String(s.label || "").slice(0, 40)}`).join("\n");
-    const prompt = `你刚要回应：「${String(contextText || "").slice(0, 100)}」\n此刻情绪是「${emotionName}」。\n从下面表情包里挑一张最贴切这张脸/这句话的，只输出序号数字，不要解释：\n${lines}`;
+    const lines = top.map((s, i) => `${i + 1}. [${s.publicId}] ${semanticLine(s)}`).join("\n");
+    const prompt = `你刚要回应：「${String(contextText || "").slice(0, 100)}」\n此刻情绪是「${emotionName}」。\n下面每张表情包都标了「画面 / 图上字 / 含义 / 场景」。请挑一张最贴切这句话和情绪的，只输出序号数字，不要解释：\n${lines}`;
     const raw = await _ctx.completeOnce([{ role: "user", content: prompt }], _ctx.settings(), 10, 0.3);
     const n = parseInt(String(raw || "").replace(/[^\d]/g, ""), 10);
     if (n >= 1 && n <= top.length) return top[n - 1];
@@ -548,7 +576,8 @@ module.exports = {
     stickers: {
       stickerPrompt, parseStickerMarkers, pickStickerByEmotion, pickStickerSmart, candidatesByEmotion,
       pickForText, maybeCollect, pickStickerByIds, generateStickerImage, listStickers, listAll,
-      setLastMeaning, teachSticker, resolveStickerTarget, recordSent, recentFnames,
+      semanticLine, semanticHaystack,
+    setLastMeaning, teachSticker, resolveStickerTarget, recordSent, recentFnames,
       canProactive, canExplicit, getLastCollected, maintain, stickerStats,
       store: () => store,
     },

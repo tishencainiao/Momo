@@ -1,6 +1,6 @@
 # 0004 · 表情包语义理解（画面 / 文字 / 梗 / 场景）
 
-- 状态：v1 已落地（2026-11-05），v2/v3 待做
+- 状态：v1 已落地（2026-11-05），v2 已落地（2026-11-05），v3 待做
 - 相关：`sticker-store.js`、`plugins/stickers.js`、`scripts/annotate-stickers.js`、`docs/decisions/0002-sticker-semantic-store.md`
 
 ## 背景
@@ -24,6 +24,15 @@
 - 耗时 236 秒；Token 入 51567 / 出 11734 ≈ ¥0.1（按 budget 单价估算）
 - 质量抽样：能准确读出图上文字（含长截图里的多行字），含义/场景判断合理；低置信条目会自动标 low_conf 不进主动发
 - 未做：挑图仍走旧逻辑（v2）、收图未用标注（v3）
+
+## v2 实测（2026-11-05）
+
+- `candidatesByEmotion` 改为语义召回：情绪「傲娇」召回 24 张，全部带标注
+- `pickStickerSmart` prompt 已是「画面 / 图上字 / 含义 / 场景」四行，候选池默认 8（`stickers.rank_pool`）
+- `low_conf` 条目不参与主动发；被点名仍可发
+- `send_sticker` 结果附「这张的含义/场景」，模型可顺势接一句；`stickerRefCtx` 也带含义
+- 新增 `test/sticker-semantic.js`（4 断言），42 个测试文件全过
+- 未做：收图接话与增量标注（v3）
 
 ## 验证方式（v2 起）
 
