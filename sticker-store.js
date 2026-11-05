@@ -62,6 +62,16 @@ const DEFAULT_ROW = {
   manual_locked: 0,
   scope: "public",
   group_id: "",
+  /* 语义标注（v1.54.0 表情包理解）：画面/图上文字/梗/适用场景/标签/置信度 */
+  what: "",
+  text_in_image: "",
+  meaning: "",
+  usage: "",
+  tags: "",
+  annotate_confidence: 0,
+  annotated_at: 0,
+  annotate_model: "",
+  annotate_status: "",
   used: 0,
   matched: 0,
   last_used: 0,
@@ -109,7 +119,25 @@ function init(file) {
   );`);
   db.exec("CREATE INDEX IF NOT EXISTS idx_sends ON sends(session_key, ts);");
   db.exec("CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);");
+  migrateStickerSchema();
   return db;
+}
+
+/* 幂等迁移：给已有的 stickers 表补语义标注列（旧库/旧行为零影响） */
+const EXTRA_COLUMNS = [
+  ["what", "TEXT"], ["text_in_image", "TEXT"], ["meaning", "TEXT"], ["usage", "TEXT"],
+  ["tags", "TEXT"], ["annotate_confidence", "REAL"], ["annotated_at", "INTEGER"],
+  ["annotate_model", "TEXT"], ["annotate_status", "TEXT"],
+];
+function migrateStickerSchema() {
+  try {
+    const cols = new Set(db.prepare("PRAGMA table_info(stickers)").all().map((c) => c.name));
+    let added = 0;
+    for (const [n, t] of EXTRA_COLUMNS) {
+      if (!cols.has(n)) { db.exec(`ALTER TABLE stickers ADD COLUMN ${n} ${t}`); added++; }
+    }
+    return added;
+  } catch (e) { return 0; }
 }
 function ready() { return !!db; }
 function close() { try { if (db) db.close(); } catch (e) {} db = null; }
@@ -163,6 +191,15 @@ function rowToSticker(r) {
     addedAt: Number(r.added_at || 0),
     reverifyAfter: Number(r.reverify_after || 0),
     updatedAt: Number(r.updated_at || 0),
+    what: r.what || "",
+    textInImage: r.text_in_image || "",
+    meaning: r.meaning || "",
+    usage: r.usage || "",
+    tags: r.tags || "",
+    annotateConfidence: Number(r.annotate_confidence || 0),
+    annotatedAt: Number(r.annotated_at || 0),
+    annotateModel: r.annotate_model || "",
+    annotateStatus: r.annotate_status || "",
   };
 }
 
@@ -195,8 +232,10 @@ function upsert(fname, patch) {
     db.prepare(`INSERT INTO stickers (
         fname, public_id, tier, desc_, mood_tag, scene_tag, risk, allow_proactive,
         source, status, confidence, source_count, manual_locked, scope, group_id,
-        used, matched, last_used, added_at, reverify_after, updated_at
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        used, matched, last_used, added_at, reverify_after, updated_at,
+        what, text_in_image, meaning, usage, tags, annotate_confidence, annotated_at,
+        annotate_model, annotate_status
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(fname) DO UPDATE SET
         public_id=excluded.public_id, tier=excluded.tier, desc_=excluded.desc_,
         mood_tag=excluded.mood_tag, scene_tag=excluded.scene_tag, risk=excluded.risk,
@@ -205,13 +244,20 @@ function upsert(fname, patch) {
         manual_locked=excluded.manual_locked, scope=excluded.scope, group_id=excluded.group_id,
         used=excluded.used, matched=excluded.matched, last_used=excluded.last_used,
         added_at=excluded.added_at, reverify_after=excluded.reverify_after,
-        updated_at=excluded.updated_at`)
+        updated_at=excluded.updated_at,
+        what=excluded.what, text_in_image=excluded.text_in_image, meaning=excluded.meaning,
+        usage=excluded.usage, tags=excluded.tags, annotate_confidence=excluded.annotate_confidence,
+        annotated_at=excluded.annotated_at, annotate_model=excluded.annotate_model,
+        annotate_status=excluded.annotate_status`)
       .run(
         fn, next.publicId, next.tier, next.desc, next.mood_tag, next.scene_tag, next.risk,
         next.allowProactive ? 1 : 0, next.source, next.status, Number(next.confidence) || 0,
         Number(next.sourceCount) || 0, next.manualLocked ? 1 : 0, next.scope, next.groupId || "",
         Number(next.used) || 0, Number(next.matched) || 0, Number(next.lastUsed) || 0,
-        Number(next.addedAt) || 0, Number(next.reverifyAfter) || 0, next.updatedAt
+        Number(next.addedAt) || 0, Number(next.reverifyAfter) || 0, next.updatedAt,
+        next.what || "", next.textInImage || "", next.meaning || "", next.usage || "",
+        next.tags || "", Number(next.annotateConfidence) || 0, Number(next.annotatedAt) || 0,
+        next.annotateModel || "", next.annotateStatus || ""
       );
     return get(fn);
   } catch (e) { return null; }
@@ -430,7 +476,7 @@ module.exports = {
   addAuto, applyManual, nextStatus,
   recordSend, recentSends, lastSendTs,
   getKV, setKV,
-  migrate,
+  migrate, migrateStickerSchema, EXTRA_COLUMNS,
   publicIdOf, riskFromText, inferMoodFromText, inferSceneFromText, labelFromFname,
   MOOD_TAGS, SCENE_TAGS, STATUSES, PROACTIVE_STATUSES, RISKS, TIERS, SOURCES, THRESHOLDS,
   _peek: () => db,
