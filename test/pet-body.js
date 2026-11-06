@@ -8,6 +8,8 @@ const path = require("path");
 const http = require("http");
 
 const ROOT = path.join(__dirname, "..");
+const os = require("os");
+process.env.MOMO_BODY_EVENTS = path.join(os.tmpdir(), "momo-body-events-test.jsonl");
 const plugin = require(path.join(ROOT, "plugins", "pet-body.js"));
 
 let pass = 0, fail = 0;
@@ -209,7 +211,7 @@ const tool = (n) => plugin.tools.find((t) => t.def.function.name === n);
   check("里面有前台程序", /Code/.test(ctxText), ctxText);
   check("刚点过也会写进去", /点了你一下/.test(ctxText), ctxText);
 
-  const eventsFile = path.join(ROOT, "data", "body-events.jsonl");
+  const eventsFile = process.env.MOMO_BODY_EVENTS;
   const evLines = fs.existsSync(eventsFile) ? fs.readFileSync(eventsFile, "utf8").trim().split("\n") : [];
   check("感官事件落盘到 data/body-events.jsonl", evLines.length >= 3, String(evLines.length));
   check("落盘的事件带 event 字段", evLines.slice(-3).every((l) => JSON.parse(l).event), evLines.slice(-1)[0]);

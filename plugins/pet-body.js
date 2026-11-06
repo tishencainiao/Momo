@@ -83,7 +83,8 @@ function offlineHint() {
  * 这里维护一份最新快照 + 落 data/body-events.jsonl，再通过 contextProvider 注入提示词。
  */
 const DATA_DIR = () => path.join(__dirname, "..", "data");
-const EVENTS_FILE = () => path.join(DATA_DIR(), "body-events.jsonl");
+// 测试可用 MOMO_BODY_EVENTS 指到临时文件，避免污染真实 data/
+const EVENTS_FILE = () => process.env.MOMO_BODY_EVENTS || path.join(DATA_DIR(), 'body-events.jsonl');
 const sense = {
   presence: "unknown", idle_s: null, foreground: null, locked: false,
   lastClickAt: 0, lastDropAt: 0, lastDrop: null, lastSayAt: 0, lastLook: null,
