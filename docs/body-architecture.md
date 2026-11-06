@@ -27,7 +27,9 @@ body/
 ├── main.py            启动入口（--selftest / --scale；单实例；托盘接线）
 ├── pet_app.py         透明置顶窗：绘制、拖拽、右键菜单、大小档位、位置记忆
 ├── anim.py            frameseq 扫描 + Clip + 按 fps 推进的 Player
-├── sound.py           音效（winsound + 内存缩放音量，后台线程顺序播放）
+├── sound.py           音效（QSoundEffect 低延迟；无 QtMultimedia 时降级 winsound）
+├── netapi.py          本地接口：HTTP 指令 + SSE 事件 + token 鉴权
+├── bubble.py          头顶说话气泡（圆角 + 小尖角 + 自动消失）
 ├── tray.py            系统托盘：状态显示 + 显示/隐藏/重启身体 + 重启/停止大脑 + 音效 + 日志
 ├── bodyicon.py        从 idle 帧生成多尺寸 .ico（纯 Qt，无 Pillow）
 ├── cfg.py             默认配置 + body/config.json 覆盖 + data/body-state.json 状态
@@ -78,22 +80,34 @@ python body\main.py
 | `volume` | 70 | 点击音效音量 0~100 |
 | `mute` | false | 静音（托盘可切） |
 | `frameseq_dir` | frameseq | 换成 `frameseq-hi` 即用高清帧 |
-| `port` | 4010 | v0.2 本地接口用 |
+| `port` | 4010 | 本地接口端口（占用时自动往后找） |
+| `api_enabled` | true | 关掉就只显示、不接受任何指令 |
 
 运行时状态（位置/缩放）写 `data/body-state.json`；日志写 `data/body.log`。
 
-## 6. 交互（v0.1.3）
+## 6. 交互（v0.2）
 
 | 操作 | 效果 |
 |---|---|
 | 左键拖拽 | 跟手移动，松手记住位置 |
 | 左键单击 | 随机播一段「点击回应」动画 + 播 `click.wav`，同时身体**Q 弹挤压**一下（横向鼓、纵向压，脚底不动），播完回待机 |
+| 大脑指令 | `say` 说任意话（气泡+说话动画）/ `play` 点播动画 / `state` 待机或睡觉 / `move` 移动 / `show`·`hide` 显隐 / `scale` 改大小 |
 | 双击 | 随机小剧场（random 类 89 段之一） |
 | 右键 | 点播动作（random/click/turn/move/drag）· 大小三档 + ±0.05 · 鼠标穿透 · 回到右下角 · 隐藏身体 · 退出身体 |
 | 托盘左键 | 显示/隐藏切换 |
 | 托盘右键 | 状态行（大脑 PID/守护在不在、身体显隐）· 显示/隐藏身体 · 重启身体 · 重启大脑 · 停止大脑（含守护，二次确认）· 音效（静音 / 40% / 70% / 100%）· 查看日志 · 退出身体 |
 
-## 7. 点击 Q 弹（squash & stretch）
+## 7. 本地接口（v0.2 起）
+
+大脑指挥身体走的是**本机 HTTP + SSE**（默认 127.0.0.1:4010，token 在 ody/body-token）：
+
+- POST /cmd/say|play|state|move|show|hide|scale —— 指令，入队后立刻返回，具体动作在 GUI 线程执行；
+- GET /status —— 快照（状态/动画/显隐/大小/位置/最近说的话）；
+- GET /events —— SSE 事件流（点击、拖拽、显隐、换动画、说话…），v0.4 起回流给大脑做记忆与情绪输入。
+
+完整契约（含字段与示例）见 [body-api.md](body-api.md)；大脑侧客户端是 plugins/pet-body.js（6 个工具 + /身体 命令，仅主人可用，超时 2.5s，离线给可操作提示）。
+
+## 8. 点击 Q 弹（squash & stretch）
 
 - 触发：左键按下瞬间（`mousePressEvent`）以及拖动落地（强度 0.65）；不再等松手，手感更跟手。
 - 曲线：总时长 `squash_duration_ms`（320ms），前 25% 用 ease-out 压到位，之后 `(1-u)·cos(1.6πu)` 回弹并轻微过冲（负值＝拉长），所以会有「压扁 → 弹高 → 归位」三段。
@@ -101,21 +115,21 @@ python body\main.py
 - 实测（离屏逐帧量 bbox）：静止 84×107 → 60ms 时 98×85（+17% 宽 / −21% 高）→ 230ms 时 80×114（回弹拉长）→ 330ms 归位 84×107，底边始终在 131 附近。
 - 关掉：`body/config.json` 里 `"squash_enabled": false`。
 
-## 8. 音效
+## 9. 音效
 - 文件：`body/assets/sounds/click.wav`（点击）、`agent/{start,done,error}.wav`（v0.3 起给状态用）、`duck/*.mp3`（预留，QSoundEffect 播不了 mp3）。
 - **后端：QSoundEffect（PySide6-Addons 里的 QtMultimedia）**——Qt 内部维护常驻音频输出，设备只开一次，点击即出声；自带 0~1 音量与多路混音。启动时 `preload()` 把 click + agent 音效都加载就绪，避免第一次点击还在开设备。
 - **为什么换掉 winsound（2026-11-06 实测）**：这段 160ms 的点击音，`winsound.PlaySound` 一次调用要阻塞约 **970ms**（大头是每次重新打开音频设备 + 系统音频栈里的 FxSound / 虚拟声卡）；本机 MCI 常驻通道也要 418~597ms。入队到真正调播放只花 0.5ms，所以延迟不在我们的线程/队列上。
 - **降级**：只装了 PySide6-Essentials 的机器上 `import QtMultimedia` 失败，会自动退回 winsound 后端（功能不中断，只是延迟高）——日志里会打 `音效后端=winsound`。
 - **坑**：winsound 不允许「内存 + 异步」同时用（`Cannot play asynchronously from memory`），所以降级后端只能后台线程同步播；QSoundEffect 则没有这个限制。
 
-## 9. 托盘与大脑控制（安全口径）
+## 10. 托盘与大脑控制（安全口径）
 
 - 找进程**按命令行匹配**，不按进程名：大脑必须是 `node.exe` 且命令行含 `Momo\index.js`；守护必须是 `powershell.exe` 且含 `-File ...supervise.ps1`；并且都要排除「正在跑查询的 powershell 自己」（`$_.ProcessId -ne $PID`）。
 - **重启大脑 = 停守护 → 杀 node → 起一个守护**（不是「只杀不拉」）。原因：机器上可能有多个 `supervise.ps1`（手动 + 自启），只杀 node 会让它们同时拉起、抢 3999 端口。
 - **停止大脑**会连守护一起停（否则杀了立刻被拉起），操作前二次确认。
 - 实测（2026-11-06）：重启后 2 秒新 node 起来，`bridge.log` 出现「OneBot WS 已连接 / Bot 上线」。
 
-## 10. 动画与素材
+## 11. 动画与素材
 
 - 101 段，7 类：`idle 1 / click 5 / drag 1 / events 1（balance 6 段）/ move 3 / random 89 / turn 1`，共 25,529 帧，24fps，每段约 241 帧（10s）。
 - 帧序列已由上游解码好（webp，**640×360 画布**；角色在画布中约占 220×270，四周是透明留白，方便放道具/特效），运行时**不需要 ffmpeg**。
@@ -124,7 +138,7 @@ python body\main.py
 
 > **DPI 踩坑（2026-11-06 实测）**：这台机器屏幕是 1920×1080、Windows 缩放 125%，Qt 的逻辑坐标是 1536×864（devicePixelRatio=1.25）。用 DPI 未感知的进程（如部分 PowerShell 会话）截图，拿到的是被系统虚拟化过的画面，看起来像是「身体被裁掉/位置偏移」——**其实是截图的锅**。要核对显示效果，用 `QScreen.grabWindow(0)` 在 Qt 进程里截，得到的是真实 1920×1080 画面。
 
-## 11. 自检口径
+## 12. 自检口径
 
 `python body/main.py --selftest`（offscreen，不弹窗，24 项断言）：
 
@@ -134,6 +148,6 @@ python body\main.py
 4. **配置**：scale / fps_cap / port / 三档升序合法；
 5. **音效与图标**：click.wav 在、音量上下夹紧、静音不出声、能生成多尺寸 .ico（ICO 头校验）。
 
-## 12. 后续批次
+## 13. 后续批次
 
 见 [body-roadmap.md](body-roadmap.md)（v0.2 接口 → v0.8 运维）与主 CHANGELOG。

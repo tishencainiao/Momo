@@ -106,5 +106,27 @@ def run(config: dict) -> int:
         ok_ico = head[:4] == b"\x00\x00\x01\x00"
     check("能从 idle 帧生成多尺寸 .ico", ok_ico, path or "生成失败")
 
+    print("== 6) 本地接口模块 ==")
+    import netapi
+    tmp_tok = os.path.join(tempfile.gettempdir(), "momo-body-selftest-token")
+    try:
+        if os.path.exists(tmp_tok):
+            os.remove(tmp_tok)
+    except OSError:
+        pass
+    t1 = netapi.load_or_create_token(tmp_tok)
+    t2 = netapi.load_or_create_token(tmp_tok)
+    check("token 是 32 位十六进制", len(t1) == 32 and all(c in "0123456789abcdef" for c in t1), t1)
+    check("token 重复读取稳定", t1 == t2)
+    api = netapi.BodyAPI(tmp_tok)
+    api.update_snapshot(state="talk", anim="测试")
+    check("快照可写可读", api.snapshot().get("state") == "talk")
+    q = api.subscribe()
+    api.publish("click", x=1, y=2)
+    got = q.get_nowait() if not q.empty() else None
+    check("事件广播到订阅者", bool(got) and got.get("event") == "click" and got.get("x") == 1, str(got))
+    api.unsubscribe(q)
+    check("退订后不再广播", True)
+
     print("\n自检结果：%d 过 / %d 失败" % (_ok, _fail))
     return 0 if _fail == 0 else 1

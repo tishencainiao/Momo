@@ -99,9 +99,23 @@ def main(argv=None) -> int:
         return code
 
     import bodyicon
+    import netapi
+    import queue as queue_mod
     import sound as sound_mod
+    from PySide6.QtCore import QTimer
     from pet_app import PetWindow
     from tray import BodyTray
+
+    # 本地接口（HTTP 指令 + SSE 事件）：大脑通过它指挥身体
+    api = None
+    if config.get("api_enabled", True):
+        api = netapi.BodyAPI(os.path.join(BODY_DIR, "body-token"), log=log)
+        ok, info = api.start(port=int(config.get("port") or 4010))
+        if ok:
+            log("本地接口已就绪：http://127.0.0.1:%d（token 在 body/body-token）" % info)
+        else:
+            log("本地接口启动失败：%s（身体照常显示，只是大脑连不上）" % info)
+            api = None
 
     icon_path = ""
     try:
@@ -122,7 +136,27 @@ def main(argv=None) -> int:
         log("音效后端=%s，预加载就绪 %d 个" % (player.backend, ready))
 
     try:
-        win = PetWindow(config, sound=player)
+        win = PetWindow(config, sound=player, api=api)
+
+        # 指令队列：HTTP 线程只入队，这里在 GUI 线程执行
+        if api is not None:
+            drain = QTimer(win)
+            drain.setInterval(80)
+
+            def _drain():
+                for _ in range(8):
+                    try:
+                        item = api.commands.get_nowait()
+                    except queue_mod.Empty:
+                        break
+                    try:
+                        res = win.handle_command(item.get("cmd"), item.get("payload") or {})
+                    except Exception as exc:
+                        res = {"ok": False, "error": str(exc)}
+                    log("指令 %s -> %s" % (item.get("cmd"), res))
+
+            drain.timeout.connect(_drain)
+            drain.start()
         tray = None
         if QSystemTrayIcon.isSystemTrayAvailable():
             tray = BodyTray(win, player, icon_path)

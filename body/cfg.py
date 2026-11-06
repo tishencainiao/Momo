@@ -30,7 +30,8 @@ DEFAULTS = {
     "squash_enabled": True,          # 点击 Q 弹挤压（像被戳了一下的软体）
     "squash_duration_ms": 320,       # 一次挤压+回弹的总时长
     "click_through": False,          # 整窗鼠标穿透（右键菜单可切）
-    "port": 4010,                    # v0.2 起用（本地接口）
+    "port": 4010,                    # 本地接口端口（v0.2 起）
+    "api_enabled": True,             # 关掉就只显示、不接受任何指令
     "log_level": "info",
 }
 

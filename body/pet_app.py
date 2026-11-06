@@ -47,13 +47,16 @@ def _assert_topmost(hwnd: int) -> None:
 
 
 class PetWindow(QWidget):
-    def __init__(self, config: dict, sound=None):
+    def __init__(self, config: dict, sound=None, api=None):
         super().__init__()
         self.cfg = config
         self.sound = sound
+        self.api = api                      # BodyAPI（v0.2 起可用）；None 表示纯本地跑
+        self.bubble = None
         self.hide_on_close = False          # 有托盘时：关窗=隐藏，不是退出
         self._quitting = False
         self._log = config.get("_log") or (lambda _m: None)
+        self._last_moved_at = 0.0
         self.scale = float(config.get("scale") or 1.0)
         self.clips = scan_clips(config.get("assets_dir") or "",
                                 config.get("frameseq_dir") or "frameseq")
@@ -108,6 +111,13 @@ class PetWindow(QWidget):
     def showEvent(self, event) -> None:                            # noqa: N802
         super().showEvent(event)
         self._keep_on_top()
+        self._snap(visible=True)
+        self._publish("visibility", visible=True)
+
+    def hideEvent(self, event) -> None:                            # noqa: N802
+        super().hideEvent(event)
+        self._snap(visible=False)
+        self._publish("visibility", visible=False)
 
     # ---------- 片段挑选 ----------
     def _cat(self, name: str):
@@ -123,6 +133,8 @@ class PetWindow(QWidget):
         if self.idle_clip is None:
             return
         self.player.play(self.idle_clip, loop=True)
+        self._publish("anim", name=self.idle_clip.key, category="idle")
+        self._snap(state="idle", anim=self.idle_clip.key)
 
     def _play_once(self, clip) -> None:
         if clip is None:
@@ -130,6 +142,126 @@ class PetWindow(QWidget):
             return
         self._after_key = "idle"
         self.player.play(clip, loop=False)
+        self._publish("anim", name=clip.key, category=clip.category)
+        self._snap(anim=clip.key)
+
+    # ---------- 对外接口（供 HTTP 指令调用，均在本体线程执行） ----------
+    def _publish(self, event: str, **data) -> None:
+        if self.api is not None:
+            try:
+                self.api.publish(event, **data)
+            except Exception:
+                pass
+
+    def _snap(self, **data) -> None:
+        if self.api is not None:
+            try:
+                data.setdefault("visible", self.isVisible())
+                data.setdefault("scale", round(self.scale, 3))
+                data.setdefault("pos", [self.x(), self.y()])
+                self.api.update_snapshot(**data)
+            except Exception:
+                pass
+
+    def find_clip(self, needle: str):
+        """按名字片段找片段（跨分类），找不到返回 None。"""
+        needle = str(needle or "").strip()
+        if not needle:
+            return None
+        for items in self.clips.values():
+            for clip in items:
+                if clip.key == needle:
+                    return clip
+        for items in self.clips.values():
+            for clip in items:
+                if needle in clip.key:
+                    return clip
+        return None
+
+    def say(self, text: str, duration_ms: int = 5000) -> None:
+        from bubble import SpeechBubble
+
+        if self.bubble is None:
+            self.bubble = SpeechBubble()
+        self.bubble.show_text(text, self, duration_ms)
+        # 说话时配一段「碎碎念/说话」类动画，没有就随机来一段
+        clip = self.find_clip("碎碎念") or self.find_clip("是啊，吃什么") or self._pick("random")
+        if clip is not None:
+            self._after_key = "idle"
+            self.player.play(clip, loop=False)
+            self._publish("anim", name=clip.key, category=clip.category)
+        self._snap(state="talk", anim=(clip.key if clip else ""), last_say=str(text)[:80])
+        self._publish("say", text=str(text)[:200])
+
+    def handle_command(self, cmd: str, payload: dict) -> dict:
+        """执行一条来自 HTTP 的指令；返回执行结果（GUI 线程内调用）。"""
+        payload = payload or {}
+        if cmd == "say":
+            text = str(payload.get("text") or "").strip()
+            if not text:
+                return {"ok": False, "error": "empty text"}
+            self.say(text, int(payload.get("duration_ms") or 5000))
+            return {"ok": True, "said": text[:80]}
+
+        if cmd == "play":
+            clip = None
+            if payload.get("name"):
+                clip = self.find_clip(payload["name"])
+            if clip is None and payload.get("category"):
+                clip = self._pick(str(payload["category"]))
+            if clip is None:
+                clip = self._pick("random")
+            if clip is None:
+                return {"ok": False, "error": "no clip"}
+            self._play_once(clip)
+            return {"ok": True, "anim": clip.key, "category": clip.category}
+
+        if cmd == "state":
+            state = str(payload.get("state") or "idle").lower()
+            if state in ("idle", ""):
+                self._play_idle()
+            elif state == "talk":
+                self.say(payload.get("text") or "嗯？", int(payload.get("duration_ms") or 4000))
+            elif state in ("sleep", "sleeping"):
+                clip = self.find_clip("小憩") or self.find_clip("沉眠") or self.idle_clip
+                if clip is not None:
+                    self.player.play(clip, loop=True)
+                    self._snap(state="sleep", anim=clip.key)
+                    self._publish("state", state="sleep")
+            else:
+                return {"ok": False, "error": "unknown state"}
+            self._snap(state=("talk" if state == "talk" else state))
+            return {"ok": True, "state": state}
+
+        if cmd == "move":
+            dx = int(payload.get("dx") or 0)
+            dy = int(payload.get("dy") or 0)
+            if "to_x" in payload or "to_y" in payload:
+                nx = int(payload.get("to_x", self.x()))
+                ny = int(payload.get("to_y", self.y()))
+                self.move(nx, ny)
+            else:
+                self.move(self.x() + dx, self.y() + dy)
+            self._save_geometry()
+            self._snap()
+            self._publish("moved", x=self.x(), y=self.y())
+            return {"ok": True, "x": self.x(), "y": self.y()}
+
+        if cmd in ("show", "hide"):
+            if cmd == "show":
+                self.show()
+                self._keep_on_top()
+            else:
+                self.hide()
+            self._snap(visible=self.isVisible())
+            self._publish("visibility", visible=self.isVisible())
+            return {"ok": True, "visible": self.isVisible()}
+
+        if cmd == "scale":
+            self._set_scale(float(payload.get("scale") or self.scale))
+            return {"ok": True, "scale": self.scale}
+
+        return {"ok": False, "error": "unknown command: %s" % cmd}
 
     def _on_clip_finished(self, key: str) -> None:
         # 一次性动画播完回待机
@@ -236,6 +368,8 @@ class PetWindow(QWidget):
         if self._drag_moved:
             self._save_geometry()
             self._kick_squash(0.65)      # 拖动落地也弹一下
+            self._publish("drag_end", x=self.x(), y=self.y())
+            self._snap()
         elif self.cfg.get("click_response", True):
             self._play_once(self._pick("click"))
             played = self.sound.play("click") if self.sound is not None else False
@@ -243,6 +377,7 @@ class PetWindow(QWidget):
             if self.sound is not None and hasattr(self.sound, "debug_state"):
                 detail = " / " + self.sound.debug_state("click")
             self._log("身体被点了一下（音效%s）%s" % ("响" if played else "静音/无设备", detail))
+            self._publish("click", x=self.x(), y=self.y(), sound=bool(played))
         event.accept()
 
     def mouseDoubleClickEvent(self, event) -> None:                 # noqa: N802
@@ -313,6 +448,8 @@ class PetWindow(QWidget):
         self.setFixedSize(int((native.width() if native else 640) * self.scale),
                           int((native.height() if native else 360) * self.scale))
         self._save_geometry()
+        self._snap(scale=round(self.scale, 3))
+        self._publish("scale", scale=round(self.scale, 3))
         self.update()
 
     def _toggle_click_through(self, checked: bool) -> None:
