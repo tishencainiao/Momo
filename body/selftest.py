@@ -146,5 +146,25 @@ def run(config: dict) -> int:
         shot = sn.capture()
         check("截图能生成文件", bool(shot.get("ok")) and os.path.exists(shot.get("path", "")), str(shot))
 
+    print("== 8) 物理（v0.5） ==")
+    import physics as ph
+    sp = ph.walk_speed_px_s(240, 241, 24.0)
+    check("走路速度按 stride/frames*fps 算（240px/241帧/24fps≈23.9）", abs(sp - 23.9) < 0.5, "%.2f" % sp)
+    check("速度参数为 0 时不炸", ph.walk_speed_px_s(0, 241, 24) == 0.0)
+    x, y, vx, vy, on_ground, bounced = ph.step_free(100, 100, 300, 0, 0.016, (0, 0, 500, 400))
+    check("自由飞会受重力（vy 变大）", vy > 0, "vy=%.1f" % vy)
+    check("有水平位移", x > 100, "x=%.1f" % x)
+    x, y, vx, vy, on_ground, bounced = ph.step_free(100, 500, 0, 200, 0.016, (0, 0, 500, 400))
+    check("撞到地面会停住并标记 on_ground", on_ground and abs(vy) < 0.001, "y=%.1f vy=%.1f" % (y, vy))
+    x, y, vx, vy, _g, bounced = ph.step_free(499, 200, 900, 0, 0.016, (0, 0, 500, 400))
+    check("撞右边界会反弹（vx 反向且衰减）", vx < 0 and bounced, "vx=%.1f" % vx)
+    bx, by = ph.clamp_position(-50, 9999, (10, 20, 400, 300))
+    check("位置被夹在屏幕内", bx == 10 and by == 300, "%s,%s" % (bx, by))
+    check("慢速松手不算甩", not ph.should_throw(100, 50))
+    check("快速松手算甩", ph.should_throw(800, 600))
+    vx, vy = ph.velocity_from_points([(0.0, 100, 100), (0.05, 250, 100)])
+    check("轨迹估速正确（150px/0.05s=3000px/s）", abs(vx - 3000) < 10, "%.0f" % vx)
+    check("朝向跟着位移走", ph.facing_for_dx(-30, 1) == -1 and ph.facing_for_dx(30, -1) == 1)
+
     print("\n自检结果：%d 过 / %d 失败" % (_ok, _fail))
     return 0 if _fail == 0 else 1

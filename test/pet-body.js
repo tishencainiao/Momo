@@ -36,6 +36,11 @@ const ctx = {
     if (ctx._describeThrows) throw new Error("视觉接口炸了");
     return "主人在写代码（VS Code），窗口标题是 index.js";
   },
+  getMood: () => 12,
+  getBoredom: () => 55,
+  getEmotion: () => ({ emotion: "开心", intensity: 0.6 }),
+  addMood: (d) => { ctx._moodDelta = (ctx._moodDelta || 0) + d; },
+  addBoredom: (d) => { ctx._boredomDelta = (ctx._boredomDelta || 0) + d; },
 };
 plugin.init(ctx);
 
@@ -215,6 +220,33 @@ const tool = (n) => plugin.tools.find((t) => t.def.function.name === n);
   const evLines = fs.existsSync(eventsFile) ? fs.readFileSync(eventsFile, "utf8").trim().split("\n") : [];
   check("感官事件落盘到 data/body-events.jsonl", evLines.length >= 3, String(evLines.length));
   check("落盘的事件带 event 字段", evLines.slice(-3).every((l) => JSON.parse(l).event), evLines.slice(-1)[0]);
+
+  console.log("\n[10] 物理与情绪（pet_walk / 情绪同步 / 被点加心情）");
+  seen.length = 0;
+  r = await tool("pet_walk").handler({ dx: -200 }, MASTER);
+  check("pet_walk 打到 /cmd/walk 并说往左", /往左走了/.test(r) && seen.some((s) => s.url === "/cmd/walk"), r);
+  const walkReq = seen.filter((s) => s.url === "/cmd/walk")[0];
+  check("pet_walk 请求体带 dx", !!walkReq && JSON.parse(walkReq.body).dx === -200);
+  r = await tool("pet_walk").handler({}, MASTER);
+  check("pet_walk 缺参数给提示", /往哪边走/.test(r), r);
+
+  ctx._moodDelta = 0;
+  ctx._boredomDelta = 0;
+  plugin.__test.sense._lastClickMood = 0;
+  plugin.__test.handleBodyEvent("click", { x: 1, y: 1 });
+  check("被点一下心情 +2", ctx._moodDelta === 2, String(ctx._moodDelta));
+  check("被点一下无聊 -6", ctx._boredomDelta === -6, String(ctx._boredomDelta));
+  plugin.__test.handleBodyEvent("click", { x: 1, y: 1 });
+  check("20 秒内连点不重复加心情", ctx._moodDelta === 2, String(ctx._moodDelta));
+
+  seen.length = 0;
+  plugin.hooks.timer({ now: Date.now() });
+  await sleep(300);
+  const moodReq = seen.filter((s) => s.url === "/cmd/mood").pop();
+  check("timer 会把心情推给身体", !!moodReq, JSON.stringify(seen.map((s) => s.url)));
+  check("推送内容含 mood/boredom/emotion",
+    !!moodReq && JSON.parse(moodReq.body).mood === 12 && JSON.parse(moodReq.body).boredom === 55
+    && JSON.parse(moodReq.body).emotion === "开心", moodReq && moodReq.body);
 
   server.close();
   await sleep(50);

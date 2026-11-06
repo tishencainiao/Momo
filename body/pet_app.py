@@ -17,6 +17,7 @@ from PySide6.QtGui import QAction, QGuiApplication, QPainter
 from PySide6.QtWidgets import QMenu, QWidget
 
 import cfg
+import physics
 from anim import Player, scan_clips
 
 _HWND_TOPMOST = -1
@@ -108,6 +109,23 @@ class PetWindow(QWidget):
         )
         self.sense.changed.connect(self._on_sense)
         self.setAcceptDrops(True)
+
+        # ---------- 物理 / 移动 / 情绪（v0.5） ----------
+        self._motion = self._load_motion_data()
+        self._facing = 1                       # 1=朝右，-1=朝左
+        self._mode = "idle"                    # idle | walk | throw
+        self._vx = 0.0
+        self._vy = 0.0
+        self._walk_target = None
+        self._drag_points = []
+        self._phys_timer = QTimer(self)
+        self._phys_timer.setInterval(16)
+        self._phys_timer.timeout.connect(self._step_physics)
+        self.mood = {"mood": 0, "boredom": 0, "emotion": ""}
+        self._idle_timer = QTimer(self)
+        self._idle_timer.setInterval(25000)
+        self._idle_timer.timeout.connect(self._maybe_self_play)
+        self._idle_timer.start()
 
         self._restore_geometry()
         self._play_idle()
@@ -345,6 +363,21 @@ class PetWindow(QWidget):
             snap["ok"] = True
             return snap
 
+        if cmd == "mood":
+            m = self.set_mood(payload.get("mood"), payload.get("boredom"), payload.get("emotion"))
+            return {"ok": True, "mood": m}
+
+        if cmd == "walk":
+            dx = int(payload.get("dx") or 0)
+            if not dx:
+                return {"ok": False, "error": "需要 dx（正=右，负=左）"}
+            self.start_walk(dx)
+            return {"ok": True, "target_x": self._walk_target}
+
+        if cmd == "throw":
+            self.throw(float(payload.get("vx") or 0), float(payload.get("vy") or 0))
+            return {"ok": True}
+
         if cmd == "look":
             r = self.sense.capture()
             if r.get("ok"):
@@ -353,6 +386,174 @@ class PetWindow(QWidget):
             return r
 
         return {"ok": False, "error": "unknown command: %s" % cmd}
+
+    # ---------- 物理 / 移动 / 情绪（v0.5） ----------
+    def _load_motion_data(self) -> dict:
+        """读 move_strides.json（每个移动动画一圈位移）与 text_clips.json（不能镜像的片段）。"""
+        import json
+
+        assets = self.cfg.get("assets_dir") or ""
+        data = {"speeds": {}, "no_mirror": set()}
+        try:
+            with open(os.path.join(assets, "move_strides.json"), "r", encoding="utf-8") as fh:
+                strides = json.load(fh) or {}
+            for name, info in strides.items():
+                if not isinstance(info, dict):
+                    continue
+                stride = float(info.get("stride") or 0)
+                clip = self.find_clip(name)
+                if clip is None or stride <= 0:
+                    continue
+                data["speeds"][clip.key] = physics.walk_speed_px_s(stride, clip.count, clip.fps)
+        except Exception as exc:
+            self._log("读取 move_strides 失败：%s" % exc)
+        try:
+            with open(os.path.join(assets, "text_clips.json"), "r", encoding="utf-8") as fh:
+                tc = json.load(fh) or {}
+            for name in tc.get("no_mirror") or []:
+                data["no_mirror"].add(str(name))
+        except Exception:
+            pass
+        return data
+
+    def _move_clip(self):
+        """挑一段可用的移动动画（优先有速度标定的）。"""
+        clips = self._cat("move")
+        if not clips:
+            return None, 0.0
+        for clip in clips:
+            sp = self._motion["speeds"].get(clip.key)
+            if sp:
+                return clip, sp
+        return clips[0], 40.0
+
+    def _bounds(self):
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        area = screen.availableGeometry() if screen else QRect(0, 0, 1280, 720)
+        return physics.screen_bounds(area, self.width(), self.height())
+
+    def start_walk(self, dx: float) -> None:
+        """朝某个方向走一段（dx 像素，负数向左）。"""
+        clip, speed = self._move_clip()
+        if clip is None or abs(dx) < 4:
+            return
+        left, top, right, bottom = self._bounds()
+        target = physics.clamp(self.x() + dx, left, right)
+        if abs(target - self.x()) < 2:
+            return
+        self._walk_target = target
+        self._facing = 1 if dx > 0 else -1
+        self._mode = "walk"
+        self._play_once(clip)
+        self._publish("walk", dx=dx, speed=round(speed, 1))
+        if not self._phys_timer.isActive():
+            self._phys_timer.start()
+
+    def throw(self, vx: float, vy: float) -> None:
+        """被甩出去：抛物线 + 边缘反弹 + 落地摩擦。"""
+        self._mode = "throw"
+        self._vx = float(vx)
+        self._vy = float(vy)
+        self._walk_target = None
+        self._facing = physics.facing_for_dx(vx, self._facing)
+        self._publish("throw", vx=round(vx), vy=round(vy))
+        if not self._phys_timer.isActive():
+            self._phys_timer.start()
+
+    def _step_physics(self) -> None:
+        dt = 0.016
+        if self._mode == "walk":
+            clip, speed = self._move_clip()
+            left, top, right, bottom = self._bounds()
+            step = speed * dt * (1 if self._facing >= 0 else -1)
+            nx = self.x() + step
+            if (self._facing >= 0 and nx >= self._walk_target) or (self._facing < 0 and nx <= self._walk_target):
+                nx = self._walk_target
+                self._walk_target = None
+                self._mode = "idle"
+                self._phys_timer.stop()
+                self._save_geometry()
+                self._play_idle()
+            else:
+                self.move(int(physics.clamp(nx, left, right)), self.y())
+            self._snap(pos=[self.x(), self.y()], facing=self._facing)
+            return
+
+        if self._mode == "throw":
+            bounds = self._bounds()
+            nx, ny, vx, vy, on_ground, bounced = physics.step_free(
+                float(self.x()), float(self.y()), self._vx, self._vy, dt, bounds)
+            self.move(int(nx), int(ny))
+            self._vx, self._vy = vx, vy
+            if bounced:
+                self._publish("bounce", x=int(nx), y=int(ny))
+            if on_ground and abs(vx) < physics.STOP_SPEED and abs(vy) < 1:
+                self._mode = "idle"
+                self._phys_timer.stop()
+                self._save_geometry()
+                self._kick_squash(1.2)
+                self._play_idle()
+                self._publish("land", x=int(nx), y=int(ny))
+            self._snap(pos=[self.x(), self.y()])
+            return
+
+        self._phys_timer.stop()
+
+    # ---------- 情绪 → 动作 ----------
+    def set_mood(self, mood: int = None, boredom: int = None, emotion: str = None) -> dict:
+        if mood is not None:
+            self.mood["mood"] = max(-100, min(100, int(mood)))
+        if boredom is not None:
+            self.mood["boredom"] = max(0, min(100, int(boredom)))
+        if emotion is not None:
+            self.mood["emotion"] = str(emotion)[:12]
+        self._publish("mood", **self.mood)
+        self._snap(mood=self.mood)
+        return dict(self.mood)
+
+    def _pick_click_clip(self):
+        """按当前情绪挑「点击回应」：开心更活泼，生气更傲娇。"""
+        items = self._cat("click")
+        if not items:
+            return None
+        emo = self.mood.get("emotion") or ""
+        want = []
+        if emo in ("开心", "满足", "期待", "撒娇"):
+            want = ["开心", "元气"]
+        elif emo in ("生气", "傲娇", "委屈", "吃醋"):
+            want = ["傲娇", "生气", "害羞"]
+        for key in want:
+            for clip in items:
+                if key in clip.key:
+                    return clip
+        return random.choice(items)
+
+    def _maybe_self_play(self) -> None:
+        """她自己找点事做：无聊度高就更活跃，心情差就更安静。"""
+        if self._mode != "idle" or not self.isVisible():
+            return
+        if self.bubble is not None and self.bubble.isVisible():
+            return
+        boredom = int(self.mood.get("boredom") or 0)
+        mood = int(self.mood.get("mood") or 0)
+        chance = 0.15
+        if boredom >= 60:
+            chance = 0.55
+        elif boredom >= 30:
+            chance = 0.3
+        if mood <= -30:
+            chance *= 0.4
+        if random.random() > chance:
+            return
+        if mood <= -40:                                  # 心情差 → 蔫着
+            clip = self.find_clip("小憩") or self.find_clip("哈欠") or self.find_clip("发呆")
+        elif boredom >= 60:                              # 无聊 → 自己玩
+            clip = self._pick("random")
+        else:
+            clip = self.find_clip("东张西望") or self._pick("random")
+        if clip is not None:
+            self._play_once(clip)
+            self._publish("self_play", anim=clip.key, boredom=boredom)
 
     def _on_clip_finished(self, key: str) -> None:
         # 一次性动画播完回待机
@@ -392,6 +593,11 @@ class PetWindow(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
         painter.setRenderHint(QPainter.Antialiasing, True)
+        # 朝向：朝左就水平镜像（但含文字的片段不镜像，否则字会反着）
+        clip = self.player.clip
+        if self._facing < 0 and clip is not None and clip.key not in self._motion.get("no_mirror", ()):
+            painter.translate(self.width(), 0)
+            painter.scale(-1, 1)
         sq = self._squash_amount()
         if abs(sq) > 0.001:
             # Q 弹：以「脚底中点」为锚点做挤压（横向鼓、纵向压），松开后回弹过冲
@@ -440,15 +646,24 @@ class PetWindow(QWidget):
             self._drag_origin = event.globalPosition().toPoint()
             self._drag_window_origin = self.pos()
             self._drag_moved = False
+            self._drag_points = [(time.perf_counter(), self._drag_origin.x(), self._drag_origin.y())]
+            if self._mode == "walk":          # 被人抓住时先停下
+                self._mode = "idle"
+                self._walk_target = None
+                self._phys_timer.stop()
             self._kick_squash(1.0)         # 按下去的瞬间就压一下，手感立刻回来
             event.accept()
 
     def mouseMoveEvent(self, event) -> None:                       # noqa: N802
         if self._drag_origin is None:
             return
-        delta = event.globalPosition().toPoint() - self._drag_origin
+        pos = event.globalPosition().toPoint()
+        delta = pos - self._drag_origin
         if abs(delta.x()) + abs(delta.y()) > 3:
             self._drag_moved = True
+        self._drag_points.append((time.perf_counter(), pos.x(), pos.y()))
+        if len(self._drag_points) > 6:
+            self._drag_points.pop(0)
         self.move(self._drag_window_origin + delta)
         event.accept()
 
@@ -457,12 +672,18 @@ class PetWindow(QWidget):
             return
         self._drag_origin = None
         if self._drag_moved:
-            self._save_geometry()
-            self._kick_squash(0.65)      # 拖动落地也弹一下
-            self._publish("drag_end", x=self.x(), y=self.y())
-            self._snap()
+            # 松手速度够快 → 甩出去（抛物线 + 反弹）；否则只是放下
+            vx, vy = physics.velocity_from_points(self._drag_points)
+            self._drag_points = []
+            if physics.should_throw(vx, vy):
+                self.throw(vx * 0.75, vy * 0.75)
+            else:
+                self._save_geometry()
+                self._kick_squash(0.65)
+                self._publish("drag_end", x=self.x(), y=self.y())
+                self._snap()
         elif self.cfg.get("click_response", True):
-            self._play_once(self._pick("click"))
+            self._play_once(self._pick_click_clip())
             played = self.sound.play("click") if self.sound is not None else False
             detail = ""
             if self.sound is not None and hasattr(self.sound, "debug_state"):

@@ -29,6 +29,9 @@
 | `POST /cmd/hide` | `{}` | 隐藏身体（进程还在，随时可叫回） |
 | `POST /cmd/scale` | `{"scale":0.4}` | 改大小，夹紧在 0.15~1.0 |
 | `POST /cmd/sense` | `{}` | 返回感官快照：`idle_s` / `presence`(active·away) / `foreground{title,pid,app}` / `locked` / `last_look` |
+| `POST /cmd/walk` | `{"dx":-200}` | 朝 dx 方向走（正=右、负=左），播走路动画、到屏边或到达即停并记住位置 |
+| `POST /cmd/throw` | `{"vx":900,"vy":-700}` | 被甩出去：抛物线 + 四边反弹 + 落地摩擦（一般由鼠标甩动触发，也可手动调） |
+| `POST /cmd/mood` | `{"mood":-30,"boredom":70,"emotion":"无聊"}` | 同步心情/无聊度/情绪，身体据此决定「自己玩还是安静待着」、以及点击回应挑哪种动画 |
 | `POST /cmd/look` | `{}` | 抓一张全屏（缩到 1280 宽存 jpg，只留最近 20 张），返回 `{path,width,height,ts}` |
 
 > 语音链路：`plugins/pet-body.js` 的 `pet_speak` → `voice.synthesizeToFile()`（复用 tts.py 的克隆音色）→ `POST /cmd/speak`。合成放后台，不在回复链路里干等。
@@ -64,6 +67,12 @@
 | `lock` | `locked` | 锁屏/解锁 |
 | `drop` | `files[]` | 往她身上拖了文件（投喂） |
 | `look` | `path,ts` | 被要求看了一眼屏幕 |
+| `walk` | `dx,speed` | 开始走路（含按素材标定算出的速度） |
+| `throw` | `vx,vy` | 被甩出去 |
+| `bounce` | `x,y` | 撞到屏幕边缘反弹 |
+| `land` | `x,y` | 落地停稳 |
+| `mood` | `mood,boredom,emotion` | 心情被同步过来 |
+| `self_play` | `anim,boredom` | 她自己找事做（播了哪段） |
 | `click` | `x,y,sound` | 主人点了她一下 |
 | `drag_end` | `x,y` | 拖拽放下（位置已保存） |
 | `visibility` | `visible` | 显示/隐藏 |

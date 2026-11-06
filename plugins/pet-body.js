@@ -117,7 +117,15 @@ function handleBodyEvent(name, data) {
   }
   else if (name === "foreground") sense.foreground = data;
   else if (name === "lock") sense.locked = !!data.locked;
-  else if (name === "click") sense.lastClickAt = now;
+  else if (name === "click") {
+    sense.lastClickAt = now;
+    // 被摸头也是互动：心情微涨、无聊度下降（20 秒内最多算一次，防连点刷）
+    if (now - (sense._lastClickMood || 0) > 20000) {
+      sense._lastClickMood = now;
+      try { if (_ctx && _ctx.addMood) _ctx.addMood(2); } catch (e) {}
+      try { if (_ctx && _ctx.addBoredom) _ctx.addBoredom(-6); } catch (e) {}
+    }
+  }
   else if (name === "drop") { sense.lastDropAt = now; sense.lastDrop = data.files || []; }
   else if (name === "say") sense.lastSayAt = now;
   else if (name === "look") sense.lastLook = data;
@@ -125,6 +133,7 @@ function handleBodyEvent(name, data) {
 }
 
 let sseStarted = false;
+let lastMoodPush = 0;
 async function startSse() {
   if (sseStarted) return;
   sseStarted = true;
@@ -265,6 +274,29 @@ module.exports = {
     },
   ],
   tools: [
+    {
+      def: toolDef(
+        "pet_walk",
+        "让身体在屏幕上走一段（会播走路动画 + 自动转向，走到屏幕边会停住）。主人说「去那边」「往左挪挪」「走到角落去」时调用。",
+        {
+          dx: { type: "number", description: "走多远：正数向右、负数向左（像素，建议 100~600）" },
+        },
+        ["dx"]
+      ),
+      async handler(args, info) {
+        const why = guard(info);
+        if (why) return why;
+        const dx = Number((args && args.dx) || 0);
+        if (!dx) return "（往哪边走？给我个 dx，负数是往左）";
+        const r = await call("POST", "/cmd/walk", { dx });
+        if (r.status === 200 && r.data && r.data.ok) {
+          record("body_walk", String(dx), true);
+          return "（身体开始" + (dx > 0 ? "往右" : "往左") + "走了）";
+        }
+        record("body_walk", String(dx), false);
+        return offlineHint();
+      },
+    },
     {
       def: toolDef(
         "pet_say",
@@ -538,6 +570,22 @@ module.exports = {
       },
     },
   ],
+  /* 情绪 → 动作（v0.5）：把她此刻的心情同步给身体，身体据此决定「自己玩还是安静待着」。
+   * 5 分钟一次，纯本地调用不花钱。 */
+  hooks: {
+    timer(payload) {
+      const now = (payload && payload.now) || Date.now();
+      if (now - lastMoodPush < 300000) return;
+      lastMoodPush = now;
+      if (!enabled()) return;
+      try {
+        const mood = Math.round(((_ctx.getMood && _ctx.getMood()) || 0));
+        const boredom = Math.round(((_ctx.getBoredom && _ctx.getBoredom()) || 0));
+        const emo = (_ctx.getEmotion && _ctx.getEmotion()) || {};
+        call("POST", "/cmd/mood", { mood, boredom, emotion: (emo && emo.emotion) || "" }).catch(() => {});
+      } catch (e) {}
+    },
+  },
   // 供测试用（不参与运行时逻辑）
   __test: { sense, handleBodyEvent, senseText },
 };
