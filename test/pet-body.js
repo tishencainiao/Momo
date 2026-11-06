@@ -333,6 +333,10 @@ const tool = (n) => plugin.tools.find((t) => t.def.function.name === n);
   check("落盘只留程序名", privLines.some((o) => (o.app || (o.foreground && o.foreground.app)) === "WINWORD.EXE"));
   check("投喂只留文件名", privLines.some((o) => Array.isArray(o.files) && o.files[0] === "私密报告.pdf"),
     JSON.stringify(privLines.filter((o) => o.files)));
+  // 时间戳归一：身体早期发的是秒，落盘要统一成毫秒
+  plugin.__test.handleBodyEvent("self_play", { ts: 1793969412.97, anim: "东张西望" });
+  const lastEv = JSON.parse(fs.readFileSync(process.env.MOMO_BODY_EVENTS, "utf8").trim().split("\n").pop());
+  check("秒级 ts 会自动转成毫秒", lastEv.ts > 1e12, String(lastEv.ts));
   process.env.MOMO_BODY_EVENTS = path.join(os.tmpdir(), "momo-body-events-test.jsonl");
 
   console.log("\n[14] 免打扰（pet_dnd / 播报抑制）");

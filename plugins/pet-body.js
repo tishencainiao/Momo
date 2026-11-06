@@ -225,25 +225,33 @@ function appendEvent(obj) {
   } catch (e) {}
 }
 
+/* 身体早期版本发的是秒级时间戳，统一成毫秒（v1.72.0） */
+function normTs(v, fallback) {
+  const n = Number(v);
+  if (!n || !isFinite(n)) return fallback;
+  return n < 1e12 ? Math.round(n * 1000) : Math.round(n);
+}
+
 function handleBodyEvent(name, data) {
   const now = Date.now();
+  const d = data || {};
+  const ts = normTs(d.ts, now);
   sense.updatedAt = now;
-  if (name === "presence") { sense.presence = data.presence || "unknown"; sense.idle_s = data.idle_s != null ? data.idle_s : null; }
+  if (name === "presence") { sense.presence = d.presence || "unknown"; sense.idle_s = d.idle_s != null ? d.idle_s : null; }
   else if (name === "sense") {
-    if (data.presence) sense.presence = data.presence;
-    if (data.idle_s != null) sense.idle_s = data.idle_s;
-    if (data.foreground) sense.foreground = data.foreground;
-    if (data.locked != null) sense.locked = !!data.locked;
+    if (d.presence) sense.presence = d.presence;
+    if (d.idle_s != null) sense.idle_s = d.idle_s;
+    if (d.foreground) sense.foreground = d.foreground;
+    if (d.locked != null) sense.locked = !!d.locked;
   }
   else if (name === "foreground") {
     // 落盘只留程序名与 pid，不留窗口标题（标题常含具体网页/文档名，属于私事）
-    sense.foreground = data;
-    appendEvent(Object.assign({ ts: now, event: name },
-      { app: (data && data.app) || "", pid: (data && data.pid) || 0 }));
+    sense.foreground = d;
+    appendEvent({ ts: ts, event: name, app: (d.app) || "", pid: (d.pid) || 0 });
     return;
   }
-  else if (name === "lock") sense.locked = !!data.locked;
-  else if (name === "dnd") sense.dnd = !!data.active;
+  else if (name === "lock") sense.locked = !!d.locked;
+  else if (name === "dnd") sense.dnd = !!d.active;
   else if (name === "click") {
     sense.lastClickAt = now;
     // 被摸头也是互动：心情微涨、无聊度下降（20 秒内最多算一次，防连点刷）
@@ -253,10 +261,10 @@ function handleBodyEvent(name, data) {
       try { if (_ctx && _ctx.addBoredom) _ctx.addBoredom(-6); } catch (e) {}
     }
   }
-  else if (name === "drop") { sense.lastDropAt = now; sense.lastDrop = data.files || []; }
+  else if (name === "drop") { sense.lastDropAt = now; sense.lastDrop = d.files || []; }
   else if (name === "say") sense.lastSayAt = now;
   else if (name === "look") sense.lastLook = data;
-  appendEvent(Object.assign({ ts: now, event: name }, data || {}));
+  appendEvent(Object.assign({}, d, { ts: ts, event: name }));
 }
 
 let sseStarted = false;

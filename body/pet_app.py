@@ -639,11 +639,11 @@ class PetWindow(QWidget):
             return
         boredom = int(self.mood.get("boredom") or 0)
         mood = int(self.mood.get("mood") or 0)
-        chance = 0.15
+        chance = 0.30                     # v0.9：整体 ×2（更活泼）
         if boredom >= 60:
-            chance = 0.55
+            chance = 1.0
         elif boredom >= 30:
-            chance = 0.3
+            chance = 0.6
         if mood <= -30:
             chance *= 0.4
         if random.random() > chance:

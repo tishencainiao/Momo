@@ -67,7 +67,7 @@ class BodyAPI:
 
     # ---------- 事件广播（GUI 线程调） ----------
     def publish(self, name: str, **data) -> None:
-        payload = {"event": name, "ts": round(time.time(), 3)}
+        payload = {"event": name, "ts": int(time.time() * 1000)}   # 统一毫秒（v1.72.0 修正）
         payload.update(data)
         with self._lock:
             subs = list(self._subscribers)

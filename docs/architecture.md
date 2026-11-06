@@ -132,11 +132,11 @@ E:\Learn\Momo\
 - `SELF_AWARENESS`：自我认知写成「事实点」而不是完整句子——完整句子会被逐字复读
 - 「当前活动」`current-activity.json`：被问「在干嘛」答案一致
 
-## 6. 插件清单（31 个）
+## 6. 插件清单（32 个）
 
 `appellations` `birthdays` `browse` `budget-report` `capability-index` `dsh-link` `emotion`
 `evening-report` `evolution` `followup` `goals` `group-chat` `group-info` `group-memes`
-`health` `interact` `life-log` `memory` `meta-cog` `mute` `pc-tools` `proactive` `qzone`
+`health` `interact` `life-log` `memory` `meta-cog` `mute` `pc-tools` `proactive` `qzone` `report`
 `reminders` `settings` `stickers` `teach` `todos` `user-profile` `voice` `weather`
 
 ## 7. 配置（config.json 主要项）
