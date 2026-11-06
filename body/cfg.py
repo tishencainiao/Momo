@@ -27,6 +27,8 @@ DEFAULTS = {
     "margin_x": 40,
     "margin_y": 120,
     "click_response": True,          # 点一下有回应动画
+    "squash_enabled": True,          # 点击 Q 弹挤压（像被戳了一下的软体）
+    "squash_duration_ms": 320,       # 一次挤压+回弹的总时长
     "click_through": False,          # 整窗鼠标穿透（右键菜单可切）
     "port": 4010,                    # v0.2 起用（本地接口）
     "log_level": "info",
@@ -67,9 +69,13 @@ def save_state(state: dict) -> None:
 
 
 def save_config(cfg: dict) -> None:
-    """把用户改动（音量/静音/缩放等）写回 body/config.json。"""
+    """把用户改动（音量/静音/缩放等）写回 body/config.json。
+
+    注意：跳过以下划线开头的内部键（如 `_log` 是运行时注入的日志函数，
+    直接 json.dump 会因为不可序列化把配置文件写坏）。
+    """
     try:
-        data = {k: v for k, v in cfg.items() if k != "assets_dir"}
+        data = {k: v for k, v in cfg.items() if k != "assets_dir" and not str(k).startswith("_")}
         with open(CONFIG_PATH, "w", encoding="utf-8") as fh:
             json.dump(data, fh, ensure_ascii=False, indent=2)
     except Exception as exc:

@@ -6,9 +6,11 @@
 from __future__ import annotations
 
 import ctypes
+import math
 import os
 import random
 import sys
+import time
 
 from PySide6.QtCore import QPoint, QRect, Qt, QTimer
 from PySide6.QtGui import QAction, QGuiApplication, QPainter
@@ -22,6 +24,10 @@ _SWP_NOSIZE = 0x0001
 _SWP_NOMOVE = 0x0002
 _SWP_NOACTIVATE = 0x0010
 _SWP_SHOWWINDOW = 0x0040
+
+# Q 弹挤压参数：横向最多鼓 16%、纵向最多压 20%（视觉上像被戳了一下的软体）
+SQ_SQUASH_X = 0.16
+SQ_SQUASH_Y = 0.20
 
 
 def _assert_topmost(hwnd: int) -> None:
@@ -77,6 +83,14 @@ class PetWindow(QWidget):
         self.player.set_fps_cap(int(self.cfg.get("fps_cap") or 30))
         self.player.frame_changed.connect(self.update)
         self.player.finished.connect(self._on_clip_finished)
+
+        # 点击 Q 弹：状态 + 60fps 驱动定时器
+        self._squash_start = None
+        self._squash_strength = 1.0
+        self._squash_duration_ms = int(self.cfg.get("squash_duration_ms") or 320)
+        self._squash_timer = QTimer(self)
+        self._squash_timer.setInterval(16)
+        self._squash_timer.timeout.connect(self._tick_squash)
 
         self._restore_geometry()
         self._play_idle()
@@ -155,8 +169,47 @@ class PetWindow(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
         painter.setRenderHint(QPainter.Antialiasing, True)
+        sq = self._squash_amount()
+        if abs(sq) > 0.001:
+            # Q 弹：以「脚底中点」为锚点做挤压（横向鼓、纵向压），松开后回弹过冲
+            painter.translate(self.width() / 2.0, float(self.height()))
+            painter.scale(1.0 + SQ_SQUASH_X * sq, 1.0 - SQ_SQUASH_Y * sq)
+            painter.translate(-self.width() / 2.0, -float(self.height()))
         painter.drawPixmap(self.rect(), pm)
         painter.end()
+
+    # ---------- Q 弹挤压 ----------
+    def _squash_amount(self) -> float:
+        """返回当前挤压量：>0 压扁，<0 拉长（回弹过冲）。"""
+        if self._squash_start is None:
+            return 0.0
+        elapsed = (time.perf_counter() - self._squash_start) * 1000.0
+        total = float(self._squash_duration_ms)
+        if elapsed >= total:
+            self._squash_start = None
+            return 0.0
+        t = elapsed / total
+        press = 0.25                     # 前 25% 时间压下去
+        if t < press:
+            u = t / press
+            return self._squash_strength * (1.0 - (1.0 - u) ** 3)   # ease-out：快速压到位
+        u = (t - press) / (1.0 - press)
+        bounce = (1.0 - u) * math.cos(u * math.pi * 1.6)            # 回弹 + 轻微过冲（负值=拉长）
+        return self._squash_strength * max(-0.35, bounce)
+
+    def _kick_squash(self, strength: float = 1.0) -> None:
+        if not self.cfg.get("squash_enabled", True):
+            return
+        self._squash_strength = max(0.2, min(1.5, float(strength)))
+        self._squash_start = time.perf_counter()
+        if not self._squash_timer.isActive():
+            self._squash_timer.start()
+
+    def _tick_squash(self) -> None:
+        self._squash_amount()                    # 到时间会自己把 _squash_start 清空
+        if self._squash_start is None:
+            self._squash_timer.stop()
+        self.update()
 
     # ---------- 鼠标 ----------
     def mousePressEvent(self, event) -> None:                      # noqa: N802
@@ -164,6 +217,7 @@ class PetWindow(QWidget):
             self._drag_origin = event.globalPosition().toPoint()
             self._drag_window_origin = self.pos()
             self._drag_moved = False
+            self._kick_squash(1.0)         # 按下去的瞬间就压一下，手感立刻回来
             event.accept()
 
     def mouseMoveEvent(self, event) -> None:                       # noqa: N802
@@ -181,10 +235,14 @@ class PetWindow(QWidget):
         self._drag_origin = None
         if self._drag_moved:
             self._save_geometry()
+            self._kick_squash(0.65)      # 拖动落地也弹一下
         elif self.cfg.get("click_response", True):
             self._play_once(self._pick("click"))
             played = self.sound.play("click") if self.sound is not None else False
-            self._log("身体被点了一下（音效%s）" % ("响" if played else "静音/无设备"))
+            detail = ""
+            if self.sound is not None and hasattr(self.sound, "debug_state"):
+                detail = " / " + self.sound.debug_state("click")
+            self._log("身体被点了一下（音效%s）%s" % ("响" if played else "静音/无设备", detail))
         event.accept()
 
     def mouseDoubleClickEvent(self, event) -> None:                 # noqa: N802

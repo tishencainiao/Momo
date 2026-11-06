@@ -71,6 +71,8 @@ python body\main.py
 | `always_on_top` | true | 置顶（每 3 秒重申一次，防被浏览器窗口盖住） |
 | `fps_cap` | 30 | 素材 24fps，再高没意义 |
 | `click_response` | true | 点一下播回应动画 |
+| `squash_enabled` | true | 点击 Q 弹挤压（像被戳了一下的软体） |
+| `squash_duration_ms` | 320 | 一次「压下去 + 回弹过冲」的总时长 |
 | `click_through` | false | 整窗鼠标穿透（右键菜单也能切） |
 | `sound_enabled` | true | 音效总开关 |
 | `volume` | 70 | 点击音效音量 0~100 |
@@ -80,33 +82,40 @@ python body\main.py
 
 运行时状态（位置/缩放）写 `data/body-state.json`；日志写 `data/body.log`。
 
-## 6. 交互（v0.1.1）
+## 6. 交互（v0.1.3）
 
 | 操作 | 效果 |
 |---|---|
 | 左键拖拽 | 跟手移动，松手记住位置 |
-| 左键单击 | 随机播一段「点击回应」动画 + 播 `click.wav`，播完回待机 |
+| 左键单击 | 随机播一段「点击回应」动画 + 播 `click.wav`，同时身体**Q 弹挤压**一下（横向鼓、纵向压，脚底不动），播完回待机 |
 | 双击 | 随机小剧场（random 类 89 段之一） |
 | 右键 | 点播动作（random/click/turn/move/drag）· 大小三档 + ±0.05 · 鼠标穿透 · 回到右下角 · 隐藏身体 · 退出身体 |
 | 托盘左键 | 显示/隐藏切换 |
 | 托盘右键 | 状态行（大脑 PID/守护在不在、身体显隐）· 显示/隐藏身体 · 重启身体 · 重启大脑 · 停止大脑（含守护，二次确认）· 音效（静音 / 40% / 70% / 100%）· 查看日志 · 退出身体 |
 
-## 7. 音效
+## 7. 点击 Q 弹（squash & stretch）
 
+- 触发：左键按下瞬间（`mousePressEvent`）以及拖动落地（强度 0.65）；不再等松手，手感更跟手。
+- 曲线：总时长 `squash_duration_ms`（320ms），前 25% 用 ease-out 压到位，之后 `(1-u)·cos(1.6πu)` 回弹并轻微过冲（负值＝拉长），所以会有「压扁 → 弹高 → 归位」三段。
+- 变换：以**脚底中点**为锚点做 `QPainter.scale`（横 1+0.16·s，纵 1−0.20·s），底边不位移，看起来是站在地上被压扁。
+- 实测（离屏逐帧量 bbox）：静止 84×107 → 60ms 时 98×85（+17% 宽 / −21% 高）→ 230ms 时 80×114（回弹拉长）→ 330ms 归位 84×107，底边始终在 131 附近。
+- 关掉：`body/config.json` 里 `"squash_enabled": false`。
+
+## 8. 音效
 - 文件：`body/assets/sounds/click.wav`（点击）、`agent/{start,done,error}.wav`（v0.3 起给状态用）、`duck/*.mp3`（预留，QSoundEffect 播不了 mp3）。
 - **后端：QSoundEffect（PySide6-Addons 里的 QtMultimedia）**——Qt 内部维护常驻音频输出，设备只开一次，点击即出声；自带 0~1 音量与多路混音。启动时 `preload()` 把 click + agent 音效都加载就绪，避免第一次点击还在开设备。
 - **为什么换掉 winsound（2026-11-06 实测）**：这段 160ms 的点击音，`winsound.PlaySound` 一次调用要阻塞约 **970ms**（大头是每次重新打开音频设备 + 系统音频栈里的 FxSound / 虚拟声卡）；本机 MCI 常驻通道也要 418~597ms。入队到真正调播放只花 0.5ms，所以延迟不在我们的线程/队列上。
 - **降级**：只装了 PySide6-Essentials 的机器上 `import QtMultimedia` 失败，会自动退回 winsound 后端（功能不中断，只是延迟高）——日志里会打 `音效后端=winsound`。
 - **坑**：winsound 不允许「内存 + 异步」同时用（`Cannot play asynchronously from memory`），所以降级后端只能后台线程同步播；QSoundEffect 则没有这个限制。
 
-## 8. 托盘与大脑控制（安全口径）
+## 9. 托盘与大脑控制（安全口径）
 
 - 找进程**按命令行匹配**，不按进程名：大脑必须是 `node.exe` 且命令行含 `Momo\index.js`；守护必须是 `powershell.exe` 且含 `-File ...supervise.ps1`；并且都要排除「正在跑查询的 powershell 自己」（`$_.ProcessId -ne $PID`）。
 - **重启大脑 = 停守护 → 杀 node → 起一个守护**（不是「只杀不拉」）。原因：机器上可能有多个 `supervise.ps1`（手动 + 自启），只杀 node 会让它们同时拉起、抢 3999 端口。
 - **停止大脑**会连守护一起停（否则杀了立刻被拉起），操作前二次确认。
 - 实测（2026-11-06）：重启后 2 秒新 node 起来，`bridge.log` 出现「OneBot WS 已连接 / Bot 上线」。
 
-## 9. 动画与素材
+## 10. 动画与素材
 
 - 101 段，7 类：`idle 1 / click 5 / drag 1 / events 1（balance 6 段）/ move 3 / random 89 / turn 1`，共 25,529 帧，24fps，每段约 241 帧（10s）。
 - 帧序列已由上游解码好（webp，**640×360 画布**；角色在画布中约占 220×270，四周是透明留白，方便放道具/特效），运行时**不需要 ffmpeg**。
@@ -115,7 +124,7 @@ python body\main.py
 
 > **DPI 踩坑（2026-11-06 实测）**：这台机器屏幕是 1920×1080、Windows 缩放 125%，Qt 的逻辑坐标是 1536×864（devicePixelRatio=1.25）。用 DPI 未感知的进程（如部分 PowerShell 会话）截图，拿到的是被系统虚拟化过的画面，看起来像是「身体被裁掉/位置偏移」——**其实是截图的锅**。要核对显示效果，用 `QScreen.grabWindow(0)` 在 Qt 进程里截，得到的是真实 1920×1080 画面。
 
-## 10. 自检口径
+## 11. 自检口径
 
 `python body/main.py --selftest`（offscreen，不弹窗，24 项断言）：
 
@@ -125,6 +134,6 @@ python body\main.py
 4. **配置**：scale / fps_cap / port / 三档升序合法；
 5. **音效与图标**：click.wav 在、音量上下夹紧、静音不出声、能生成多尺寸 .ico（ICO 头校验）。
 
-## 11. 后续批次
+## 12. 后续批次
 
 见 [body-roadmap.md](body-roadmap.md)（v0.2 接口 → v0.8 运维）与主 CHANGELOG。

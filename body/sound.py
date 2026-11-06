@@ -255,12 +255,26 @@ class SoundPlayer:
             return False
 
     def wait_idle(self, timeout: float = 3.0) -> bool:
+        import time
         if not _HAS_QT:
             return self._fallback.wait_idle(timeout)
-        import time
         deadline = time.time() + timeout
         while time.time() < deadline:
             if not any(getattr(e, "isPlaying", lambda: False)() for e in self._effects.values()):
                 return True
             time.sleep(0.02)
         return False
+
+    def debug_state(self, name: str = "click") -> str:
+        """给日志用的一句话状态：后端 / 加载状态 / 是否在响 / 音量。"""
+        if not _HAS_QT:
+            return "backend=winsound vol=%d muted=%s" % (self.volume, self.muted)
+        eff = self._effects.get(name)
+        if eff is None:
+            return "backend=qt 未加载(%s)" % name
+        try:
+            return "backend=qt status=%s loaded=%s playing=%s vol=%.2f" % (
+                eff.status().name, eff.isLoaded(), eff.isPlaying(), eff.volume())
+        except Exception as exc:
+            return "backend=qt 状态读取失败: %s" % exc
+
