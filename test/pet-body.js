@@ -228,7 +228,7 @@ const tool = (n) => plugin.tools.find((t) => t.def.function.name === n);
   t.handleBodyEvent("presence", { presence: "away", idle_s: 600 });
   t.handleBodyEvent("foreground", { title: "index.js — Momo", pid: 1, app: "Code.exe" });
   t.handleBodyEvent("click", { x: 1, y: 2, sound: true });
-  const ctxText = plugin.contextProvider({});
+  const ctxText = plugin.contextProvider({ userId: "100000001", petMode: true });
   check("contextProvider 注入【身体感觉】", /【身体感觉】/.test(ctxText), ctxText);
   check("里面有「主人可能离开了」", /离开|没动/.test(ctxText), ctxText);
   check("里面有前台程序", /Code/.test(ctxText), ctxText);
@@ -307,7 +307,35 @@ const tool = (n) => plugin.tools.find((t) => t.def.function.name === n);
   check("空文本不播报", ann2.ok === false);
   ctx.getApi = (n) => (n === "voice" ? fakeVoice : null);
 
-  console.log("\n[12] 免打扰（pet_dnd / 播报抑制）");
+  console.log("\n[13] 隐私闸门（A 只给主人 + C 只桌面渠道）");
+  plugin.__test.handleBodyEvent("presence", { presence: "active", idle_s: 3 });
+  plugin.__test.handleBodyEvent("foreground", { title: "机密文档.docx", app: "WINWORD.EXE", pid: 9 });
+  check("桌面 + 主人 → 有身体感觉",
+    /【身体感觉】/.test(plugin.contextProvider({ userId: "100000001", petMode: true })),
+    plugin.contextProvider({ userId: "100000001", petMode: true }));
+  check("QQ + 主人 → 不注入（C）",
+    plugin.contextProvider({ userId: "100000001", petMode: false }) === "");
+  check("桌面 + 朋友 → 不注入（A）",
+    plugin.contextProvider({ userId: "100000002", petMode: true }) === "");
+  check("QQ + 朋友 → 不注入",
+    plugin.contextProvider({ userId: "100000002", petMode: false }) === "");
+  check("缺 payload 也不炸且不注入", plugin.contextProvider({}) === "" && plugin.contextProvider() === "");
+
+  // 落盘脱敏：foreground 事件不许留下窗口标题，drop 只留文件名
+  process.env.MOMO_BODY_EVENTS = path.join(os.tmpdir(), "momo-body-privacy.jsonl");
+  try { fs.unlinkSync(process.env.MOMO_BODY_EVENTS); } catch (e) {}
+  plugin.__test.handleBodyEvent("foreground", { title: "机密文档.docx", app: "WINWORD.EXE", pid: 9 });
+  plugin.__test.handleBodyEvent("drop", { files: ["C:\\Users\\19372\\Desktop\\私密报告.pdf"] });
+  plugin.__test.handleBodyEvent("sense", { presence: "active", idle_s: 1, foreground: { title: "机密文档.docx", app: "WINWORD.EXE", pid: 9 } });
+  const privLines = fs.readFileSync(process.env.MOMO_BODY_EVENTS, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  check("落盘不带窗口标题", privLines.every((o) => !JSON.stringify(o).includes("机密文档")),
+    JSON.stringify(privLines).slice(0, 200));
+  check("落盘只留程序名", privLines.some((o) => (o.app || (o.foreground && o.foreground.app)) === "WINWORD.EXE"));
+  check("投喂只留文件名", privLines.some((o) => Array.isArray(o.files) && o.files[0] === "私密报告.pdf"),
+    JSON.stringify(privLines.filter((o) => o.files)));
+  process.env.MOMO_BODY_EVENTS = path.join(os.tmpdir(), "momo-body-events-test.jsonl");
+
+  console.log("\n[14] 免打扰（pet_dnd / 播报抑制）");
   seen.length = 0;
   r = await tool("pet_dnd").handler({ enable: true }, MASTER);
   check("pet_dnd 开免打扰有回执", /安静/.test(r), r);
@@ -319,7 +347,7 @@ const tool = (n) => plugin.tools.find((t) => t.def.function.name === n);
   check("免打扰时 announce 被挡下", ann3.ok === false && ann3.error === "dnd", JSON.stringify(ann3));
   const ann4 = await plugin.api.body.announce("主人明确要的", { force: true });
   check("force=true 可以强制说", ann4.ok === true, JSON.stringify(ann4));
-  check("contextProvider 会提到免打扰", /免打扰/.test(plugin.contextProvider({})), plugin.contextProvider({}));
+  check("contextProvider 会提到免打扰", /免打扰/.test(plugin.contextProvider({ userId: "100000001", petMode: true })));
 
   r = await tool("pet_dnd").handler({ enable: false }, MASTER);
   check("关掉免打扰有回执", /可以出声/.test(r), r);

@@ -205,8 +205,16 @@ const sense = {
 
 function appendEvent(obj) {
   try {
+    // 落盘前脱敏：不留窗口标题（常含具体网页/文档名）、不留完整文件路径
+    const o = Object.assign({}, obj);
+    if (o.foreground && typeof o.foreground === "object") {
+      o.foreground = { app: o.foreground.app || "", pid: o.foreground.pid || 0 };
+    }
+    if (Array.isArray(o.files)) {
+      o.files = o.files.map((p) => String(p).split(/[\\/]/).pop()).slice(0, 10);
+    }
     fs.mkdirSync(DATA_DIR(), { recursive: true });
-    const line = JSON.stringify(obj) + "\n";
+    const line = JSON.stringify(o) + "\n";
     fs.appendFileSync(EVENTS_FILE(), line);
     try {
       if (fs.statSync(EVENTS_FILE()).size > 512 * 1024) {       // 半兆就截断重建，别无限长
@@ -227,7 +235,13 @@ function handleBodyEvent(name, data) {
     if (data.foreground) sense.foreground = data.foreground;
     if (data.locked != null) sense.locked = !!data.locked;
   }
-  else if (name === "foreground") sense.foreground = data;
+  else if (name === "foreground") {
+    // 落盘只留程序名与 pid，不留窗口标题（标题常含具体网页/文档名，属于私事）
+    sense.foreground = data;
+    appendEvent(Object.assign({ ts: now, event: name },
+      { app: (data && data.app) || "", pid: (data && data.pid) || 0 }));
+    return;
+  }
   else if (name === "lock") sense.locked = !!data.locked;
   else if (name === "dnd") sense.dnd = !!data.active;
   else if (name === "click") {
@@ -395,6 +409,13 @@ module.exports = {
   contextProvider(payload) {
     try {
       if (!enabled()) return "";
+      const p = payload || {};
+      // 隐私闸门（v1.71.1）：
+      // ① 只在「桌面渠道」注入——QQ（私聊/群聊）一律不给身体感官；
+      // ② 只给主人注入——朋友/访客拿不到主人在干嘛的任何信息。
+      // 工具通道（pet_sense / pet_look）另有 isMaster 判断，这里是上下文通道的第二道锁。
+      if (!p.petMode) return "";
+      if (!_ctx || !_ctx.isMaster(p.userId)) return "";
       return senseText();
     } catch (e) {
       return "";

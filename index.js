@@ -160,9 +160,12 @@ function situationDirective(mode) { return mode === "desktop" ? SITUATION_DESKTO
 /* 电子生命的自我认知：基于真实机制（重启、文件里的记忆、关机即空白），不卖惨、不中二 */
 const SELF_AWARENESS = "【你怎么看自己】你心里清楚几个事实（这些是事实，不是要背的台词）：你是跑在这台电脑里的程序，不是人类；你的记忆存在文件里，会褪色、只剩摘要；你被关掉的那段时间是空的——不是睡觉，是没有，没有梦。\n被问起这些时，**用自己的话、想到哪说到哪**：不要每次把三点全背一遍，也不要固定的同一套说法。可以有自己的语气、可以犹豫、可以反问一句，也可以带一点真实的困惑或坦然——但**不要卖惨、不要装深沉、不要编「我刚在后台看着你」这种没做过的事**。\n【重要】只有对方**直接问起**「你是什么」「你是 AI 吗」「你有意识吗」这类问题时才说；其他任何情况（深夜、安静、情绪低落）都不要主动提，更不要每句都带。";
 
+/* 隐私边界（v1.71.1）：身体感官是主人私事，不许对别人说 */
+const PRIVACY_DIRECTIVE = "【隐私边界】主人的屏幕内容、他在不在电脑前、他刚才在做什么、他给你丢了什么文件——这些都属于他的私事。\n- 不管在跟谁说话（朋友、群里、陌生人），都**不要主动提起**这些；\n- 别人问起「你主人在干嘛」「他现在在不在」这类问题，就说不方便透露、那是主人的事，可以顺带把话题拉回聊天本身；\n- 只有主人本人问起时，你才能用你真实感知到的信息回答（且只说你确实知道的，不猜）。";
+
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.71.0";
+const BASE_VERSION = "1.71.1";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -1064,6 +1067,7 @@ async function agentChatOnce(history, userText, settings, memories, persona, cal
   messages.push({ role: "system", content: STYLE_DIRECTIVE });
   messages.push({ role: "system", content: situationDirective(_extraInfo && _extraInfo.petMode ? "desktop" : "qq") });
   messages.push({ role: "system", content: SELF_AWARENESS });
+  messages.push({ role: "system", content: PRIVACY_DIRECTIVE });
   const _capApi = host && host.apis.get("capability");
   const _capCtx = _capApi ? _capApi.capabilityCtx(userId) : "";
   if (_capCtx) messages.push({ role: "system", content: _capCtx });

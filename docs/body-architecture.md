@@ -213,6 +213,19 @@ python body\main.py
 - **守护**：`scripts/supervise-body.ps1`（崩溃 3 秒拉起，连续崩溃退避到 30 秒，单实例锁）。
 - **路径覆盖**：`MOMO_BODY_DATA` / `MOMO_BODY_CONFIG` 环境变量可改数据与配置位置（打包版常用）。
 
-## 18. 后续批次
+## 18. 隐私与权限（v1.71.1）
+
+身体能感知主人的私事（在不在电脑前、用什么软件、屏幕内容），所以有**两道独立的闸门**，缺一不可：
+
+| 通道 | 控制点 | 规则 |
+|---|---|---|
+| 工具通道 | `pet_sense` / `pet_look` / `pet_body_status` 等 handler | 必须 `isMaster(userId)`，否则直接拒绝 |
+| 上下文通道 | `contextProvider(payload)` | 必须 `payload.petMode`（桌面渠道）**且** `isMaster(userId)`，否则返回空——QQ 私聊/群聊一律不注入 |
+
+提示词侧还有一条 `PRIVACY_DIRECTIVE`（`index.js`）：不主动提主人的屏幕/在场/刚做过什么；别人问就说「那是主人的事」；只有主人本人问才用真实感知回答。
+
+**落盘也要脱敏**：`data/body-events.jsonl` 里 `foreground` 只留程序名 + pid（不留窗口标题），投喂事件只留文件名（不留完整路径）。
+
+## 19. 后续批次
 
 见 [body-roadmap.md](body-roadmap.md)（v0.2 接口 → v0.8 运维）与主 CHANGELOG。
