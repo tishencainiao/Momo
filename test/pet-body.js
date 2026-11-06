@@ -98,6 +98,11 @@ const tool = (n) => plugin.tools.find((t) => t.def.function.name === n);
       if (req.url.startsWith("/cmd/look")) {
         return send(200, { ok: true, path: "E:/Learn/Momo/data/body-shots/fake.jpg", ts: Date.now() / 1000, width: 1280, height: 720 });
       }
+      if (req.url.startsWith("/cmd/dnd")) {
+        let manual = false;
+        try { manual = !!JSON.parse(body).manual; } catch (e) {}
+        return send(200, { ok: true, dnd: manual, manual });
+      }
       return send(200, { ok: true, queued: true, anim: "哈欠连天", x: 120, y: 220 });
     });
   });
@@ -288,6 +293,26 @@ const tool = (n) => plugin.tools.find((t) => t.def.function.name === n);
   const ann2 = await plugin.api.body.announce("");
   check("空文本不播报", ann2.ok === false);
   ctx.getApi = (n) => (n === "voice" ? fakeVoice : null);
+
+  console.log("\n[12] 免打扰（pet_dnd / 播报抑制）");
+  seen.length = 0;
+  r = await tool("pet_dnd").handler({ enable: true }, MASTER);
+  check("pet_dnd 开免打扰有回执", /安静/.test(r), r);
+  const dndReq = seen.filter((s) => s.url === "/cmd/dnd").pop();
+  check("请求体带 manual:true", !!dndReq && JSON.parse(dndReq.body).manual === true);
+  check("免打扰状态同步到快照", plugin.__test.sense.dnd === true, String(plugin.__test.sense.dnd));
+
+  const ann3 = await plugin.api.body.announce("现在不该出声");
+  check("免打扰时 announce 被挡下", ann3.ok === false && ann3.error === "dnd", JSON.stringify(ann3));
+  const ann4 = await plugin.api.body.announce("主人明确要的", { force: true });
+  check("force=true 可以强制说", ann4.ok === true, JSON.stringify(ann4));
+  check("contextProvider 会提到免打扰", /免打扰/.test(plugin.contextProvider({})), plugin.contextProvider({}));
+
+  r = await tool("pet_dnd").handler({ enable: false }, MASTER);
+  check("关掉免打扰有回执", /可以出声/.test(r), r);
+  check("关掉后快照同步", plugin.__test.sense.dnd === false);
+  const ann5 = await plugin.api.body.announce("恢复后可以说了");
+  check("关掉后 announce 恢复正常", ann5.ok === true, JSON.stringify(ann5));
 
   server.close();
   await sleep(50);

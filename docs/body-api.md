@@ -31,6 +31,7 @@
 | `POST /cmd/sense` | `{}` | 返回感官快照：`idle_s` / `presence`(active·away) / `foreground{title,pid,app}` / `locked` / `last_look` |
 | `POST /cmd/walk` | `{"dx":-200}` | 朝 dx 方向走（正=右、负=左），播走路动画、到屏边或到达即停并记住位置 |
 | `POST /cmd/throw` | `{"vx":900,"vy":-700}` | 被甩出去：抛物线 + 四边反弹 + 落地摩擦（一般由鼠标甩动触发，也可手动调） |
+| `POST /cmd/dnd` | `{"manual":true}` | 开关免打扰（手动）；返回 `{ok,dnd,manual}`，自动时段仍会叠加 |
 | `POST /cmd/mood` | `{"mood":-30,"boredom":70,"emotion":"无聊"}` | 同步心情/无聊度/情绪，身体据此决定「自己玩还是安静待着」、以及点击回应挑哪种动画 |
 | `POST /cmd/look` | `{}` | 抓一张全屏（缩到 1280 宽存 jpg，只留最近 20 张），返回 `{path,width,height,ts}` |
 
@@ -72,6 +73,8 @@
 | `bounce` | `x,y` | 撞到屏幕边缘反弹 |
 | `land` | `x,y` | 落地停稳 |
 | `mood` | `mood,boredom,emotion` | 心情被同步过来 |
+| `dnd` | `active,manual` | 进入/退出免打扰 |
+| `settings` | `changed[]` | 设置页保存了什么 |
 | `self_play` | `anim,boredom` | 她自己找事做（播了哪段） |
 | `click` | `x,y,sound` | 主人点了她一下 |
 | `drag_end` | `x,y` | 拖拽放下（位置已保存） |

@@ -17,6 +17,7 @@ from PySide6.QtGui import QAction, QGuiApplication, QPainter
 from PySide6.QtWidgets import QMenu, QWidget
 
 import cfg
+import dnd as dnd_mod
 import physics
 from anim import Player, scan_clips
 
@@ -122,6 +123,7 @@ class PetWindow(QWidget):
         self._phys_timer.setInterval(16)
         self._phys_timer.timeout.connect(self._step_physics)
         self.mood = {"mood": 0, "boredom": 0, "emotion": ""}
+        self.dnd_manual = bool(self.cfg.get("dnd_manual"))
         self._idle_timer = QTimer(self)
         self._idle_timer.setInterval(25000)
         self._idle_timer.timeout.connect(self._maybe_self_play)
@@ -129,6 +131,34 @@ class PetWindow(QWidget):
 
         self._restore_geometry()
         self._play_idle()
+
+        # 全局快捷键（v0.7）：Ctrl+Alt+M/S/D
+        try:
+            from hotkeys import Hotkeys
+
+            self.hotkeys = Hotkeys(self)
+            self._hotkey_map = {}
+            self._hotkey_labels = {}
+            plan = {
+                "toggle": ["ctrl+alt+m", "ctrl+shift+m", "ctrl+alt+f9"],
+                "settings": ["ctrl+alt+s", "ctrl+shift+s", "ctrl+alt+f10"],
+                "dnd": ["ctrl+alt+d", "ctrl+shift+d", "ctrl+alt+f11"],
+            }
+            for action, combos in plan.items():
+                for combo in combos:
+                    hid = self.hotkeys.register(combo, action)
+                    if hid:
+                        self._hotkey_map[hid] = action
+                        self._hotkey_labels[action] = combo
+                        break
+                else:
+                    self._log("快捷键全部被占用，放弃：%s（%s）" % (action, self.hotkeys.last_error))
+            if self._hotkey_labels:
+                self._log("快捷键就绪：" + "，".join("%s=%s" % (k, v) for k, v in self._hotkey_labels.items()))
+            self.hotkeys.hotkey.connect(self._on_hotkey)
+        except Exception as exc:
+            self.hotkeys = None
+            self._log("快捷键初始化失败：%s" % exc)
 
         # 某些窗口（浏览器/全屏应用）激活后会盖住置顶窗，周期性重申置顶
         self._top_timer = QTimer(self)
@@ -277,6 +307,9 @@ class PetWindow(QWidget):
             duration = voice.duration_ms() + 900 if voice.duration_ms() else 6000
         if text:
             self.say(text, duration)
+        if self.in_dnd():                        # 免打扰：只弹字，不出声
+            self._publish("voice", path="", ok=False, dnd=True)
+            return
         ok = voice.play(path, delete_after=True)
         if not ok:
             self._log("语音播放失败：%s" % getattr(voice, "last_error", ""))
@@ -378,6 +411,10 @@ class PetWindow(QWidget):
             self.throw(float(payload.get("vx") or 0), float(payload.get("vy") or 0))
             return {"ok": True}
 
+        if cmd == "dnd":
+            active = self.set_dnd(payload.get("manual"))
+            return {"ok": True, "dnd": active, "manual": self.dnd_manual}
+
         if cmd == "look":
             r = self.sense.capture()
             if r.get("ok"):
@@ -386,6 +423,70 @@ class PetWindow(QWidget):
             return r
 
         return {"ok": False, "error": "unknown command: %s" % cmd}
+
+    # ---------- 免打扰 / 设置 / 快捷键（v0.7） ----------
+    def in_dnd(self) -> bool:
+        import datetime
+
+        now = datetime.datetime.now()
+        minutes = now.hour * 60 + now.minute
+        return dnd_mod.dnd_active(self.dnd_manual, self.cfg, minutes)
+
+    def set_dnd(self, manual=None) -> bool:
+        if manual is not None:
+            self.dnd_manual = bool(manual)
+            self.cfg["dnd_manual"] = self.dnd_manual
+            cfg.save_config(self.cfg)
+        active = self.in_dnd()
+        if active and getattr(self, "_voice_out", None) is not None:
+            self._voice_out.stop()
+        self._publish("dnd", active=active, manual=self.dnd_manual)
+        self._snap(dnd=active)
+        return active
+
+    def open_settings(self) -> None:
+        from settings_dialog import SettingsDialog
+
+        dlg = SettingsDialog(self.cfg, self)
+        dlg.applied.connect(self.apply_settings)
+        dlg.exec()
+
+    def apply_settings(self, new_cfg: dict) -> None:
+        """把设置页的改动落到运行时（大小/音量/开关/免打扰）并落盘。"""
+        self.cfg.update(new_cfg or {})
+        cfg.save_config(self.cfg)
+        if "scale" in (new_cfg or {}):
+            self._set_scale(float(new_cfg["scale"]))
+        if self.sound is not None:
+            if new_cfg.get("sound_enabled") is False:
+                self.sound.set_muted(True)
+            else:
+                self.sound.set_muted(bool(new_cfg.get("mute")))
+                self.sound.set_volume(int(new_cfg.get("volume", 70)))
+        if self._voice_out is not None:
+            self._voice_out.set_volume(int(new_cfg.get("voice_volume", 85)))
+        self._click_through = bool(new_cfg.get("click_through"))
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, self._click_through)
+        self.dnd_manual = bool(new_cfg.get("dnd_manual"))
+        self.set_dnd(self.dnd_manual)
+        self._publish("settings", changed=sorted(new_cfg.keys())[:20])
+        self._log("设置已应用：大小 %.2f，音效 %d，语音 %d，免打扰 %s"
+                  % (self.scale, int(new_cfg.get("volume", 70)),
+                     int(new_cfg.get("voice_volume", 85)), "开" if self.in_dnd() else "关"))
+
+    def _on_hotkey(self, hid: int) -> None:
+        action = (getattr(self, "_hotkey_map", None) or {}).get(int(hid))
+        if action == "toggle":
+            if self.isVisible():
+                self.hide()
+            else:
+                self.show()
+                self._keep_on_top()
+        elif action == "settings":
+            self.open_settings()
+        elif action == "dnd":
+            active = self.set_dnd(not self.dnd_manual)
+            self._log("快捷键切换免打扰：%s" % ("开" if active else "关"))
 
     # ---------- 物理 / 移动 / 情绪（v0.5） ----------
     def _load_motion_data(self) -> dict:
@@ -531,6 +632,8 @@ class PetWindow(QWidget):
     def _maybe_self_play(self) -> None:
         """她自己找点事做：无聊度高就更活跃，心情差就更安静。"""
         if self._mode != "idle" or not self.isVisible():
+            return
+        if self.in_dnd():                        # 免打扰：不自己找事做
             return
         if self.bubble is not None and self.bubble.isVisible():
             return
@@ -684,11 +787,14 @@ class PetWindow(QWidget):
                 self._snap()
         elif self.cfg.get("click_response", True):
             self._play_once(self._pick_click_clip())
-            played = self.sound.play("click") if self.sound is not None else False
+            quiet = self.in_dnd() or self.cfg.get("sound_enabled") is False
+            played = (self.sound.play("click") if (self.sound is not None and not quiet) else False)
             detail = ""
             if self.sound is not None and hasattr(self.sound, "debug_state"):
                 detail = " / " + self.sound.debug_state("click")
-            self._log("身体被点了一下（音效%s）%s" % ("响" if played else "静音/无设备", detail))
+            self._log("身体被点了一下（音效%s）%s%s"
+                      % ("响" if played else "静音/无设备", detail,
+                         "（免打扰）" if quiet else ""))
             self._publish("click", x=self.x(), y=self.y(), sound=bool(played))
         event.accept()
 
@@ -733,6 +839,14 @@ class PetWindow(QWidget):
         recenter = QAction("回到右下角", self)
         recenter.triggered.connect(self._recenter)
         menu.addAction(recenter)
+        menu.addSeparator()
+        settings_act = QAction("设置…", self)
+        settings_act.triggered.connect(self.open_settings)
+        menu.addAction(settings_act)
+        dnd_act = QAction("免打扰", self, checkable=True)
+        dnd_act.setChecked(self.in_dnd())
+        dnd_act.triggered.connect(lambda checked=False: self.set_dnd(not self.dnd_manual))
+        menu.addAction(dnd_act)
         menu.addSeparator()
         hide_act = QAction("隐藏身体（托盘可叫回）", self)
         hide_act.triggered.connect(self.hide)

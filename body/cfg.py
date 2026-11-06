@@ -35,6 +35,10 @@ DEFAULTS = {
     "api_enabled": True,             # 关掉就只显示、不接受任何指令
     "away_after_s": 180,             # 键鼠空闲超过多少秒算「主人不在电脑前」
     "sense_interval_ms": 5000,       # 感官采样间隔
+    "dnd_manual": False,             # 手动免打扰（快捷键/托盘/设置页可切）
+    "dnd_auto": True,                # 自动免打扰时段
+    "dnd_from": "23:00",
+    "dnd_to": "08:00",
     "log_level": "info",
 }
 

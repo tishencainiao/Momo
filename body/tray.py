@@ -144,6 +144,14 @@ class BodyTray(QObject):
             sound_menu.addAction(act)
 
         self.menu.addSeparator()
+        act_settings = QAction("设置…", self.menu)
+        act_settings.triggered.connect(self._open_settings)
+        self.menu.addAction(act_settings)
+        self.act_dnd = QAction("免打扰", self.menu, checkable=True)
+        self.act_dnd.setChecked(bool(getattr(window, "dnd_manual", False)))
+        self.act_dnd.toggled.connect(self._toggle_dnd)
+        self.menu.addAction(self.act_dnd)
+
         act_log = QAction("查看日志", self.menu)
         act_log.triggered.connect(self._open_log)
         self.menu.addAction(act_log)
@@ -186,6 +194,11 @@ class BodyTray(QObject):
         self.act_brain.setText("大脑：%s（%s）" % (self._status["brain"], self._status["supervisor"]))
         self.act_body.setText("身体：%s" % self._status["body"])
         self.act_toggle.setText("隐藏身体" if self.window.isVisible() else "显示身体")
+        try:
+            if hasattr(self.act_dnd, "setChecked") and hasattr(self.window, "in_dnd"):
+                self.act_dnd.setChecked(bool(self.window.in_dnd()))
+        except Exception:
+            pass
         self.act_stop_brain.setText("停止大脑（含守护）" if self._status["brain"] != "未运行"
                                     else "大脑已停（用「重启大脑」启动）")
 
@@ -219,6 +232,19 @@ class BodyTray(QObject):
                     if sub.isCheckable() and sub is not self.act_mute:
                         sub.setChecked(sub.text().startswith(("小", "中", "大")) and str(vol) in sub.text())
         self.volume_changed.emit(vol)
+
+    def _open_settings(self) -> None:
+        try:
+            self.window.open_settings()
+        except Exception as exc:
+            self._notify("打开设置失败：%s" % exc)
+
+    def _toggle_dnd(self, checked: bool) -> None:
+        try:
+            active = self.window.set_dnd(bool(checked))
+            self._notify("免打扰：%s" % ("开（静音、不自己玩、不播报）" if active else "关"))
+        except Exception as exc:
+            self._notify("切换免打扰失败：%s" % exc)
 
     def _open_log(self) -> None:
         path = cfg.LOG_PATH

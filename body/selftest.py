@@ -166,5 +166,32 @@ def run(config: dict) -> int:
     check("轨迹估速正确（150px/0.05s=3000px/s）", abs(vx - 3000) < 10, "%.0f" % vx)
     check("朝向跟着位移走", ph.facing_for_dx(-30, 1) == -1 and ph.facing_for_dx(30, -1) == 1)
 
+    print("== 9) 免打扰 / 设置 / 快捷键（v0.7） ==")
+    import dnd as dnd_mod
+    check("时段解析 23:30 → 1410 分钟", dnd_mod.parse_hhmm("23:30") == 23 * 60 + 30)
+    check("时段解析坏值回落", dnd_mod.parse_hhmm("xx", 60) == 60)
+    check("跨午夜时段命中（01:00 在 23:00~08:00 内）", dnd_mod.in_window(60, 23 * 60, 8 * 60))
+    check("跨午夜时段不命中（12:00 不在 23:00~08:00）", not dnd_mod.in_window(12 * 60, 23 * 60, 8 * 60))
+    check("同起止时间不算免打扰", not dnd_mod.in_window(23 * 60, 23 * 60, 23 * 60))
+    check("手动开关优先", dnd_mod.dnd_active(True, {"dnd_auto": False}, 12 * 60))
+    check("关掉自动时段后不触发", not dnd_mod.dnd_active(False, {"dnd_auto": False}, 23 * 60 + 30))
+    check("自动时段默认 23~8 生效", dnd_mod.dnd_active(False, {}, 2 * 60))
+
+    from settings_dialog import SettingsDialog
+    dlg = SettingsDialog(config)
+    check("设置页能构造出来", dlg is not None)
+    check("设置页读到了当前缩放", abs(dlg.scale_slider.value() - int(round(float(config.get("scale") or .4) * 100))) <= 1)
+    check("设置页有音量滑条", dlg.sfx_slider.value() >= 0 and dlg.voice_slider.value() >= 0)
+    dlg.deleteLater()
+
+    from hotkeys import Hotkeys
+    hk = Hotkeys()
+    hid = hk.register("ctrl+alt+f12", "selftest")
+    check("快捷键能注册（Ctrl+Alt+F12）", bool(hid), hk.last_error)
+    if hid:
+        hk.unregister_all()
+        check("快捷键能注销", not hk.bound())
+    check("非法组合返回 0", hk.register("ctrl+alt+不存在的键", "x") == 0)
+
     print("\n自检结果：%d 过 / %d 失败" % (_ok, _fail))
     return 0 if _fail == 0 else 1

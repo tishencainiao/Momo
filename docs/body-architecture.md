@@ -171,14 +171,22 @@ python body\main.py
 
 对外播报入口：`api.body.announce(text,{voice,duration_ms})` —— 任何插件都能让身体开口，不用自己拼 HTTP。
 
-## 13. 托盘与大脑控制（安全口径）
+## 13. 设置页 / 快捷键 / 免打扰（v0.7）
+
+**设置页**（`body/settings_dialog.py`）：大小、点击音效音量、语音音量、音效总开关、点击回应、Q 弹挤压、整窗穿透、免打扰（手动 + 时段）。保存即生效并写回 `body/config.json`；入口有三个（右键菜单 / 托盘 / 快捷键）。
+
+**全局快捷键**（`body/hotkeys.py`）：`RegisterHotKey` + Qt `QAbstractNativeEventFilter` 接 `WM_HOTKEY`。默认 `Ctrl+Alt+M` 显隐、`Ctrl+Alt+S` 设置、`Ctrl+Alt+D` 免打扰；被占用会自动退到 `Ctrl+Shift+*` / `Ctrl+Alt+F9~F11`，启动日志打印最终绑定。
+
+**免打扰**（`body/dnd.py` 纯函数）：手动开关 + 自动时段（默认 23:00~08:00，支持跨午夜）。生效范围三层——声音（音效/语音）、行为（不自己玩）、播报（`announce()` 直接拒绝，`force:true` 可强制）。状态通过 SSE 推给大脑，插件会写进`【身体感觉】`。
+
+## 14. 托盘与大脑控制（安全口径）
 
 - 找进程**按命令行匹配**，不按进程名：大脑必须是 `node.exe` 且命令行含 `Momo\index.js`；守护必须是 `powershell.exe` 且含 `-File ...supervise.ps1`；并且都要排除「正在跑查询的 powershell 自己」（`$_.ProcessId -ne $PID`）。
 - **重启大脑 = 停守护 → 杀 node → 起一个守护**（不是「只杀不拉」）。原因：机器上可能有多个 `supervise.ps1`（手动 + 自启），只杀 node 会让它们同时拉起、抢 3999 端口。
 - **停止大脑**会连守护一起停（否则杀了立刻被拉起），操作前二次确认。
 - 实测（2026-11-06）：重启后 2 秒新 node 起来，`bridge.log` 出现「OneBot WS 已连接 / Bot 上线」。
 
-## 14. 动画与素材
+## 15. 动画与素材
 
 - 101 段，7 类：`idle 1 / click 5 / drag 1 / events 1（balance 6 段）/ move 3 / random 89 / turn 1`，共 25,529 帧，24fps，每段约 241 帧（10s）。
 - 帧序列已由上游解码好（webp，**640×360 画布**；角色在画布中约占 220×270，四周是透明留白，方便放道具/特效），运行时**不需要 ffmpeg**。
@@ -187,7 +195,7 @@ python body\main.py
 
 > **DPI 踩坑（2026-11-06 实测）**：这台机器屏幕是 1920×1080、Windows 缩放 125%，Qt 的逻辑坐标是 1536×864（devicePixelRatio=1.25）。用 DPI 未感知的进程（如部分 PowerShell 会话）截图，拿到的是被系统虚拟化过的画面，看起来像是「身体被裁掉/位置偏移」——**其实是截图的锅**。要核对显示效果，用 `QScreen.grabWindow(0)` 在 Qt 进程里截，得到的是真实 1920×1080 画面。
 
-## 15. 自检口径
+## 16. 自检口径
 
 `python body/main.py --selftest`（offscreen，不弹窗，24 项断言）：
 
@@ -197,6 +205,6 @@ python body\main.py
 4. **配置**：scale / fps_cap / port / 三档升序合法；
 5. **音效与图标**：click.wav 在、音量上下夹紧、静音不出声、能生成多尺寸 .ico（ICO 头校验）。
 
-## 16. 后续批次
+## 17. 后续批次
 
 见 [body-roadmap.md](body-roadmap.md)（v0.2 接口 → v0.8 运维）与主 CHANGELOG。

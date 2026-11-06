@@ -135,6 +135,7 @@ async function announce(text, opts) {
   const t = String(text || "").trim();
   if (!t) return { ok: false, error: "empty" };
   if (!enabled()) return { ok: false, error: "body disabled" };
+  if (sense.dnd && !o.force) return { ok: false, error: "dnd" };   // 免打扰：不打扰
   const r = await call("POST", "/cmd/say", { text: t, duration_ms: Number(o.duration_ms) || 6000 });
   if (o.voice && token()) {
     try {
@@ -191,7 +192,7 @@ const EVENTS_FILE = () => process.env.MOMO_BODY_EVENTS || path.join(DATA_DIR(), 
 const sense = {
   presence: "unknown", idle_s: null, foreground: null, locked: false,
   lastClickAt: 0, lastDropAt: 0, lastDrop: null, lastSayAt: 0, lastLook: null,
-  updatedAt: 0, connected: false,
+  updatedAt: 0, connected: false, dnd: false,
 };
 
 function appendEvent(obj) {
@@ -220,6 +221,7 @@ function handleBodyEvent(name, data) {
   }
   else if (name === "foreground") sense.foreground = data;
   else if (name === "lock") sense.locked = !!data.locked;
+  else if (name === "dnd") sense.dnd = !!data.active;
   else if (name === "click") {
     sense.lastClickAt = now;
     // 被摸头也是互动：心情微涨、无聊度下降（20 秒内最多算一次，防连点刷）
@@ -301,6 +303,7 @@ function senseText() {
   if (dMin !== null && dMin <= 30 && sense.lastDrop && sense.lastDrop.length) {
     bits.push(dMin === 0 ? "刚往你身上丢了文件" : dMin + " 分钟前往你身上丢了文件");
   }
+  if (sense.dnd) bits.push("你处于免打扰状态（不说话不出声）");
   if (!bits.length) return "";
   return "【身体感觉】" + bits.join("；") + "。";
 }
@@ -630,6 +633,26 @@ module.exports = {
         const r = await call("POST", "/cmd/say", { text, duration_ms: 9000 });
         record("body_fortune", f.luck, !!(r.status === 200 && r.data && r.data.ok));
         return text;
+      },
+    },
+    {
+      def: toolDef(
+        "pet_dnd",
+        "开关身体的免打扰（静音、不自己玩、也不播报报时/提醒）。主人说「先安静一会儿」「免打扰」「可以出声了」时调用。",
+        { enable: { type: "boolean", description: "true=开免打扰，false=关" } },
+        ["enable"]
+      ),
+      async handler(args, info) {
+        if (!requireMaster(info)) return "（只有主人能改免打扰）";
+        const on = !!(args && args.enable);
+        const r = await call("POST", "/cmd/dnd", { manual: on, _wait: true }, { wait: true });
+        if (r.status === 200 && r.data && r.data.ok) {
+          sense.dnd = !!r.data.dnd;
+          record("body_dnd", String(on), true);
+          return sense.dnd ? "好，我安静待着，不吵你。" : "好，我可以出声啦～";
+        }
+        record("body_dnd", String(on), false);
+        return offlineHint();
       },
     },
     {

@@ -12,11 +12,16 @@
   "click_through": false,
   "away_after_s": 180,
   "sense_interval_ms": 5000,
+  "dnd_manual": false,
+  "dnd_auto": true,
+  "dnd_from": "23:00",
+  "dnd_to": "08:00",
   "sound_enabled": true,
   "volume": 70,
   "voice_volume": 85,
   "mute": false,
   "frameseq_dir": "frameseq",
   "port": 4010,
+  "api_enabled": true,
   "log_level": "info"
 }
