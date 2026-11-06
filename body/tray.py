@@ -134,6 +134,9 @@ class BodyTray(QObject):
         self.act_mute.toggled.connect(self._on_mute)
         sound_menu.addAction(self.act_mute)
         sound_menu.addSeparator()
+        self.act_audio = QAction("试听 / 重开音频", sound_menu)
+        self.act_audio.triggered.connect(self._reinit_audio)
+        sound_menu.addAction(self.act_audio)
         for label, vol in (("小（40%）", 40), ("中（70%）", 70), ("大（100%）", 100)):
             act = QAction(label, sound_menu, checkable=True)
             act.setChecked(int(getattr(sound, "volume", 70)) == vol)
@@ -194,6 +197,17 @@ class BodyTray(QObject):
     def _on_mute(self, checked: bool) -> None:
         self.sound.set_muted(bool(checked))
         self.muted_changed.emit(bool(checked))
+
+    def _reinit_audio(self) -> None:
+        """重开音频输出并试听一声——换过耳机/虚拟声卡程序退出后没声音时用。"""
+        try:
+            ready = self.sound.reinit() if hasattr(self.sound, "reinit") else 0
+            played = self.sound.play("click")
+            name = getattr(self.sound, "device_name", "")
+            self._notify("音频已重开（%s，就绪 %d 个，试听%s）"
+                         % (name or "默认设备", ready, "已播" if played else "未播"))
+        except Exception as exc:
+            self._notify("重开音频失败：%s" % exc)
 
     def _set_volume(self, vol: int) -> None:
         self.sound.set_volume(vol)

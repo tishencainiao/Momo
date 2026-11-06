@@ -152,9 +152,53 @@ class SoundPlayer:
         self.last_error = ""
         self.backend = "qt" if _HAS_QT else "winsound"
         self._effects = {}                 # name -> QSoundEffect（必须持有引用，否则会被回收）
+        self._device_id = self._current_device_id()
+        self.device_name = self._current_device_name()
         self._fallback = None
         if not _HAS_QT:
             self._fallback = _WinsoundBackend(sounds_dir, lambda: self.volume, lambda: self.muted)
+
+    # ---- 音频设备 ----
+    @staticmethod
+    def _current_device_id() -> str:
+        try:
+            from PySide6.QtMultimedia import QMediaDevices
+
+            return bytes(QMediaDevices.defaultAudioOutput().id()).decode("utf-8", "ignore")
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _current_device_name() -> str:
+        try:
+            from PySide6.QtMultimedia import QMediaDevices
+
+            return QMediaDevices.defaultAudioOutput().description()
+        except Exception:
+            return ""
+
+    def _ensure_device(self) -> None:
+        """默认输出设备变了就重建 QSoundEffect。
+
+        不这么做的坑：进程启动时绑定的端点如果中途失效（换耳机、虚拟声卡程序
+        退出、FxSound 之类的中间层被关掉），Qt 仍会报 `playing=True`，
+        但声音其实送不到声卡——表现就是「点了没声、日志却说响了」。
+        """
+        cur = self._current_device_id()
+        if cur and cur != self._device_id:
+            self._effects.clear()
+            self._device_id = cur
+            self.device_name = self._current_device_name()
+            self.last_error = "音频设备切换：%s" % self.device_name
+
+    def reinit(self, names=("click", "agent/start", "agent/done", "agent/error")) -> int:
+        """手动重开音频（托盘「试听 / 重开音频」用）：清缓存、重建设备与音效。"""
+        if not _HAS_QT:
+            return 0
+        self._effects.clear()
+        self._device_id = self._current_device_id()
+        self.device_name = self._current_device_name()
+        return self.preload(names)
 
     # ---- 设置 ----
     def set_volume(self, volume: int) -> None:
@@ -185,6 +229,7 @@ class SoundPlayer:
 
     # ---- 播放 ----
     def _effect(self, name: str):
+        self._ensure_device()
         eff = self._effects.get(name)
         if eff is not None:
             return eff

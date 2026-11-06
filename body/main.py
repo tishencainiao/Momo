@@ -133,7 +133,8 @@ def main(argv=None) -> int:
             muted=bool(config.get("mute")),
         )
         ready = player.preload()          # 提前打开音频设备，第一次点击就不卡
-        log("音效后端=%s，预加载就绪 %d 个" % (player.backend, ready))
+        log("音效后端=%s，预加载就绪 %d 个，输出设备=%s"
+            % (player.backend, ready, getattr(player, "device_name", "") or "默认"))
 
     try:
         win = PetWindow(config, sound=player, api=api)
