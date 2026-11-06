@@ -166,8 +166,26 @@ function prepareVoice(userId, text) {
   pendingVoice.set(key, { file, text: t, job: synthesize(t, file) });
   return { ok: true, text: t };
 }
-function takePendingVoice(userId) { return pendingVoice.get(String(userId)) || null; }
-function clearPendingVoice(userId) { const k = String(userId); const p = pendingVoice.get(k); pendingVoice.delete(k); return p; }
+/* 给「桌面语音」用：把一句话合成到文件，返回路径（不经过 QQ 发送链路）
+ * 顺手清理两小时前的临时文件，避免 data/ 里堆一堆 tts-body-*.mp3 */
+function synthesizeToFile(text, ext = "mp3") {
+  const t = stripStageDirections(String(text || "")).slice(0, 200);
+  if (!t) return Promise.resolve({ ok: false, error: "内容为空" });
+  try {
+    const now = Date.now();
+    for (const f of fs.readdirSync(_ctx.DATA_DIR)) {
+      if (!f.startsWith("tts-body-")) continue;
+      const fp = path.join(_ctx.DATA_DIR, f);
+      try {
+        if (now - fs.statSync(fp).mtimeMs > 2 * 3600e3) fs.unlinkSync(fp);
+      } catch (e) {}
+    }
+  } catch (e) {}
+  const file = path.join(_ctx.DATA_DIR, "tts-body-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6) + "." + ext);
+  return synthesize(t, file).then((r) => (r.ok ? { ok: true, file, text: t } : r));
+}
+
+function takePendingVoice(userId) { return pendingVoice.get(String(userId)) || null; }function clearPendingVoice(userId) { const k = String(userId); const p = pendingVoice.get(k); pendingVoice.delete(k); return p; }
 function hasPendingVoice(userId) { return pendingVoice.has(String(userId)); }
 function voiceOnlyReply() {
   try { return _ctx.getSetting("qq.voice_only", true) !== false; } catch (e) { return true; }
@@ -183,7 +201,7 @@ module.exports = {
     { key: "qq.voice_warm", label: "语音预热", type: "boolean", default: true, desc: "收到语音请求时后台先拉起 TTS 服务，减少等待" },
     { key: "qq.voice_only", label: "发语音时不配文字", type: "boolean", default: true, desc: "开着：语音回复只发语音；关掉：文字+语音两条都发" },
   ],
-  api: { voice: { wantsVoice, sendVoice, warmVoice, transcribeRecords, voiceRateOk, prepareVoice, takePendingVoice, clearPendingVoice, hasPendingVoice, voiceOnlyReply } },
+  api: { voice: { wantsVoice, sendVoice, warmVoice, transcribeRecords, voiceRateOk, prepareVoice, takePendingVoice, clearPendingVoice, hasPendingVoice, voiceOnlyReply, synthesizeToFile } },
   tools: [{
     def: {
       type: "function",

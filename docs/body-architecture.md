@@ -122,6 +122,14 @@ python body\main.py
 - **降级**：只装了 PySide6-Essentials 的机器上 `import QtMultimedia` 失败，会自动退回 winsound 后端（功能不中断，只是延迟高）——日志里会打 `音效后端=winsound`。
 - **坑**：winsound 不允许「内存 + 异步」同时用（`Cannot play asynchronously from memory`），所以降级后端只能后台线程同步播；QSoundEffect 则没有这个限制。
 
+
+### 9.1 桌面语音（v0.3）
+
+- 链路：pet_speak → 大脑侧 oice.synthesizeToFile()（复用 tts.py 的克隆音色，产出 mp3）→ POST /cmd/speak {path,text} → 身体用 **QMediaPlayer** 播放 + 气泡按时长对齐。
+- 为什么不用 QSoundEffect：它只吃未压缩 WAV，而 tts.py 产出的是 mp3；QMediaPlayer 还能取时长。
+- **合成不能进回复链路**：GSV 冷启动可达几十秒，会把联脑 30 秒超时拖爆（实测第一次就这么挂的）。所以 pet_speak 先弹气泡立刻返回，合成与播放在后台完成，失败只记 action + warn。
+- 临时文件：data/tts-body-*.mp3，播完自动删；voice.js 另有 2 小时兜底清理。
+- 音量：oice_volume（默认 85）与点击音效分开；每次播放前重绑默认输出设备。
 ## 10. 托盘与大脑控制（安全口径）
 
 - 找进程**按命令行匹配**，不按进程名：大脑必须是 `node.exe` 且命令行含 `Momo\index.js`；守护必须是 `powershell.exe` 且含 `-File ...supervise.ps1`；并且都要排除「正在跑查询的 powershell 自己」（`$_.ProcessId -ne $PID`）。

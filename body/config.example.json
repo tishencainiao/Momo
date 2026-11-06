@@ -12,6 +12,7 @@
   "click_through": false,
   "sound_enabled": true,
   "volume": 70,
+  "voice_volume": 85,
   "mute": false,
   "frameseq_dir": "frameseq",
   "port": 4010,

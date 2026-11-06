@@ -19,6 +19,7 @@ DEFAULTS = {
     "scale": 0.40,                   # 画布 640x360；0.40 时角色约 108px 高（右键可切三档/微调）
     "tiers": [0.30, 0.40, 0.50],     # 右键菜单的三档（小/中/大）
     "volume": 70,                    # 点击音效音量 0~100
+    "voice_volume": 85,              # 桌面语音（克隆音色）音量 0~100
     "mute": False,
     "sound_enabled": True,
     "always_on_top": True,

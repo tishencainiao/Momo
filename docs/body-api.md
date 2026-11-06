@@ -21,12 +21,15 @@
 | 路径 | 入参 | 说明 |
 |---|---|---|
 | `POST /cmd/say` | `{"text":"...","duration_ms":5000}` | 头顶气泡说出这句话 + 播一段说话类动画（碎碎念/是啊吃什么/随机），气泡到时自动消失 |
+| `POST /cmd/speak` | `{"path":"C:/.../tts-body-xxx.mp3","text":"...","duration_ms":0}` | 播一段**真实语音**（大脑先用 tts.py 合成到文件）+ 头顶气泡；气泡时长按音频长度自动对齐，播完自动删掉临时文件 |
 | `POST /cmd/play` | `{"name":"优雅女仆舞"}` 或 `{"category":"random"}` | 点播动画；`name` 支持中文片段模糊匹配，`category` 可取 `random/click/turn/move/drag` |
 | `POST /cmd/state` | `{"state":"idle"\|"sleep"}` | `idle` 回待机；`sleep` 播小憩/沉眠类动画并进入休眠状态 |
 | `POST /cmd/move` | `{"dx":20,"dy":-10}` 或 `{"to_x":900,"to_y":500}` | 相对/绝对移动，位置会写进 `data/body-state.json` |
 | `POST /cmd/show` | `{}` | 显示身体（托盘里点显示等价） |
 | `POST /cmd/hide` | `{}` | 隐藏身体（进程还在，随时可叫回） |
 | `POST /cmd/scale` | `{"scale":0.4}` | 改大小，夹紧在 0.15~1.0 |
+
+> 语音链路：`plugins/pet-body.js` 的 `pet_speak` → `voice.synthesizeToFile()`（复用 tts.py 的克隆音色）→ `POST /cmd/speak`。合成放后台，不在回复链路里干等。
 
 返回示例：`{"ok":true,"queued":true,"cmd":"say"}`
 错误：`400` 请求体不是 JSON 对象；`503` 队列满（身体忙不过来）；`404` 未知路径；`401` 鉴权失败。

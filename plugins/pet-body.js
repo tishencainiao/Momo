@@ -155,6 +155,59 @@ module.exports = {
     },
     {
       def: toolDef(
+        "pet_speak",
+        "在桌面上用**真实语音**说一句话（复用 Momo 的克隆音色：先合成再播，气泡会按语音长度自动停留）。当你想「出声说一句」而不只是弹文字气泡时用它。合成要几秒，别连着调很多次；要快速弹字用 pet_say。",
+        {
+          text: { type: "string", description: "要说的话（短，≤60 字）" },
+          duration_ms: { type: "number", description: "气泡停留毫秒（默认按音频长度自动算）" },
+        },
+        ["text"]
+      ),
+      async handler(args, info) {
+        const why = guard(info);
+        if (why) return why;
+        const text = String((args && args.text) || "").trim();
+        if (!text) return "（要说什么呀）";
+        const voice = _ctx.getApi("voice");
+        if (!voice || typeof voice.synthesizeToFile !== "function") {
+          return "（语音管道不可用：voice 插件没加载，先用 pet_say 弹气泡吧）";
+        }
+        // 1) 先把话弹成气泡（毫秒级，手感立刻回来）
+        await call("POST", "/cmd/say", { text, duration_ms: 6000 });
+        // 2) TTS 放后台：GSV 冷启动可能要几十秒，绝不能让它在回复链路里干等（会把整轮拖超时）
+        try {
+          if (typeof voice.warmVoice === "function") {
+            try {
+              voice.warmVoice();
+            } catch (e) {}
+          }
+          voice
+            .synthesizeToFile(text)
+            .then((syn) => {
+              if (!syn || !syn.ok) {
+                record("body_speak", text + "|synth-fail", false);
+                try {
+                  _ctx.log("warn", "桌面语音合成失败: " + String((syn && syn.error) || ""));
+                } catch (e) {}
+                return null;
+              }
+              return call("POST", "/cmd/speak", {
+                path: syn.file,
+                text: syn.text || text,
+                duration_ms: Number((args && args.duration_ms) || 0),
+              }).then((r) => {
+                const ok = !!(r.status === 200 && r.data && r.data.ok);
+                record("body_speak", text, ok);
+                return null;
+              });
+            })
+            .catch(() => {});
+        } catch (e) {}
+        return "（先在桌面上弹了字，声音马上跟上：" + text.slice(0, 40) + "）";
+      },
+    },
+    {
+      def: toolDef(
         "pet_play",
         "让桌面上的身体播一段指定动画（不说活，只做动作）。可以按名字指定（如「优雅女仆舞」「打瞌睡」）或按分类随机。",
         {

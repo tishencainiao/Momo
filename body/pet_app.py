@@ -53,6 +53,7 @@ class PetWindow(QWidget):
         self.sound = sound
         self.api = api                      # BodyAPI（v0.2 起可用）；None 表示纯本地跑
         self.bubble = None
+        self._voice_out = None
         self.hide_on_close = False          # 有托盘时：关窗=隐藏，不是退出
         self._quitting = False
         self._log = config.get("_log") or (lambda _m: None)
@@ -116,6 +117,8 @@ class PetWindow(QWidget):
 
     def hideEvent(self, event) -> None:                            # noqa: N802
         super().hideEvent(event)
+        if getattr(self, "_voice_out", None) is not None:
+            self._voice_out.stop()
         self._snap(visible=False)
         self._publish("visibility", visible=False)
 
@@ -193,6 +196,30 @@ class PetWindow(QWidget):
         self._snap(state="talk", anim=(clip.key if clip else ""), last_say=str(text)[:80])
         self._publish("say", text=str(text)[:200])
 
+    # ---------- 语音（复用大脑合成好的音频文件） ----------
+    def _voice(self):
+        if getattr(self, "_voice_out", None) is None:
+            from voiceout import VoiceOut
+
+            self._voice_out = VoiceOut(self)
+            self._voice_out.set_volume(int(self.cfg.get("voice_volume") or self.cfg.get("volume") or 85))
+            self._voice_out.finished.connect(lambda p: self._publish("voice_end", path=str(p)))
+        return self._voice_out
+
+    def speak(self, path: str, text: str = "", duration_ms: int = 0) -> None:
+        """播一段语音 + 头顶气泡（气泡时长按音频长度自动对齐）。"""
+        voice = self._voice()
+        duration = int(duration_ms or 0)
+        if not duration:
+            duration = voice.duration_ms() + 900 if voice.duration_ms() else 6000
+        if text:
+            self.say(text, duration)
+        ok = voice.play(path, delete_after=True)
+        if not ok:
+            self._log("语音播放失败：%s" % getattr(voice, "last_error", ""))
+        self._publish("voice", path=str(path), ok=bool(ok))
+        self._snap(state="talk", last_voice_ok=bool(ok))
+
     def handle_command(self, cmd: str, payload: dict) -> dict:
         """执行一条来自 HTTP 的指令；返回执行结果（GUI 线程内调用）。"""
         payload = payload or {}
@@ -202,6 +229,13 @@ class PetWindow(QWidget):
                 return {"ok": False, "error": "empty text"}
             self.say(text, int(payload.get("duration_ms") or 5000))
             return {"ok": True, "said": text[:80]}
+
+        if cmd == "speak":
+            path = str(payload.get("path") or "").strip()
+            if not path:
+                return {"ok": False, "error": "empty path"}
+            self.speak(path, str(payload.get("text") or ""), int(payload.get("duration_ms") or 0))
+            return {"ok": True, "spoke": str(payload.get("text") or "")[:80]}
 
         if cmd == "play":
             clip = None

@@ -20,6 +20,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // ---- ctx 桩 ----
 const store = new Map();
 const actions = [];
+let fakeVoice = null;
 const ctx = {
   getSetting: (k, d) => (store.has(k) ? store.get(k) : d),
   setSetting: (k, v) => store.set(k, v),
@@ -27,6 +28,7 @@ const ctx = {
   log: () => {},
   recordAction: (e) => actions.push(e),
   sendPrivate: (u, t) => { ctx._lastPrivate = { u, t }; },
+  getApi: (n) => (n === "voice" ? fakeVoice : null),
 };
 plugin.init(ctx);
 
@@ -122,6 +124,44 @@ const tool = (n) => plugin.tools.find((t) => t.def.function.name === n);
   mode = "fail";
   r = await tool("pet_say").handler({ text: "报错测试" }, MASTER);
   check("身体 500 时返回离线提示而不是崩", /身体好像没在跑/.test(r), r);
+
+  console.log("\n[8] 桌面语音（pet_speak：先气泡、后台合成再播）");
+  mode = "ok";
+  let synthCalls = 0;
+  fakeVoice = {
+    warmVoice: () => {},
+    synthesizeToFile: async (text) => {
+      synthCalls++;
+      await sleep(60);
+      return { ok: true, file: "/tmp/momo-fake.mp3", text };
+    },
+  };
+  seen.length = 0;
+  r = await tool("pet_speak").handler({ text: "晚安，早点睡" }, MASTER);
+  check("pet_speak 立即回执（不干等合成）", /弹了字/.test(r), r);
+  check("先发了气泡 /cmd/say", seen.some((s) => s.url === "/cmd/say"));
+  check("此时还没发 /cmd/speak（合成在后台）", !seen.some((s) => s.url === "/cmd/speak"));
+  await sleep(400);
+  check("合成完成后补发 /cmd/speak", seen.some((s) => s.url === "/cmd/speak"));
+  check("合成被调用了一次", synthCalls === 1, String(synthCalls));
+  const speakReq = seen.filter((s) => s.url === "/cmd/speak").pop();
+  check("/cmd/speak 带音频路径与原文",
+    !!speakReq && JSON.parse(speakReq.body).path === "/tmp/momo-fake.mp3"
+    && JSON.parse(speakReq.body).text === "晚安，早点睡");
+
+  seen.length = 0;
+  fakeVoice = null;
+  r = await tool("pet_speak").handler({ text: "没有语音管道" }, MASTER);
+  check("voice 插件不在时给明确提示", /语音管道不可用/.test(r), r);
+  check("此时不该发 /cmd/speak", !seen.some((s) => s.url === "/cmd/speak"));
+
+  fakeVoice = { synthesizeToFile: async () => ({ ok: false, error: "gsv 挂了" }), warmVoice: () => {} };
+  seen.length = 0;
+  r = await tool("pet_speak").handler({ text: "合成会失败" }, MASTER);
+  check("合成失败也先弹气泡（不静默）", /弹了字/.test(r));
+  await sleep(300);
+  check("合成失败时不发 /cmd/speak", !seen.some((s) => s.url === "/cmd/speak"));
+  check("合成失败记了失败 action", actions.some((a) => a.action === "body_speak" && a.ok === false));
 
   server.close();
   await sleep(50);
