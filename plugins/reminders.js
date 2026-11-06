@@ -196,6 +196,13 @@ module.exports = {
         x.done = true; changed = true;
         _ctx.recordAndSend(Number(x.userId), `⏰ 提醒你：${x.text}`).catch(() => {});
         if (cfgBool("reminder.desktop_toast", true)) showDesktopToast("Momo 提醒", x.text);
+        // v0.6：桌面上也播报一句（身体在跑时才有反应，失败静默）
+        try {
+          const ba = _ctx.getApi("body");
+          if (ba && typeof ba.announce === "function") {
+            ba.announce(`⏰ 到点啦：${x.text}`, { duration_ms: 8000 }).catch(() => {});
+          }
+        } catch (e) {}
         _ctx.log("info", `提醒触发 → ${x.userId}: ${x.text.slice(0, 30)}`);
       }
       if (changed) saveReminders(r);

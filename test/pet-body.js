@@ -56,7 +56,7 @@ const tool = (n) => plugin.tools.find((t) => t.def.function.name === n);
     check("有工具 " + n, names.includes(n));
   });
   check("有 /身体 命令", plugin.commands.some((c) => c.key === "/身体"));
-  check("暴露两个设置项", Array.isArray(plugin.settings) && plugin.settings.length === 2);
+  check("设置项齐备（接口地址 + 报时 + 早间播报 + 开关）", Array.isArray(plugin.settings) && plugin.settings.length >= 6, String(plugin.settings.length));
 
   console.log("\n[2] 权限与开关");
   let r = await tool("pet_say").handler({ text: "不该被朋友触发" }, FRIEND);
@@ -247,6 +247,47 @@ const tool = (n) => plugin.tools.find((t) => t.def.function.name === n);
   check("推送内容含 mood/boredom/emotion",
     !!moodReq && JSON.parse(moodReq.body).mood === 12 && JSON.parse(moodReq.body).boredom === 55
     && JSON.parse(moodReq.body).emotion === "开心", moodReq && moodReq.body);
+
+  console.log("\n[11] 陪伴外挂（报时 / 余额 / 抽签 / 播报接口）");
+  const t2 = plugin.__test;
+  check("整点报时文案带小时", /11 点|11点/.test(t2.buildChimeLine(11)), t2.buildChimeLine(11));
+  check("节日表含国庆与圣诞", t2.FESTIVALS["10-01"] === "国庆节" && t2.FESTIVALS["12-25"] === "圣诞节");
+  check("今日日期键是 MM-DD", /^\d{2}-\d{2}$/.test(t2.todayKey(new Date(2026, 0, 5))), t2.todayKey(new Date(2026, 0, 5)));
+
+  // 余额：按已用百分比分 6 档
+  ctx.getApi = (n) => {
+    if (n === "voice") return fakeVoice;
+    if (n === "budgetReport") {
+      return {
+        loadBudget: () => ({}),
+        dailyBill: () => "📊 今日账单\n生活费：¥1.200 / ¥2（60%）\n花费明细：聊天 ¥1.2\n调用：chat 3次",
+      };
+    }
+    return null;
+  };
+  plugin.init(ctx);                        // 前面的分支用过 spread 出来的 ctx，这里换回主 ctx
+  store.set("body.url", "http://127.0.0.1:" + port);   // 让请求回到 stub 身体
+  const bl = await t2.balanceLevel();
+  check("余额档位按百分比算（60% → 第 3 档）", bl.pct === 60 && bl.idx === 3, JSON.stringify(bl));
+  check("余额档位对应素材名", bl.clip === t2.BALANCE_CLIPS[3], bl.clip);
+
+  seen.length = 0;
+  r = await tool("pet_balance").handler({}, MASTER);
+  check("pet_balance 播动画并报账", seen.some((s) => s.url === "/cmd/play") && /生活费/.test(r), r);
+  r = await tool("pet_balance").handler({}, FRIEND);
+  check("朋友不能看账本", /只有主人/.test(r), r);
+
+  seen.length = 0;
+  r = await tool("pet_fortune").handler({}, MASTER);
+  check("pet_fortune 给出运势并在桌面说", /今日运势/.test(r) && seen.some((s) => s.url === "/cmd/say"), r);
+
+  // 给别的插件用的 announce 接口
+  seen.length = 0;
+  const ann = await plugin.api.body.announce("⏰ 到点啦：喝水", { duration_ms: 8000 });
+  check("api.body.announce 被调用会发气泡", ann.ok === true && seen.some((s) => s.url === "/cmd/say"), JSON.stringify(ann));
+  const ann2 = await plugin.api.body.announce("");
+  check("空文本不播报", ann2.ok === false);
+  ctx.getApi = (n) => (n === "voice" ? fakeVoice : null);
 
   server.close();
   await sleep(50);

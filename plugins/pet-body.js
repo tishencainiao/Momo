@@ -78,6 +78,109 @@ function offlineHint() {
   return "身体好像没在跑（连不上本机接口 http://127.0.0.1:4010）。双击桌面「Momo 身体」或托盘里点一下就能叫回来，然后再叫我一次。";
 }
 
+/* ---------------- 陪伴外挂（v0.6）：报时 / 早间播报 / 节日 / 抽签 / 余额 ----------------
+ * 口径：逻辑全在大脑这边，身体只负责「弹字 + 发声 + 播对应动画」。
+ */
+const FESTIVALS = {
+  "01-01": "元旦",
+  "02-14": "情人节",
+  "03-08": "妇女节",
+  "04-01": "愚人节",
+  "05-01": "劳动节",
+  "06-01": "儿童节",
+  "09-10": "教师节",
+  "10-01": "国庆节",
+  "12-24": "平安夜",
+  "12-25": "圣诞节",
+};
+
+const CHIME_LINES = [
+  "{h} 点啦，主人抬头看看远处呗～",
+  "叮——{h} 点了，时间过得真快呀。",
+  "{h} 点了哦，喝口水再继续嘛。",
+  "整点报时：{h} 点。我在旁边陪着呢。",
+  "又是新的一小时啦（{h} 点），主人还在忙吗？",
+  "{h} 点整～伸个懒腰吧，我给你看着时间。",
+];
+
+const FORTUNES = [
+  { luck: "大吉", text: "今天适合把拖着的事收个尾，顺手得像一条顺水的鱼。" },
+  { luck: "中吉", text: "会遇到一点小麻烦，但都在能解决的范围内，别慌。" },
+  { luck: "小吉", text: "适合吃点好的，肠胃开心人就开心。" },
+  { luck: "吉", text: "有人会想起你——可能是很久没联系的那种。" },
+  { luck: "平", text: "普普通通的一天，但普普通通也挺好。" },
+  { luck: "小凶", text: "别熬夜，熬了明天会更烦。" },
+  { luck: "凶", text: "今天少做决定，多喝水，多休息。" },
+  { luck: "大凶", text: "什么也别干了，摸鱼吧——反正这签说你也干不成（我胡说的）。" },
+];
+
+const BALANCE_CLIPS = [
+  "余额-钱袋满溢", "余额-金袋叮当", "余额-钱袋如常",
+  "余额-数金皱眉", "余额-袋空如洗", "余额-分文不剩",
+];
+
+function todayKey(d = new Date()) {
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return mm + "-" + dd;
+}
+
+function hourNow() {
+  return new Date().getHours();
+}
+
+/* 给别的插件用的「让身体播报」入口（提醒、晚report 之类都可以调） */
+async function announce(text, opts) {
+  const o = opts || {};
+  const t = String(text || "").trim();
+  if (!t) return { ok: false, error: "empty" };
+  if (!enabled()) return { ok: false, error: "body disabled" };
+  const r = await call("POST", "/cmd/say", { text: t, duration_ms: Number(o.duration_ms) || 6000 });
+  if (o.voice && token()) {
+    try {
+      const voice = _ctx.getApi("voice");
+      if (voice && typeof voice.synthesizeToFile === "function") {
+        voice.synthesizeToFile(t).then((syn) => {
+          if (syn && syn.ok) {
+            call("POST", "/cmd/speak", { path: syn.file, text: t, duration_ms: 0 }).catch(() => {});
+          }
+        }).catch(() => {});
+      }
+    } catch (e) {}
+  }
+  return { ok: !!(r.status === 200 && r.data && r.data.ok) };
+}
+
+/* 生活费：用今日花费比例挑 6 档余额动画 */
+async function balanceLevel() {
+  let pct = 0;
+  let text = "";
+  try {
+    const br = _ctx.getApi("budgetReport");
+    if (br && typeof br.dailyBill === "function") {
+      const state = (typeof br.loadBudget === "function") ? br.loadBudget() : {};
+      const raw = br.dailyBill(state || {});
+      const s = Array.isArray(raw) ? raw.join("\n") : String(raw || "");
+      const m = s.match(/（(\d+)%）/) || s.match(/(\d+)%/);
+      if (m) pct = Number(m[1]);
+      const line = s.split("\n").find((l) => l.indexOf("生活费") >= 0);
+      text = line ? line.replace(/^生活费：/, "").trim() : "";
+    }
+  } catch (e) {}
+  if (!text) {
+    try { text = String((_ctx.budgetLevel && _ctx.budgetLevel()) || ""); } catch (e) {}
+  }
+  pct = Math.max(0, Math.min(200, pct));
+  const idx = Math.max(0, Math.min(5, Math.floor(pct / 20)));
+  return { pct, text, idx, clip: BALANCE_CLIPS[idx] };
+}
+
+/* 整点报时的一句话（单独抽出来，方便测试） */
+function buildChimeLine(h) {
+  const line = CHIME_LINES[Math.floor(Math.random() * CHIME_LINES.length)];
+  return line.replace("{h}", String(h));
+}
+
 /* ---------------- 感官回流（v0.4） ----------------
  * 身体用 SSE 把「在不在电脑前 / 前台是什么 / 锁屏 / 被点了 / 收文件 / 说过话」推过来，
  * 这里维护一份最新快照 + 落 data/body-events.jsonl，再通过 contextProvider 注入提示词。
@@ -134,6 +237,8 @@ function handleBodyEvent(name, data) {
 
 let sseStarted = false;
 let lastMoodPush = 0;
+let lastChimeHour = -1;
+let lastMorningKey = "";
 async function startSse() {
   if (sseStarted) return;
   sseStarted = true;
@@ -271,6 +376,38 @@ module.exports = {
       type: "string",
       default: DEFAULT_URL,
       desc: "身体本地 HTTP 接口，默认 http://127.0.0.1:4010",
+    },
+    {
+      key: "body.hourly_chime",
+      label: "整点报时",
+      type: "boolean",
+      default: true,
+      desc: "每到整点在桌面上报一次时间（只在这个时段内）",
+    },
+    {
+      key: "body.chime_from",
+      label: "报时起始小时",
+      type: "number",
+      default: 8,
+      min: 0,
+      max: 23,
+      desc: "从几点开始报时（默认 8 点）",
+    },
+    {
+      key: "body.chime_to",
+      label: "报时结束小时",
+      type: "number",
+      default: 23,
+      min: 0,
+      max: 23,
+      desc: "到几点停止报时（默认 23 点）",
+    },
+    {
+      key: "body.morning_report",
+      label: "早间播报",
+      type: "boolean",
+      default: true,
+      desc: "每天 7~10 点第一次运行时，用语音报天气/节日/叫起床",
     },
   ],
   tools: [
@@ -459,6 +596,44 @@ module.exports = {
     },
     {
       def: toolDef(
+        "pet_balance",
+        "让身体播「生活费余额」对应的动画（按今天已用比例分 6 档：钱袋满溢→分文不剩），并报一句账。主人问「生活费还剩多少」「今天花了多少」时调用。",
+        {},
+        []
+      ),
+      async handler(args, info) {
+        if (!requireMaster(info)) return "（只有主人能看我的账本哦）";
+        const lv = await balanceLevel();
+        const text = "今天的生活费已用 " + lv.pct + "%" + (lv.text ? "（" + lv.text + "）" : "");
+        try {
+          const r1 = await call("POST", "/cmd/play", { name: lv.clip });
+          await call("POST", "/cmd/say", { text, duration_ms: 6000 });
+          record("body_balance", lv.clip, !!(r1.status === 200));
+        } catch (e) {
+          return offlineHint();
+        }
+        return text + "（身体演的是「" + lv.clip + "」）";
+      },
+    },
+    {
+      def: toolDef(
+        "pet_fortune",
+        "在桌面上抽一支签（今日运势），身体会弹气泡说结果。主人说「抽个签」「今天运势怎么样」时调用。",
+        {},
+        []
+      ),
+      async handler(args, info) {
+        const why = guard(info);
+        if (why) return why;
+        const f = FORTUNES[Math.floor(Math.random() * FORTUNES.length)];
+        const text = "今日运势：" + f.luck + "——" + f.text;
+        const r = await call("POST", "/cmd/say", { text, duration_ms: 9000 });
+        record("body_fortune", f.luck, !!(r.status === 200 && r.data && r.data.ok));
+        return text;
+      },
+    },
+    {
+      def: toolDef(
         "pet_state",
         "切换身体的状态：idle 待机 / sleep 睡觉 / show 显示 / hide 隐藏。要让它说话请用 pet_say。",
         {
@@ -575,9 +750,45 @@ module.exports = {
   hooks: {
     timer(payload) {
       const now = (payload && payload.now) || Date.now();
+      if (!enabled()) return;
+
+      // 整点报时（默认 8~23 点，每小时最多一次）
+      try {
+        const h = hourNow();
+        const from = Number(_ctx.getSetting("body.chime_from", 8));
+        const to = Number(_ctx.getSetting("body.chime_to", 23));
+        if (_ctx.getSetting("body.hourly_chime", true) !== false && h >= from && h <= to && lastChimeHour !== h) {
+          lastChimeHour = h;
+          announce(buildChimeLine(h), { duration_ms: 5000 }).catch(() => {});
+        }
+      } catch (e) {}
+
+      // 早间播报（7~10 点，每天一次）：天气 + 节日 + 叫起床
+      try {
+        const h = hourNow();
+        const key = new Date().toDateString();
+        if (_ctx.getSetting("body.morning_report", true) !== false && h >= 7 && h <= 10 && lastMorningKey !== key) {
+          lastMorningKey = key;
+          (async () => {
+            const bits = [];
+            try {
+              const w = _ctx.getApi("weather");
+              if (w && typeof w.weatherCtx === "function") {
+                const t = await w.weatherCtx();
+                if (t) bits.push(String(t).replace(/^【天气】/, "").replace(/。（可以自然地.*?）$/, ""));
+              }
+            } catch (e) {}
+            const fest = FESTIVALS[todayKey()];
+            if (fest) bits.push("今天是" + fest + "哦");
+            bits.push("该起床啦，记得吃点东西");
+            announce(bits.join("；"), { voice: true, duration_ms: 9000 }).catch(() => {});
+          })();
+        }
+      } catch (e) {}
+
+      // 情绪同步（5 分钟一次）
       if (now - lastMoodPush < 300000) return;
       lastMoodPush = now;
-      if (!enabled()) return;
       try {
         const mood = Math.round(((_ctx.getMood && _ctx.getMood()) || 0));
         const boredom = Math.round(((_ctx.getBoredom && _ctx.getBoredom()) || 0));
@@ -586,6 +797,14 @@ module.exports = {
       } catch (e) {}
     },
   },
+  api: {
+    body: {
+      announce,
+      balanceLevel,
+      senseText,
+      status: () => call("GET", "/status"),
+    },
+  },
   // 供测试用（不参与运行时逻辑）
-  __test: { sense, handleBodyEvent, senseText },
+  __test: { sense, handleBodyEvent, senseText, announce, balanceLevel, buildChimeLine, FESTIVALS, FORTUNES, todayKey, BALANCE_CLIPS },
 };
