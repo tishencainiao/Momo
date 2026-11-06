@@ -156,7 +156,14 @@ def main(argv=None) -> int:
                     if item.get("event") is not None:
                         item["result"] = res
                         item["event"].set()
-                    log("指令 %s -> %s" % (item.get("cmd"), res))
+                    # 日志脱敏：感官结果里的窗口标题属于私事，落盘只留程序名
+                    log_res = res
+                    if item.get("cmd") == "sense" and isinstance(res, dict) and isinstance(res.get("foreground"), dict):
+                        log_res = dict(res)
+                        fg = dict(res["foreground"])
+                        fg.pop("title", None)
+                        log_res["foreground"] = fg
+                    log("指令 %s -> %s" % (item.get("cmd"), log_res))
 
             drain.timeout.connect(_drain)
             drain.start()
