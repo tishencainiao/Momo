@@ -28,6 +28,8 @@
 | `POST /cmd/show` | `{}` | 显示身体（托盘里点显示等价） |
 | `POST /cmd/hide` | `{}` | 隐藏身体（进程还在，随时可叫回） |
 | `POST /cmd/scale` | `{"scale":0.4}` | 改大小，夹紧在 0.15~1.0 |
+| `POST /cmd/sense` | `{}` | 返回感官快照：`idle_s` / `presence`(active·away) / `foreground{title,pid,app}` / `locked` / `last_look` |
+| `POST /cmd/look` | `{}` | 抓一张全屏（缩到 1280 宽存 jpg，只留最近 20 张），返回 `{path,width,height,ts}` |
 
 > 语音链路：`plugins/pet-body.js` 的 `pet_speak` → `voice.synthesizeToFile()`（复用 tts.py 的克隆音色）→ `POST /cmd/speak`。合成放后台，不在回复链路里干等。
 
@@ -56,6 +58,12 @@
 
 | 事件 | 字段 | 触发 |
 |---|---|---|
+| `sense` | 完整快照 | 感官首次采样 / 状态变化 |
+| `presence` | `presence,idle_s` | 键鼠空闲跨过阈值（默认 180 秒）时说「主人可能走了/回来了」 |
+| `foreground` | `title,pid,app` | 前台窗口变了 |
+| `lock` | `locked` | 锁屏/解锁 |
+| `drop` | `files[]` | 往她身上拖了文件（投喂） |
+| `look` | `path,ts` | 被要求看了一眼屏幕 |
 | `click` | `x,y,sound` | 主人点了她一下 |
 | `drag_end` | `x,y` | 拖拽放下（位置已保存） |
 | `visibility` | `visible` | 显示/隐藏 |

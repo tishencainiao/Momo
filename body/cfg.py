@@ -33,6 +33,8 @@ DEFAULTS = {
     "click_through": False,          # 整窗鼠标穿透（右键菜单可切）
     "port": 4010,                    # 本地接口端口（v0.2 起）
     "api_enabled": True,             # 关掉就只显示、不接受任何指令
+    "away_after_s": 180,             # 键鼠空闲超过多少秒算「主人不在电脑前」
+    "sense_interval_ms": 5000,       # 感官采样间隔
     "log_level": "info",
 }
 

@@ -29,6 +29,11 @@ const ctx = {
   recordAction: (e) => actions.push(e),
   sendPrivate: (u, t) => { ctx._lastPrivate = { u, t }; },
   getApi: (n) => (n === "voice" ? fakeVoice : null),
+  describeImageFile: async (p, prompt) => {
+    ctx._lastDescribe = { p, prompt };
+    if (ctx._describeThrows) throw new Error("视觉接口炸了");
+    return "主人在写代码（VS Code），窗口标题是 index.js";
+  },
 };
 plugin.init(ctx);
 
@@ -78,6 +83,13 @@ const tool = (n) => plugin.tools.find((t) => t.def.function.name === n);
       if (req.url.startsWith("/status")) {
         return send(200, { ok: true, protocol: "1", pid: 1234, port: 4010, state: "talk",
           anim: "深度思考碎碎念", visible: true, scale: 0.4, pos: [100, 200] });
+      }
+      if (req.url.startsWith("/cmd/sense")) {
+        return send(200, { ok: true, idle_s: 12.5, presence: "active", locked: false,
+          foreground: { title: "index.js — Momo", pid: 4321, app: "Code.exe" }, last_look: null });
+      }
+      if (req.url.startsWith("/cmd/look")) {
+        return send(200, { ok: true, path: "E:/Learn/Momo/data/body-shots/fake.jpg", ts: Date.now() / 1000, width: 1280, height: 720 });
       }
       return send(200, { ok: true, queued: true, anim: "哈欠连天", x: 120, y: 220 });
     });
@@ -162,6 +174,45 @@ const tool = (n) => plugin.tools.find((t) => t.def.function.name === n);
   await sleep(300);
   check("合成失败时不发 /cmd/speak", !seen.some((s) => s.url === "/cmd/speak"));
   check("合成失败记了失败 action", actions.some((a) => a.action === "body_speak" && a.ok === false));
+
+  console.log("\n[9] 感官回流（pet_sense / pet_look / contextProvider）");
+  r = await tool("pet_sense").handler({}, MASTER);
+  check("pet_sense 说清在不在 + 前台程序", /主人在电脑前|主人可能不在/.test(r) && /Code/.test(r), r);
+
+  r = await tool("pet_sense").handler({}, FRIEND);
+  check("朋友查感官被拒", /只有主人/.test(r), r);
+
+  r = await tool("pet_look").handler({ question: "他在干嘛" }, MASTER);
+  check("pet_look 返回看图描述", /主人在写代码/.test(r), r);
+  check("pet_look 把截图路径交给视觉接口", !!ctx._lastDescribe && /fake\.jpg$/.test(ctx._lastDescribe.p), JSON.stringify(ctx._lastDescribe));
+  check("pet_look 把问题透传给视觉接口", !!ctx._lastDescribe && ctx._lastDescribe.prompt === "他在干嘛");
+
+  // 20 秒内重复看会被劝退（省钱）
+  r = await tool("pet_look").handler({}, MASTER);
+  check("短时间重复看图会被拦", /刚看过一眼/.test(r), r);
+
+  ctx._describeThrows = true;
+  require(path.join(__dirname, "..", "plugins", "pet-body.js")).__test.sense.lastLook = null;
+  r = await tool("pet_look").handler({}, MASTER);
+  check("视觉接口出错时把路径给出来而不是崩", /看图的接口出错了/.test(r) && /fake\.jpg/.test(r), r);
+  ctx._describeThrows = false;
+
+  const t = plugin.__test;
+  t.sense.updatedAt = 0;
+  check("没有感官数据时 contextProvider 返回空", plugin.contextProvider({}) === "");
+  t.handleBodyEvent("presence", { presence: "away", idle_s: 600 });
+  t.handleBodyEvent("foreground", { title: "index.js — Momo", pid: 1, app: "Code.exe" });
+  t.handleBodyEvent("click", { x: 1, y: 2, sound: true });
+  const ctxText = plugin.contextProvider({});
+  check("contextProvider 注入【身体感觉】", /【身体感觉】/.test(ctxText), ctxText);
+  check("里面有「主人可能离开了」", /离开|没动/.test(ctxText), ctxText);
+  check("里面有前台程序", /Code/.test(ctxText), ctxText);
+  check("刚点过也会写进去", /点了你一下/.test(ctxText), ctxText);
+
+  const eventsFile = path.join(ROOT, "data", "body-events.jsonl");
+  const evLines = fs.existsSync(eventsFile) ? fs.readFileSync(eventsFile, "utf8").trim().split("\n") : [];
+  check("感官事件落盘到 data/body-events.jsonl", evLines.length >= 3, String(evLines.length));
+  check("落盘的事件带 event 字段", evLines.slice(-3).every((l) => JSON.parse(l).event), evLines.slice(-1)[0]);
 
   server.close();
   await sleep(50);

@@ -128,5 +128,23 @@ def run(config: dict) -> int:
     api.unsubscribe(q)
     check("退订后不再广播", True)
 
+    print("== 7) 感官（v0.4） ==")
+    import sense as sense_mod
+    idle = sense_mod.idle_seconds()
+    check("键鼠空闲秒数可读且非负", isinstance(idle, float) and idle >= 0, str(idle))
+    fg = sense_mod.foreground_window()
+    check("前台窗口有结构（title/app/pid）",
+          isinstance(fg, dict) and "app" in fg and "title" in fg and "pid" in fg, str(fg))
+    check("锁屏状态可读（bool）", isinstance(sense_mod.is_locked(), bool))
+    sn = sense_mod.Sense(log=lambda *a: None, look_dir=tempfile.gettempdir(), interval_ms=60000)
+    snap = sn.snapshot()
+    check("感官快照含 idle_s/presence/foreground/locked",
+          all(k in snap for k in ("idle_s", "presence", "foreground", "locked")), str(snap))
+    if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
+        check("截图在 offscreen 下跳过（无真实屏幕）", True)
+    else:
+        shot = sn.capture()
+        check("截图能生成文件", bool(shot.get("ok")) and os.path.exists(shot.get("path", "")), str(shot))
+
     print("\n自检结果：%d 过 / %d 失败" % (_ok, _fail))
     return 0 if _fail == 0 else 1

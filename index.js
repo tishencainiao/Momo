@@ -162,7 +162,7 @@ const SELF_AWARENESS = "【你怎么看自己】你心里清楚几个事实（�
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.66.0";
+const BASE_VERSION = "1.67.0";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -1089,6 +1089,17 @@ try {
   const _mc = host && host.apis.get("metaCog");
   const _mctx = _mc && _mc.metaCtx ? _mc.metaCtx() : "";
   if (_mctx) _dyn.push(_mctx);
+} catch (e) {}
+/* 插件提供的动态上下文（v0.4 起）：插件 export 一个 contextProvider(payload) → 文本/对象 */
+try {
+  const _cps = (host && host.contextProviders) || [];
+  for (const _cp of _cps) {
+    try {
+      const _r = _cp({ userId, petMode: !!(_extraInfo && _extraInfo.petMode) });
+      const _s = typeof _r === "string" ? _r : (_r && (_r.content || _r.text)) || "";
+      if (_s && String(_s).trim()) _dyn.push(String(_s).trim());
+    } catch (e) { log("warn", "contextProvider 失败: " + String(e && e.message).slice(0, 100)); }
+  }
 } catch (e) {}
 /* 空闲心跳带来的节奏感：她知道"现在是什么时候、你在不在" */
 try {
@@ -2780,6 +2791,47 @@ async function describeImage(image, settings) {
   return desc;
 }
 
+/* 通用视觉：给一个本地图片路径 + 提示词，返回文字描述（桌面识屏用，不参与表情包收集）
+ * 与 describeImage 的区别：提示词可定制、不写表情包库、失败直接抛错由调用方兜底。 */
+async function describeImageFile(filePath, prompt) {
+  const vcfg = (cfg.chat && cfg.chat.vision) || {};
+  if (vcfg.enabled === false) throw new Error("视觉功能被关掉了（config.chat.vision.enabled=false）");
+  const p = String(filePath || "");
+  if (!p || !fs.existsSync(p)) throw new Error("图片文件不存在");
+  const buf = fs.readFileSync(p);
+  if (buf.length < 32) throw new Error("图片数据异常");
+  if (buf.length > 8 * 1024 * 1024) throw new Error("图片过大(>8MB)");
+  const settings = resolveChatSettings();
+  const dataUrl = "data:" + mimeOf(buf) + ";base64," + buf.toString("base64");
+  const endpoint = ((vcfg.base_url || settings.base_url) || "https://api.deepseek.com").replace(/\/+$/, "") + "/v1/chat/completions";
+  const body = JSON.stringify({
+    model: visionModel(settings),
+    messages: [{ role: "user", content: [
+      { type: "text", text: String(prompt || "用简洁中文描述画面内容，重点说清主人在做什么。").slice(0, 600) },
+      { type: "image_url", image_url: { url: dataUrl } },
+    ] }],
+    stream: false, max_tokens: 500, temperature: 0.3,
+    thinking: { type: "disabled" },
+  });
+  const resp = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + apiKey },
+    body,
+    signal: AbortSignal.timeout(30000),
+  });
+  if (!resp.ok) {
+    let d = "";
+    try { d = (await resp.text()).slice(0, 200); } catch (e) {}
+    throw new Error("视觉 HTTP " + resp.status + ": " + d);
+  }
+  const data = await resp.json();
+  const desc = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
+  const u = data.usage || null;
+  recordSpend("vision", u ? (u.prompt_cache_miss_tokens || (u.prompt_tokens || 0)) : estimateTokens(JSON.stringify(body)),
+    u ? (u.completion_tokens || 0) : estimateTokens(desc), u ? (u.prompt_cache_hit_tokens || 0) : 0);
+  return String(desc).trim();
+}
+
 async function handlePrivateMessage(event) {
   const userId = Number(event.user_id), selfId = Number(event.self_id);
   if (userId === selfId) return;
@@ -3699,6 +3751,7 @@ host = createHost({
   getEmotion, getMood, addMood, setMood, getBoredom, addBoredom, loadBudget, budgetCfg, loadMindState, textSimilar,
   getLastSentSticker, stickerSessionKey,
   loadEvolution, reloadEvolution, pickStickerByIds, SELF_DIR, BASE_VERSION,
+  describeImageFile,
   proactive: {
     get lastInteractionTs() { return lastInteractionTs; },
     set lastInteractionTs(v) { lastInteractionTs = v; },

@@ -154,6 +154,9 @@ def main(argv=None) -> int:
                         res = win.handle_command(item.get("cmd"), item.get("payload") or {})
                     except Exception as exc:
                         res = {"ok": False, "error": str(exc)}
+                    if item.get("event") is not None:
+                        item["result"] = res
+                        item["event"].set()
                     log("指令 %s -> %s" % (item.get("cmd"), res))
 
             drain.timeout.connect(_drain)

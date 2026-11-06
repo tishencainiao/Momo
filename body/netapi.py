@@ -181,11 +181,24 @@ class BodyAPI:
                 except Exception:
                     return self._send(400, {"ok": False, "error": "bad json"})
                 cmd = path[len("/cmd/"):]
+                # 支持同步等待：请求头 X-Momo-Wait: 1（或 body 里 _wait:true），
+                # 服务端最多等 4 秒把 GUI 线程的执行结果拿回来（截图这类需要即取即用）
+                wait = str(self.headers.get("X-Momo-Wait", "")).strip() in ("1", "true", "yes")
+                if "_wait" in payload:
+                    wait = bool(payload.pop("_wait"))
+                item = {"cmd": cmd, "payload": payload, "ts": time.time()}
+                if wait:
+                    item["event"] = threading.Event()
+                    item["result"] = None
                 try:
-                    api.commands.put_nowait({"cmd": cmd, "payload": payload,
-                                             "ts": time.time()})
+                    api.commands.put_nowait(item)
                 except queue.Full:
                     return self._send(503, {"ok": False, "error": "busy"})
+                if wait and item.get("event") is not None:
+                    if item["event"].wait(4.0) and item.get("result") is not None:
+                        return self._send(200, item["result"])
+                    return self._send(202, {"ok": False, "timeout": True,
+                                            "error": "身体没在 4 秒内完成该指令"})
                 return self._send(200, {"ok": True, "queued": True, "cmd": cmd})
 
         last_err = None

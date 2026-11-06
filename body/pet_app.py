@@ -96,6 +96,19 @@ class PetWindow(QWidget):
         self._squash_timer.setInterval(16)
         self._squash_timer.timeout.connect(self._tick_squash)
 
+        # 感官（v0.4）：键鼠空闲 / 前台窗口 / 锁屏；截图由大脑按需触发
+        from sense import Sense
+
+        self.sense = Sense(
+            log=self._log,
+            look_dir=os.path.join(cfg.DATA_DIR, "body-shots"),
+            away_after_s=float(self.cfg.get("away_after_s") or 180),
+            interval_ms=int(self.cfg.get("sense_interval_ms") or 5000),
+            parent=self,
+        )
+        self.sense.changed.connect(self._on_sense)
+        self.setAcceptDrops(True)
+
         self._restore_geometry()
         self._play_idle()
 
@@ -104,6 +117,38 @@ class PetWindow(QWidget):
         self._top_timer.setInterval(3000)
         self._top_timer.timeout.connect(self._keep_on_top)
         self._top_timer.start()
+
+    def _on_sense(self, event: str, data: dict) -> None:
+        try:
+            self._publish(event, **data)
+            if event == "presence":
+                self._snap(presence=data.get("presence"), idle_s=data.get("idle_s"))
+            elif event == "lock":
+                self._snap(locked=data.get("locked"))
+            elif event == "foreground":
+                self._snap(foreground=data)
+            elif event == "drop":
+                self._snap(last_drop=data.get("files"))
+        except Exception:
+            pass
+
+    # ---------- 拖文件进来（投喂） ----------
+    def dragEnterEvent(self, event) -> None:                       # noqa: N802
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:                            # noqa: N802
+        files = []
+        for url in event.mimeData().urls():
+            p = url.toLocalFile()
+            if p:
+                files.append(p)
+        if not files:
+            return
+        event.acceptProposedAction()
+        self._publish("drop", files=files)
+        name = os.path.basename(files[0])
+        self.say("收到啦：%s" % (name if len(files) == 1 else "%d 个文件" % len(files)), 4000)
 
     def _keep_on_top(self) -> None:
         if self.cfg.get("always_on_top", True):
@@ -294,6 +339,18 @@ class PetWindow(QWidget):
         if cmd == "scale":
             self._set_scale(float(payload.get("scale") or self.scale))
             return {"ok": True, "scale": self.scale}
+
+        if cmd == "sense":
+            snap = self.sense.snapshot()
+            snap["ok"] = True
+            return snap
+
+        if cmd == "look":
+            r = self.sense.capture()
+            if r.get("ok"):
+                self._publish("look", path=r["path"], ts=r["ts"])
+                self._snap(last_look=r)
+            return r
 
         return {"ok": False, "error": "unknown command: %s" % cmd}
 

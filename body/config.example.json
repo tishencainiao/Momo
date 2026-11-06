@@ -10,6 +10,8 @@
   "squash_enabled": true,
   "squash_duration_ms": 320,
   "click_through": false,
+  "away_after_s": 180,
+  "sense_interval_ms": 5000,
   "sound_enabled": true,
   "volume": 70,
   "voice_volume": 85,

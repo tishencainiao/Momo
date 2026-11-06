@@ -45,12 +45,13 @@ function enabled() {
   }
 }
 
-async function call(method, pathname, body) {
+async function call(method, pathname, body, opts) {
   const url = baseUrl() + pathname;
   const headers = { Authorization: "Bearer " + token() };
+  if (opts && opts.wait) headers["X-Momo-Wait"] = "1";
   if (body !== undefined) headers["Content-Type"] = "application/json; charset=utf-8";
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => ctrl.abort(), (opts && opts.timeoutMs) || TIMEOUT_MS);
   try {
     const res = await fetch(url, {
       method,
@@ -75,6 +76,118 @@ async function call(method, pathname, body) {
 
 function offlineHint() {
   return "身体好像没在跑（连不上本机接口 http://127.0.0.1:4010）。双击桌面「Momo 身体」或托盘里点一下就能叫回来，然后再叫我一次。";
+}
+
+/* ---------------- 感官回流（v0.4） ----------------
+ * 身体用 SSE 把「在不在电脑前 / 前台是什么 / 锁屏 / 被点了 / 收文件 / 说过话」推过来，
+ * 这里维护一份最新快照 + 落 data/body-events.jsonl，再通过 contextProvider 注入提示词。
+ */
+const DATA_DIR = () => path.join(__dirname, "..", "data");
+const EVENTS_FILE = () => path.join(DATA_DIR(), "body-events.jsonl");
+const sense = {
+  presence: "unknown", idle_s: null, foreground: null, locked: false,
+  lastClickAt: 0, lastDropAt: 0, lastDrop: null, lastSayAt: 0, lastLook: null,
+  updatedAt: 0, connected: false,
+};
+
+function appendEvent(obj) {
+  try {
+    fs.mkdirSync(DATA_DIR(), { recursive: true });
+    const line = JSON.stringify(obj) + "\n";
+    fs.appendFileSync(EVENTS_FILE(), line);
+    try {
+      if (fs.statSync(EVENTS_FILE()).size > 512 * 1024) {       // 半兆就截断重建，别无限长
+        const keep = fs.readFileSync(EVENTS_FILE(), "utf8").trim().split("\n").slice(-200).join("\n") + "\n";
+        fs.writeFileSync(EVENTS_FILE(), keep);
+      }
+    } catch (e) {}
+  } catch (e) {}
+}
+
+function handleBodyEvent(name, data) {
+  const now = Date.now();
+  sense.updatedAt = now;
+  if (name === "presence") { sense.presence = data.presence || "unknown"; sense.idle_s = data.idle_s != null ? data.idle_s : null; }
+  else if (name === "sense") {
+    if (data.presence) sense.presence = data.presence;
+    if (data.idle_s != null) sense.idle_s = data.idle_s;
+    if (data.foreground) sense.foreground = data.foreground;
+    if (data.locked != null) sense.locked = !!data.locked;
+  }
+  else if (name === "foreground") sense.foreground = data;
+  else if (name === "lock") sense.locked = !!data.locked;
+  else if (name === "click") sense.lastClickAt = now;
+  else if (name === "drop") { sense.lastDropAt = now; sense.lastDrop = data.files || []; }
+  else if (name === "say") sense.lastSayAt = now;
+  else if (name === "look") sense.lastLook = data;
+  appendEvent(Object.assign({ ts: now, event: name }, data || {}));
+}
+
+let sseStarted = false;
+async function startSse() {
+  if (sseStarted) return;
+  sseStarted = true;
+  const backoff = [1000, 3000, 8000, 20000];
+  let i = 0;
+  while (true) {
+    try {
+      const res = await fetch(baseUrl() + "/events", {
+        headers: { Authorization: "Bearer " + token() },
+      });
+      if (res.status !== 200 || !res.body) throw new Error("SSE " + res.status);
+      sense.connected = true;
+      i = 0;
+      const decoder = new TextDecoder();
+      let buf = "";
+      for await (const chunk of res.body) {
+        buf += decoder.decode(chunk, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf("\n\n")) >= 0) {
+          const block = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          const lines = block.split("\n");
+          const evLine = lines.find((l) => l.startsWith("event:"));
+          const dataLine = lines.find((l) => l.startsWith("data:"));
+          if (!dataLine) continue;
+          let payload = null;
+          try { payload = JSON.parse(dataLine.slice(5).trim()); } catch (e) { continue; }
+          handleBodyEvent((evLine ? evLine.slice(6).trim() : "message"), payload);
+        }
+      }
+      sense.connected = false;
+    } catch (e) {
+      sense.connected = false;
+    }
+    await new Promise((r) => setTimeout(r, backoff[Math.min(i, backoff.length - 1)]));
+    i++;
+  }
+}
+
+function minutesAgo(ts) {
+  if (!ts) return null;
+  return Math.max(0, Math.round((Date.now() - ts) / 60000));
+}
+
+function senseText() {
+  if (!sense.updatedAt || Date.now() - sense.updatedAt > 10 * 60000) return "";
+  const bits = [];
+  if (sense.presence === "active") bits.push("主人在电脑前（刚有键鼠操作）");
+  else if (sense.presence === "away" && sense.idle_s != null) {
+    bits.push("主人可能离开了，键鼠已经 " + Math.round(sense.idle_s / 60) + " 分钟没动");
+  }
+  if (sense.locked) bits.push("屏幕锁着");
+  if (sense.foreground && sense.foreground.app) {
+    const t = String(sense.foreground.title || "").slice(0, 40);
+    bits.push("前台是 " + sense.foreground.app.replace(/\.exe$/i, "") + (t ? "（" + t + "）" : ""));
+  }
+  const cMin = minutesAgo(sense.lastClickAt);
+  if (cMin !== null && cMin <= 30) bits.push(cMin === 0 ? "刚刚点了你一下" : cMin + " 分钟前点了你一下");
+  const dMin = minutesAgo(sense.lastDropAt);
+  if (dMin !== null && dMin <= 30 && sense.lastDrop && sense.lastDrop.length) {
+    bits.push(dMin === 0 ? "刚往你身上丢了文件" : dMin + " 分钟前往你身上丢了文件");
+  }
+  if (!bits.length) return "";
+  return "【身体感觉】" + bits.join("；") + "。";
 }
 
 function requireMaster(info) {
@@ -111,6 +224,28 @@ module.exports = {
   version: "1.0.0",
   init(ctx) {
     _ctx = ctx;
+    // 感官事件流：后台常连，断了自动退避重连；不阻塞插件加载
+    try {
+      startSse();
+    } catch (e) {}
+    // 再主动拉一次快照当种子（万一 SSE 连上时状态一直没变化）
+    setTimeout(() => {
+      call("POST", "/cmd/sense", { _wait: true }, { wait: true, timeoutMs: 4000 })
+        .then((r) => {
+          if (r.status === 200 && r.data && r.data.ok !== false) {
+            handleBodyEvent("sense", r.data);
+          }
+        })
+        .catch(() => {});
+    }, 2500);
+  },
+  contextProvider(payload) {
+    try {
+      if (!enabled()) return "";
+      return senseText();
+    } catch (e) {
+      return "";
+    }
   },
   settings: [
     {
@@ -237,6 +372,60 @@ module.exports = {
     },
     {
       def: toolDef(
+        "pet_sense",
+        "查身体的感官当前读数：主人在不在电脑前（键鼠空闲多久）、前台是什么程序/窗口、屏幕锁没锁、最近有没有点你/丢文件给你。当你想「主人现在在干嘛」「他还在吗」时调用——这是你真看得到的东西，别瞎猜。",
+        {},
+        []
+      ),
+      async handler(args, info) {
+        if (!requireMaster(info)) return "（只有主人能查我的感官哦）";
+        const r = await call("POST", "/cmd/sense", { _wait: true }, { wait: true });
+        if (r.status !== 200 || !r.data || r.data.ok === false) return offlineHint();
+        const d = r.data;
+        const fg = d.foreground || {};
+        const parts = [];
+        parts.push(d.presence === "away" ? "主人可能不在（键鼠 " + Math.round((d.idle_s || 0) / 60) + " 分钟没动）" : "主人在电脑前（键鼠 " + Math.round(d.idle_s || 0) + " 秒前有动作）");
+        if (fg.app) parts.push("前台：" + String(fg.app).replace(/\.exe$/i, "") + (fg.title ? "（" + String(fg.title).slice(0, 40) + "）" : ""));
+        parts.push(d.locked ? "屏幕锁着" : "屏幕没锁");
+        const cMin = minutesAgo(sense.lastClickAt);
+        if (cMin !== null && cMin <= 60) parts.push(cMin === 0 ? "刚点过你" : cMin + " 分钟前点过你");
+        return "身体的感官：" + parts.join("；") + "。";
+      },
+    },
+    {
+      def: toolDef(
+        "pet_look",
+        "让身体截一张主人现在的屏幕，并（由你看图）说出主人在做什么。当主人问「你看我在干嘛」「看看我屏幕」，或你想知道他在忙什么时调用。注意：要花钱（一次约 0.001~0.002 元）且涉及隐私，别频繁看、别擅自乱看。",
+        {
+          question: { type: "string", description: "你想从画面上知道什么（可选，比如「他在写代码还是看视频」）" },
+        },
+        []
+      ),
+      async handler(args, info) {
+        const why = guard(info);
+        if (why) return why;
+        const now = Date.now();
+        if (sense.lastLook && now - (sense.lastLook.ts * 1000) < 20000) {
+          return "（刚看过一眼，等几十秒再看吧，省点钱）";
+        }
+        const r = await call("POST", "/cmd/look", { _wait: true }, { wait: true, timeoutMs: 8000 });
+        if (r.status !== 200 || !r.data || !r.data.ok) return offlineHint() + "（截图没成功）";
+        const shot = r.data;
+        sense.lastLook = { path: shot.path, ts: shot.ts };
+        const prompt = String((args && args.question) || "").trim()
+          || "这是主人的电脑屏幕截图。用简洁中文说清：1) 主人在做什么（写代码/看视频/聊天/游戏等）；2) 画面上关键的窗口名或文字。不要虚构细节。";
+        try {
+          const desc = await _ctx.describeImageFile(shot.path, prompt);
+          record("body_look", String(desc).slice(0, 100), true);
+          return "我看了一眼屏幕：" + String(desc || "（没看清）").slice(0, 300);
+        } catch (e) {
+          record("body_look", "vision-fail", false);
+          return "截图拿到了（" + shot.path + "），但我这边看图的接口出错了：" + String((e && e.message) || e).slice(0, 80);
+        }
+      },
+    },
+    {
+      def: toolDef(
         "pet_state",
         "切换身体的状态：idle 待机 / sleep 睡觉 / show 显示 / hide 隐藏。要让它说话请用 pet_say。",
         {
@@ -348,4 +537,6 @@ module.exports = {
       },
     },
   ],
+  // 供测试用（不参与运行时逻辑）
+  __test: { sense, handleBodyEvent, senseText },
 };

@@ -82,6 +82,8 @@ python body\main.py
 | `frameseq_dir` | frameseq | 换成 `frameseq-hi` 即用高清帧 |
 | `port` | 4010 | 本地接口端口（占用时自动往后找） |
 | `api_enabled` | true | 关掉就只显示、不接受任何指令 |
+| `away_after_s` | 180 | 键鼠空闲超过多少秒算「主人不在电脑前」 |
+| `sense_interval_ms` | 5000 | 感官采样间隔 |
 
 运行时状态（位置/缩放）写 `data/body-state.json`；日志写 `data/body.log`。
 
@@ -130,14 +132,30 @@ python body\main.py
 - **合成不能进回复链路**：GSV 冷启动可达几十秒，会把联脑 30 秒超时拖爆（实测第一次就这么挂的）。所以 pet_speak 先弹气泡立刻返回，合成与播放在后台完成，失败只记 action + warn。
 - 临时文件：data/tts-body-*.mp3，播完自动删；voice.js 另有 2 小时兜底清理。
 - 音量：oice_volume（默认 85）与点击音效分开；每次播放前重绑默认输出设备。
-## 10. 托盘与大脑控制（安全口径）
+## 10. 感官回流（v0.4）
+
+身体只负责**采集**，判断留给大脑：
+
+| 感官 | 实现 | 频率/开销 |
+|---|---|---|
+| 键鼠空闲 | `GetLastInputInfo`（ctypes） | 5 秒一次，几乎零开销；≥180 秒判「可能离开」 |
+| 前台窗口 | `GetForegroundWindow` + 标题 + `QueryFullProcessImageNameW` 取进程名 | 同上，仅在变化时发事件 |
+| 锁屏 | `OpenInputDesktop` 打不开即视为锁屏/安全桌面 | 同上，仅变化时发事件 |
+| 截图 | 只有大脑调 `/cmd/look` 才抓（`QScreen.grabWindow` → 1280 宽 jpg，留最近 20 张） | 触发式 |
+| 被点/被拖/收文件 | 鼠标事件与拖放事件 | 事件驱动 |
+
+回流路径：身体 → SSE `/events` → `plugins/pet-body.js` 维护最新快照并落 `data/body-events.jsonl` → 每轮通过 `contextProvider` 注入一行【身体感觉】（在电脑前否 / 前台程序 / 锁屏 / 最近被点 / 最近收文件）。
+
+大脑侧的 `pet_look` 会把截图路径交给 `describeImageFile()`（复用 chat.vision 视觉模型）转成文字，所以「她看了一眼屏幕就能说出你在干嘛」是真的看图，不是猜的；单次约 ¥0.001~0.002，20 秒内重复看会被拦。
+
+## 11. 托盘与大脑控制（安全口径）
 
 - 找进程**按命令行匹配**，不按进程名：大脑必须是 `node.exe` 且命令行含 `Momo\index.js`；守护必须是 `powershell.exe` 且含 `-File ...supervise.ps1`；并且都要排除「正在跑查询的 powershell 自己」（`$_.ProcessId -ne $PID`）。
 - **重启大脑 = 停守护 → 杀 node → 起一个守护**（不是「只杀不拉」）。原因：机器上可能有多个 `supervise.ps1`（手动 + 自启），只杀 node 会让它们同时拉起、抢 3999 端口。
 - **停止大脑**会连守护一起停（否则杀了立刻被拉起），操作前二次确认。
 - 实测（2026-11-06）：重启后 2 秒新 node 起来，`bridge.log` 出现「OneBot WS 已连接 / Bot 上线」。
 
-## 11. 动画与素材
+## 12. 动画与素材
 
 - 101 段，7 类：`idle 1 / click 5 / drag 1 / events 1（balance 6 段）/ move 3 / random 89 / turn 1`，共 25,529 帧，24fps，每段约 241 帧（10s）。
 - 帧序列已由上游解码好（webp，**640×360 画布**；角色在画布中约占 220×270，四周是透明留白，方便放道具/特效），运行时**不需要 ffmpeg**。
@@ -146,7 +164,7 @@ python body\main.py
 
 > **DPI 踩坑（2026-11-06 实测）**：这台机器屏幕是 1920×1080、Windows 缩放 125%，Qt 的逻辑坐标是 1536×864（devicePixelRatio=1.25）。用 DPI 未感知的进程（如部分 PowerShell 会话）截图，拿到的是被系统虚拟化过的画面，看起来像是「身体被裁掉/位置偏移」——**其实是截图的锅**。要核对显示效果，用 `QScreen.grabWindow(0)` 在 Qt 进程里截，得到的是真实 1920×1080 画面。
 
-## 12. 自检口径
+## 13. 自检口径
 
 `python body/main.py --selftest`（offscreen，不弹窗，24 项断言）：
 
@@ -156,6 +174,6 @@ python body\main.py
 4. **配置**：scale / fps_cap / port / 三档升序合法；
 5. **音效与图标**：click.wav 在、音量上下夹紧、静音不出声、能生成多尺寸 .ico（ICO 头校验）。
 
-## 13. 后续批次
+## 14. 后续批次
 
 见 [body-roadmap.md](body-roadmap.md)（v0.2 接口 → v0.8 运维）与主 CHANGELOG。
