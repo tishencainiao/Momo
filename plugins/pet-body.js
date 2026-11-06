@@ -15,7 +15,13 @@ const path = require("path");
 
 let _ctx = null;
 
-const TOKEN_FILE = () => path.join(__dirname, "..", "body", "body-token");
+const TOKEN_FILES = () => {
+  const list = [];
+  if (process.env.MOMO_BODY_TOKEN) list.push(process.env.MOMO_BODY_TOKEN);
+  list.push(path.join(__dirname, "..", "data", "body-token"));
+  list.push(path.join(__dirname, "..", "body", "body-token"));
+  return list;
+};
 const DEFAULT_URL = "http://127.0.0.1:4010";
 const TIMEOUT_MS = 2500;
 
@@ -30,11 +36,13 @@ function baseUrl() {
 }
 
 function token() {
-  try {
-    return fs.readFileSync(TOKEN_FILE(), "utf8").trim();
-  } catch (e) {
-    return "";
+  for (const p of TOKEN_FILES()) {
+    try {
+      const t = fs.readFileSync(p, "utf8").trim();
+      if (t) return t;
+    } catch (e) {}
   }
+  return "";
 }
 
 function enabled() {
@@ -241,6 +249,30 @@ let sseStarted = false;
 let lastMoodPush = 0;
 let lastChimeHour = -1;
 let lastMorningKey = "";
+
+/* 报时/早间播报的「今天做过没」要跨重启记住，否则每次重启都会再报一遍 */
+function stateFile() {
+  return path.join(DATA_DIR(), "body-chime.json");
+}
+function loadChimeState() {
+  try {
+    const d = JSON.parse(fs.readFileSync(stateFile(), "utf8")) || {};
+    if (d.date === new Date().toDateString()) {
+      if (typeof d.hour === "number") lastChimeHour = d.hour;
+      if (d.morning === d.date) lastMorningKey = d.date;
+    }
+    return d;
+  } catch (e) {
+    return {};
+  }
+}
+function saveChimeState(patch) {
+  try {
+    const d = Object.assign(loadChimeState(), { date: new Date().toDateString() }, patch || {});
+    fs.mkdirSync(DATA_DIR(), { recursive: true });
+    fs.writeFileSync(stateFile(), JSON.stringify(d));
+  } catch (e) {}
+}
 async function startSse() {
   if (sseStarted) return;
   sseStarted = true;
@@ -342,6 +374,9 @@ module.exports = {
   version: "1.0.0",
   init(ctx) {
     _ctx = ctx;
+    try {
+      loadChimeState();
+    } catch (e) {}
     // 感官事件流：后台常连，断了自动退避重连；不阻塞插件加载
     try {
       startSse();
@@ -782,6 +817,7 @@ module.exports = {
         const to = Number(_ctx.getSetting("body.chime_to", 23));
         if (_ctx.getSetting("body.hourly_chime", true) !== false && h >= from && h <= to && lastChimeHour !== h) {
           lastChimeHour = h;
+          saveChimeState({ hour: h });
           announce(buildChimeLine(h), { duration_ms: 5000 }).catch(() => {});
         }
       } catch (e) {}
@@ -792,6 +828,7 @@ module.exports = {
         const key = new Date().toDateString();
         if (_ctx.getSetting("body.morning_report", true) !== false && h >= 7 && h <= 10 && lastMorningKey !== key) {
           lastMorningKey = key;
+          saveChimeState({ morning: key });
           (async () => {
             const bits = [];
             try {

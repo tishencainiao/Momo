@@ -110,7 +110,20 @@ const tool = (n) => plugin.tools.find((t) => t.def.function.name === n);
   const port = server.address().port;
   plugin.init({ ...ctx, getSetting: (k, d) => (k === "body.url" ? "http://127.0.0.1:" + port : ctx.getSetting(k, d)) });
 
-  const token = (() => { try { return fs.readFileSync(path.join(ROOT, "body", "body-token"), "utf8").trim(); } catch (e) { return ""; } })();
+  const token = (() => {
+    const cands = [
+      process.env.MOMO_BODY_TOKEN,
+      path.join(ROOT, "data", "body-token"),
+      path.join(ROOT, "body", "body-token"),
+    ].filter(Boolean);
+    for (const p of cands) {
+      try {
+        const t = fs.readFileSync(p, "utf8").trim();
+        if (t) return t;
+      } catch (e) {}
+    }
+    return "";
+  })();
 
   console.log("\n[4] 正常路径（stub 身体）");
   r = await tool("pet_say").handler({ text: "主人～我在桌面上说话", duration_ms: 6000 }, MASTER);

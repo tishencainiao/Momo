@@ -205,6 +205,14 @@ python body\main.py
 4. **配置**：scale / fps_cap / port / 三档升序合法；
 5. **音效与图标**：click.wav 在、音量上下夹紧、静音不出声、能生成多尺寸 .ico（ICO 头校验）。
 
-## 17. 后续批次
+## 17. 运维（v0.8）
+
+- **日志**：`data/body.log` 超 2MB 自动轮转成 `body.log.1`（`body/logutil.py`）。
+- **启动方式**：源码 `python body/main.py`；无控制台 `pythonw`；打包版 `body/dist/MomoBody/MomoBody.exe`。
+- **打包**：`scripts/build-body.ps1`（PyInstaller onedir + windowed）。**素材不打包**，构建后自动把 `config.json` 放到 exe 旁并写好 `assets_dir`；打包版自检 `MomoBody.exe --selftest` 退出码 0 为准。
+- **守护**：`scripts/supervise-body.ps1`（崩溃 3 秒拉起，连续崩溃退避到 30 秒，单实例锁）。
+- **路径覆盖**：`MOMO_BODY_DATA` / `MOMO_BODY_CONFIG` 环境变量可改数据与配置位置（打包版常用）。
+
+## 18. 后续批次
 
 见 [body-roadmap.md](body-roadmap.md)（v0.2 接口 → v0.8 运维）与主 CHANGELOG。

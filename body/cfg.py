@@ -6,11 +6,21 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 
-BODY_DIR = os.path.dirname(os.path.abspath(__file__))
-ROOT_DIR = os.path.dirname(BODY_DIR)                       # Momo 仓库根
-DATA_DIR = os.path.join(ROOT_DIR, "data")
-CONFIG_PATH = os.path.join(BODY_DIR, "config.json")
+
+def _base_dir() -> str:
+    """身体主目录：源码跑 = body/；PyInstaller 打包后 = exe 所在目录。"""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+BODY_DIR = _base_dir()
+ROOT_DIR = os.path.dirname(BODY_DIR)                       # Momo 仓库根（打包后是 exe 的上级）
+# 允许用环境变量指定数据目录（打包版放在别处跑时很有用）
+DATA_DIR = os.environ.get("MOMO_BODY_DATA") or os.path.join(ROOT_DIR, "data")
+CONFIG_PATH = os.environ.get("MOMO_BODY_CONFIG") or os.path.join(BODY_DIR, "config.json")
 STATE_PATH = os.path.join(DATA_DIR, "body-state.json")
 LOG_PATH = os.path.join(DATA_DIR, "body.log")
 
@@ -47,7 +57,7 @@ def load() -> dict:
     cfg = dict(DEFAULTS)
     if os.path.exists(CONFIG_PATH):
         try:
-            with open(CONFIG_PATH, "r", encoding="utf-8") as fh:
+            with open(CONFIG_PATH, "r", encoding="utf-8-sig") as fh:   # 容忍 BOM（PowerShell 写的配置带 BOM）
                 user = json.load(fh) or {}
             if isinstance(user, dict):
                 cfg.update(user)

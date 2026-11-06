@@ -23,20 +23,17 @@ if BODY_DIR not in sys.path:
 
 
 def log(msg: str) -> None:
-    """写 data/body.log；没有控制台（pythonw）时也不会抛错。"""
-    import time
-    line = "[%s] %s" % (time.strftime("%Y-%m-%d %H:%M:%S"), msg)
+    """写 data/body.log（超过 2MB 自动轮转）；没有控制台（pythonw/exe）时也不会抛错。"""
     try:
         import cfg
-        os.makedirs(cfg.DATA_DIR, exist_ok=True)
-        with open(cfg.LOG_PATH, "a", encoding="utf-8") as fh:
-            fh.write(line + "\n")
+        import logutil
+
+        logutil.append(cfg.LOG_PATH, msg)
     except Exception:
-        pass
-    try:
-        print(line)
-    except Exception:
-        pass
+        try:
+            print(msg)
+        except Exception:
+            pass
 
 
 def _restart_self() -> None:
@@ -109,10 +106,12 @@ def main(argv=None) -> int:
     # 本地接口（HTTP 指令 + SSE 事件）：大脑通过它指挥身体
     api = None
     if config.get("api_enabled", True):
-        api = netapi.BodyAPI(os.path.join(BODY_DIR, "body-token"), log=log)
+        # token 放数据目录（源码跑/打包跑共用一份，brain 侧也读这里）
+        token_path = os.environ.get("MOMO_BODY_TOKEN") or os.path.join(cfg.DATA_DIR, "body-token")
+        api = netapi.BodyAPI(token_path, log=log)
         ok, info = api.start(port=int(config.get("port") or 4010))
         if ok:
-            log("本地接口已就绪：http://127.0.0.1:%d（token 在 body/body-token）" % info)
+            log("本地接口已就绪：http://127.0.0.1:%d（token 在 %s）" % (info, token_path))
         else:
             log("本地接口启动失败：%s（身体照常显示，只是大脑连不上）" % info)
             api = None

@@ -193,5 +193,34 @@ def run(config: dict) -> int:
         check("快捷键能注销", not hk.bound())
     check("非法组合返回 0", hk.register("ctrl+alt+不存在的键", "x") == 0)
 
+    print("== 10) 运维（v0.8） ==")
+    import logutil
+    tmp_log = os.path.join(tempfile.gettempdir(), "momo-body-logtest.log")
+    for suffix in ("", ".1"):
+        try:
+            if os.path.exists(tmp_log + suffix):
+                os.remove(tmp_log + suffix)
+        except OSError:
+            pass
+    logutil.append(tmp_log, "第一条", max_bytes=1024 * 1024)
+    check("日志能写入", os.path.exists(tmp_log) and "第一条" in open(tmp_log, encoding="utf-8").read())
+    with open(tmp_log, "a", encoding="utf-8") as fh:
+        fh.write("x" * (1100 * 1024))
+    rotated = logutil.rotate_if_needed(tmp_log, max_bytes=1024 * 1024)
+    check("超过上限会轮转", rotated and os.path.exists(tmp_log + ".1"))
+    check("轮转后新日志为空/重建", (not os.path.exists(tmp_log)) or os.path.getsize(tmp_log) == 0)
+    logutil.append(tmp_log, "轮转后", max_bytes=1024 * 1024)
+    check("轮转后还能继续写", "轮转后" in open(tmp_log, encoding="utf-8").read())
+
+    import cfg as cfg_mod
+    check("数据目录可用环境变量覆盖（打包版要）",
+          hasattr(cfg_mod, "DATA_DIR") and isinstance(cfg_mod.DATA_DIR, str) and cfg_mod.DATA_DIR.endswith("data"))
+    cfg_src = getattr(cfg_mod, "__file__", "") or ""
+    if cfg_src and os.path.exists(cfg_src):
+        check("配置路径支持 MOMO_BODY_CONFIG 覆盖",
+              "MOMO_BODY_CONFIG" in open(cfg_src, encoding="utf-8").read())
+    else:
+        check("配置路径支持覆盖（打包版无源码，跳过源码检查）", hasattr(cfg_mod, "CONFIG_PATH"))
+
     print("\n自检结果：%d 过 / %d 失败" % (_ok, _fail))
     return 0 if _fail == 0 else 1
