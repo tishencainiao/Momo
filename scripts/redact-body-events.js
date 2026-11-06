@@ -14,9 +14,11 @@ const fs = require("fs");
 const path = require("path");
 
 const ROOT = path.join(__dirname, "..");
-// 测试可用 MOMO_BODY_EVENTS 指向临时文件
+// 测试可用 MOMO_BODY_EVENTS 指向临时文件（备份目录也跟着走，避免污染真实 data/archive）
 const FILE = process.env.MOMO_BODY_EVENTS || path.join(ROOT, "data", "body-events.jsonl");
-const ARCHIVE_DIR = path.join(ROOT, "data", "archive");
+const ARCHIVE_DIR = process.env.MOMO_BODY_EVENTS
+  ? path.join(path.dirname(FILE), "archive")
+  : path.join(ROOT, "data", "archive");
 
 function sanitize(obj) {
   const out = Object.assign({}, obj);
