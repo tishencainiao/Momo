@@ -1,0 +1,13 @@
+{
+  "scale": 0.45,
+  "always_on_top": true,
+  "fps_cap": 30,
+  "start_corner": "bottom-right",
+  "margin_x": 40,
+  "margin_y": 120,
+  "click_response": true,
+  "click_through": false,
+  "frameseq_dir": "frameseq",
+  "port": 4010,
+  "log_level": "info"
+}

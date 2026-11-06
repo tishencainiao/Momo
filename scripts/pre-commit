@@ -1,0 +1,13 @@
+#!/bin/sh
+# Momo pre-commit 钩子：提交前跑自检，语法/配置/插件不过就拦下
+NODE="C:\\Users\\19372\\.dsh\\dsh-runtimes\\dsh-primary-runtime\\dependencies\\node\\bin\\node.exe"
+if [ -f "$NODE" ]; then
+  "$NODE" "E:\\Learn\\Momo\\check.js"
+else
+  node "E:\\Learn\\Momo\\check.js"
+fi
+if [ $? -ne 0 ]; then
+  echo "❌ 自检未通过，已取消提交。"
+  exit 1
+fi
+exit 0

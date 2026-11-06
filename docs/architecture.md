@@ -42,7 +42,8 @@ E:\Learn\Momo\
 ├── plugin-host.js           # 插件宿主：加载器 / ctx / 钩子 / 工具与命令注册表
 ├── sticker-store.js         # 表情包语义库（node:sqlite，非插件）
 ├── config.json              # 配置
-├── plugins/                 # 31 个功能插件
+├── plugins/                 # 38 个功能插件
+├── body/                    # 自建身体（Python/PySide6，v0.1 起；见 body-architecture.md）
 ├── self/                    # 自我进化层（identity / reflections / skills / journal / pref）
 ├── data/                    # 运行时数据（不进版本库）
 ├── stickers/                # 表情包文件 + stickers.db 语义库
@@ -63,6 +64,14 @@ E:\Learn\Momo\
 
 进程内三个全局：`host`（插件宿主）、`apiKey`、`cfg`。
 插件之间**不直接 require**，一律走 `ctx.getApi("<名字>")`。
+
+### 4.1 身体层（独立进程，v1.64.0 起）
+
+`body/`（Python + PySide6）是 Momo 的**新身体**，与大脑（Node 进程）分离：透明置顶窗、101 段帧序列动画、拖拽/点击回应/右键点播，v0.2 起通过本地 HTTP+SSE 接受大脑指令。旧第三方桌宠**不卸载、不改动**，两者可并行。
+
+- 架构与运行：`docs/body-architecture.md`
+- 分批计划与「还没实现的功能」：`docs/body-roadmap.md`
+- 借鉴署名（素材来自 dsh-pet，非商用）：`docs/body-attribution.md`
 
 ## 5. 核心模块（index.js）
 
