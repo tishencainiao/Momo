@@ -68,6 +68,43 @@ def run(config: dict) -> int:
     check("scale 在 0.15~4 之间", 0.15 <= float(config.get("scale") or 0) <= 4.0, str(config.get("scale")))
     check("fps_cap >= 12", int(config.get("fps_cap") or 0) >= 12, str(config.get("fps_cap")))
     check("端口是整数", isinstance(config.get("port"), int), str(config.get("port")))
+    tiers = config.get("tiers") or []
+    check("三档是升序三个数且在 0.15~1.0",
+          len(tiers) == 3 and all(0.15 <= float(t) <= 1.0 for t in tiers)
+          and float(tiers[0]) < float(tiers[1]) < float(tiers[2]), str(tiers))
+
+    print("== 5) 音效与图标 ==")
+    import os
+    import sound as sound_mod
+    sp = sound_mod.SoundPlayer(os.path.join(assets, "sounds"), volume=70, muted=False)
+    check("click.wav 存在", sp.has("click"))
+    check("agent 音效预留（start/done/error 至少一个）",
+          sp.has("agent/start") or sp.has("agent/done") or sp.has("agent/error"))
+    sp.set_volume(500)
+    check("音量上夹紧到 100", sp.volume == 100, str(sp.volume))
+    sp.set_volume(-5)
+    check("音量下夹紧到 0", sp.volume == 0, str(sp.volume))
+    sp.set_volume(70)
+    sp.set_muted(True)
+    check("静音时不出声（play 返回 False）", sp.play("click") is False)
+    sp.set_muted(False)
+    check("取消静音后可播（允许无声卡）", sp.play("click") in (True, False))
+
+    import tempfile
+    import bodyicon
+    tmp_ico = os.path.join(tempfile.gettempdir(), "momo-body-selftest.ico")
+    try:
+        if os.path.exists(tmp_ico):
+            os.remove(tmp_ico)
+    except OSError:
+        pass
+    path = bodyicon.ensure_icon(assets, tmp_ico, force=True)
+    ok_ico = bool(path) and os.path.exists(path) and os.path.getsize(path) > 2000
+    if ok_ico:
+        with open(path, "rb") as fh:
+            head = fh.read(4)
+        ok_ico = head[:4] == b"\x00\x00\x01\x00"
+    check("能从 idle 帧生成多尺寸 .ico", ok_ico, path or "生成失败")
 
     print("\n自检结果：%d 过 / %d 失败" % (_ok, _fail))
     return 0 if _fail == 0 else 1

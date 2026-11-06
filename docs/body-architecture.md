@@ -1,6 +1,6 @@
 # 身体（body/）架构
 
-> 版本：v0.1 · 更新：2026-11-06
+> 版本：v0.1.1 · 更新：2026-11-06
 > 定位：给 Momo 换一个**自己的、能被她的大脑完全控制的身体**，替代现在这个第三方黑盒桌宠。
 
 ## 1. 为什么要自建身体
@@ -18,76 +18,111 @@ QQ / 桌宠聊天 ──> 大脑（Node, index.js）  ──HTTP+SSE（v0.2 起�
 - **大脑**：现有 `index.js` + 插件，一行核心逻辑不改（新增插件接入）。
 - **身体**：独立 Python 进程（PySide6），崩了不影响 QQ，QQ 挂了身体也照常显示。
 - **旧桌宠**：不卸载、不改动，与新身体并行；两者端口/目录/进程完全隔离，随时可切回。
+- **托盘**：身体自带托盘图标（一个图标同时管大脑和身体），是「关掉窗口之后唯一能把她叫回来」的入口。
 
 ## 3. 目录
 
 ```
 body/
-├── main.py            启动入口（--selftest / --scale）
-├── pet_app.py         透明置顶窗：绘制、拖拽、右键菜单、位置记忆
+├── main.py            启动入口（--selftest / --scale；单实例；托盘接线）
+├── pet_app.py         透明置顶窗：绘制、拖拽、右键菜单、大小档位、位置记忆
 ├── anim.py            frameseq 扫描 + Clip + 按 fps 推进的 Player
+├── sound.py           音效（winsound + 内存缩放音量，后台线程顺序播放）
+├── tray.py            系统托盘：状态显示 + 显示/隐藏/重启身体 + 重启/停止大脑 + 音效 + 日志
+├── bodyicon.py        从 idle 帧生成多尺寸 .ico（纯 Qt，无 Pillow）
 ├── cfg.py             默认配置 + body/config.json 覆盖 + data/body-state.json 状态
-├── selftest.py        素材/帧图/播放器/配置四项自检
-├── requirements.txt   PySide6>=6.8（唯一硬依赖）
+├── selftest.py        五组自检（素材 / 帧图 / 播放器 / 配置 / 音效与图标）
+├── requirements.txt   PySide6-Essentials>=6.8（唯一硬依赖）
 ├── config.example.json
-└── assets/            素材（359MB，gitignore，脚本从旧桌宠复制）
+└── assets/            素材（359MB，gitignore，脚本从旧桌宠复制；含自动生成的 icon.ico）
 ```
 
 ## 4. 运行
 
 ```powershell
-# 首次：装依赖（清华源已配好）
+# 首次：装依赖（清华源已配好；只要 Essentials，约 82MB）
 python -m pip install -r body\requirements.txt
 
 # 复制素材（约 360MB，几秒钟）
 powershell -File scripts\convert-assets.ps1
 
-# 自检（不弹窗）
+# 自检（不弹窗，24 项）
 python body\main.py --selftest
+
+# 建桌面 / 开始菜单 / 开机自启快捷方式（-Remove 全删，-NoAutostart 只建前两个）
+powershell -File scripts\install-shortcuts.ps1
 
 # 启动
 python body\main.py
-# 或双击 scripts\run-body.vbs（pythonw，无控制台）
+# 或双击 scripts\run-body.vbs（pythonw，无控制台）／桌面「Momo 身体」
 ```
+
+- **单实例**：用 `QSharedMemory` 守着，已经在跑时再启动会直接退出（避免快捷方式、开机自启、托盘「重启身体」打架）。
+- **关窗 ≠ 退出**：有托盘时关窗只是隐藏；只有菜单里的「退出身体」才真退出（托盘一起消失），之后靠桌面快捷方式召回。
 
 ## 5. 配置
 
-`body/config.json`（不存在则用内置默认；示例见 `config.example.json`）：
+`body/config.json`（不存在则用内置默认；示例见 `config.example.json`；托盘改音量/静音会自动写回这里）：
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `scale` | 0.45 | 画布原生 640×360，0.45 倍时角色约 100×120px（接近旧桌宠体积） |
-| `always_on_top` | true | 置顶 |
+| `scale` | 0.40 | 画布 640×360，0.40 倍时角色约 108px 高 |
+| `tiers` | [0.30, 0.40, 0.50] | 右键三档（小/中/大），另有 ±0.05 微调（范围 0.15~1.0） |
+| `always_on_top` | true | 置顶（每 3 秒重申一次，防被浏览器窗口盖住） |
 | `fps_cap` | 30 | 素材 24fps，再高没意义 |
 | `click_response` | true | 点一下播回应动画 |
 | `click_through` | false | 整窗鼠标穿透（右键菜单也能切） |
+| `sound_enabled` | true | 音效总开关 |
+| `volume` | 70 | 点击音效音量 0~100 |
+| `mute` | false | 静音（托盘可切） |
 | `frameseq_dir` | frameseq | 换成 `frameseq-hi` 即用高清帧 |
 | `port` | 4010 | v0.2 本地接口用 |
 
 运行时状态（位置/缩放）写 `data/body-state.json`；日志写 `data/body.log`。
 
-## 6. 交互（v0.1 已有）
+## 6. 交互（v0.1.1）
 
 | 操作 | 效果 |
 |---|---|
 | 左键拖拽 | 跟手移动，松手记住位置 |
-| 左键单击 | 随机播一段「点击回应」动画，播完回待机 |
+| 左键单击 | 随机播一段「点击回应」动画 + 播 `click.wav`，播完回待机 |
 | 双击 | 随机小剧场（random 类 89 段之一） |
-| 右键 | 点播动作（random/click/turn/move/drag 分类）· 大中小三档 · 鼠标穿透 · 回到右下角 · 退出 |
+| 右键 | 点播动作（random/click/turn/move/drag）· 大小三档 + ±0.05 · 鼠标穿透 · 回到右下角 · 隐藏身体 · 退出身体 |
+| 托盘左键 | 显示/隐藏切换 |
+| 托盘右键 | 状态行（大脑 PID/守护在不在、身体显隐）· 显示/隐藏身体 · 重启身体 · 重启大脑 · 停止大脑（含守护，二次确认）· 音效（静音 / 40% / 70% / 100%）· 查看日志 · 退出身体 |
 
-## 7. 动画与素材
+## 7. 音效
 
-- 101 段，7 类：`idle 1 / click 5 / drag 1 / events 1 / move 3 / random 89 / turn 1`，共 25,529 帧，24fps，每段约 241 帧（10s）。
+- 文件：`body/assets/sounds/click.wav`（点击）、`agent/{start,done,error}.wav`（v0.3 起给状态用）、`duck/*.mp3`（预留，winsound 播不了 mp3）。
+- 实现：读 WAV → 解析 16bit PCM → 样本乘音量系数并夹紧 → 后台线程里 `winsound.PlaySound(SND_MEMORY)` 顺序播放。
+- **坑**：winsound 不允许「内存 + 异步」同时用（会抛 `Cannot play asynchronously from memory`），所以只能后台线程同步播；队列上限 4，连点不会积压成噪音。
+
+## 8. 托盘与大脑控制（安全口径）
+
+- 找进程**按命令行匹配**，不按进程名：大脑必须是 `node.exe` 且命令行含 `Momo\index.js`；守护必须是 `powershell.exe` 且含 `-File ...supervise.ps1`；并且都要排除「正在跑查询的 powershell 自己」（`$_.ProcessId -ne $PID`）。
+- **重启大脑 = 停守护 → 杀 node → 起一个守护**（不是「只杀不拉」）。原因：机器上可能有多个 `supervise.ps1`（手动 + 自启），只杀 node 会让它们同时拉起、抢 3999 端口。
+- **停止大脑**会连守护一起停（否则杀了立刻被拉起），操作前二次确认。
+- 实测（2026-11-06）：重启后 2 秒新 node 起来，`bridge.log` 出现「OneBot WS 已连接 / Bot 上线」。
+
+## 9. 动画与素材
+
+- 101 段，7 类：`idle 1 / click 5 / drag 1 / events 1（balance 6 段）/ move 3 / random 89 / turn 1`，共 25,529 帧，24fps，每段约 241 帧（10s）。
 - 帧序列已由上游解码好（webp，**640×360 画布**；角色在画布中约占 220×270，四周是透明留白，方便放道具/特效），运行时**不需要 ffmpeg**。
 - 想更清晰：`scripts\convert-assets.ps1 -HiRes` 用 ffmpeg 从 `videos/*.webm`（640×360 VP9 alpha）重抠 320×180 帧到 `frameseq-hi/`，再把 `frameseq_dir` 改成 `frameseq-hi`。
 - 素材授权与署名见 [body-attribution.md](body-attribution.md)。
 
 > **DPI 踩坑（2026-11-06 实测）**：这台机器屏幕是 1920×1080、Windows 缩放 125%，Qt 的逻辑坐标是 1536×864（devicePixelRatio=1.25）。用 DPI 未感知的进程（如部分 PowerShell 会话）截图，拿到的是被系统虚拟化过的画面，看起来像是「身体被裁掉/位置偏移」——**其实是截图的锅**。要核对显示效果，用 `QScreen.grabWindow(0)` 在 Qt 进程里截，得到的是真实 1920×1080 画面。
 
-## 8. 自检口径
+## 10. 自检口径
 
-`python body/main.py --selftest` 会断言：素材 ≥100 段、7 个分类都在、抽样帧图能解码、Player 帧号推进/停止、配置数值合法。全部通过退出码 0。
+`python body/main.py --selftest`（offscreen，不弹窗，24 项断言）：
 
-## 9. 后续批次
+1. **素材**：≥100 段、7 个分类齐全、events 含嵌套 balance；
+2. **帧图**：抽样解码成功；
+3. **播放器**：帧号推进、可停止；
+4. **配置**：scale / fps_cap / port / 三档升序合法；
+5. **音效与图标**：click.wav 在、音量上下夹紧、静音不出声、能生成多尺寸 .ico（ICO 头校验）。
+
+## 11. 后续批次
 
 见 [body-roadmap.md](body-roadmap.md)（v0.2 接口 → v0.8 运维）与主 CHANGELOG。

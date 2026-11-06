@@ -16,7 +16,11 @@ LOG_PATH = os.path.join(DATA_DIR, "body.log")
 
 DEFAULTS = {
     "assets_dir": os.path.join(BODY_DIR, "assets"),
-    "scale": 0.45,                   # 画布原生 640x360，0.45 倍时角色约 100x120px（与旧桌宠相近）
+    "scale": 0.40,                   # 画布 640x360；0.40 时角色约 108px 高（右键可切三档/微调）
+    "tiers": [0.30, 0.40, 0.50],     # 右键菜单的三档（小/中/大）
+    "volume": 70,                    # 点击音效音量 0~100
+    "mute": False,
+    "sound_enabled": True,
     "always_on_top": True,
     "fps_cap": 30,                   # 再高没意义（素材 24fps）
     "start_corner": "bottom-right",  # 首次启动位置
@@ -60,3 +64,13 @@ def save_state(state: dict) -> None:
         os.replace(tmp, STATE_PATH)
     except Exception as exc:
         print("[cfg] 保存状态失败：%s" % exc)
+
+
+def save_config(cfg: dict) -> None:
+    """把用户改动（音量/静音/缩放等）写回 body/config.json。"""
+    try:
+        data = {k: v for k, v in cfg.items() if k != "assets_dir"}
+        with open(CONFIG_PATH, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, ensure_ascii=False, indent=2)
+    except Exception as exc:
+        print("[cfg] 保存配置失败：%s" % exc)

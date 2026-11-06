@@ -1,5 +1,6 @@
 {
-  "scale": 0.45,
+  "scale": 0.40,
+  "tiers": [0.30, 0.40, 0.50],
   "always_on_top": true,
   "fps_cap": 30,
   "start_corner": "bottom-right",
@@ -7,6 +8,9 @@
   "margin_y": 120,
   "click_response": true,
   "click_through": false,
+  "sound_enabled": true,
+  "volume": 70,
+  "mute": false,
   "frameseq_dir": "frameseq",
   "port": 4010,
   "log_level": "info"

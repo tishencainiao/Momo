@@ -41,9 +41,13 @@ def _assert_topmost(hwnd: int) -> None:
 
 
 class PetWindow(QWidget):
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, sound=None):
         super().__init__()
         self.cfg = config
+        self.sound = sound
+        self.hide_on_close = False          # 有托盘时：关窗=隐藏，不是退出
+        self._quitting = False
+        self._log = config.get("_log") or (lambda _m: None)
         self.scale = float(config.get("scale") or 1.0)
         self.clips = scan_clips(config.get("assets_dir") or "",
                                 config.get("frameseq_dir") or "frameseq")
@@ -179,11 +183,15 @@ class PetWindow(QWidget):
             self._save_geometry()
         elif self.cfg.get("click_response", True):
             self._play_once(self._pick("click"))
+            played = self.sound.play("click") if self.sound is not None else False
+            self._log("身体被点了一下（音效%s）" % ("响" if played else "静音/无设备"))
         event.accept()
 
     def mouseDoubleClickEvent(self, event) -> None:                 # noqa: N802
         if event.button() == Qt.LeftButton:
             self._play_once(self._pick("random"))
+            if self.sound is not None:
+                self.sound.play("click")
 
     # ---------- 右键菜单 ----------
     def contextMenuEvent(self, event) -> None:                     # noqa: N802
@@ -199,10 +207,20 @@ class PetWindow(QWidget):
                 act.triggered.connect(lambda _checked=False, c=clip: self._play_once(c))
                 sub.addAction(act)
         menu.addSeparator()
-        for label, value in (("小 (1.2x)", 1.2), ("中 (1.6x)", 1.6), ("大 (2.2x)", 2.2)):
-            act = QAction(label, self)
+
+        # 三档：按「屏幕上的角色大小」定，不再按画布算
+        size_menu = menu.addMenu("大小（当前 %.2f）" % self.scale)
+        for label, value in self._tiers():
+            act = QAction("%s（%.2f）" % (label, value), self, checkable=True)
+            act.setChecked(abs(self.scale - value) < 1e-6)
             act.triggered.connect(lambda _checked=False, v=value: self._set_scale(v))
-            menu.addAction(act)
+            size_menu.addAction(act)
+        size_menu.addSeparator()
+        for label, delta in (("放大一档（+0.05）", +0.05), ("缩小一档（−0.05）", -0.05)):
+            act = QAction(label, self)
+            act.triggered.connect(lambda _checked=False, d=delta: self._nudge_scale(d))
+            size_menu.addAction(act)
+
         toggle = QAction("鼠标穿透（整窗）", self, checkable=True)
         toggle.setChecked(self._click_through)
         toggle.triggered.connect(self._toggle_click_through)
@@ -211,16 +229,31 @@ class PetWindow(QWidget):
         recenter.triggered.connect(self._recenter)
         menu.addAction(recenter)
         menu.addSeparator()
+        hide_act = QAction("隐藏身体（托盘可叫回）", self)
+        hide_act.triggered.connect(self.hide)
+        menu.addAction(hide_act)
         quit_act = QAction("退出身体", self)
         quit_act.triggered.connect(self._quit)
         menu.addAction(quit_act)
         menu.exec(event.globalPos())
 
+    def _tiers(self):
+        tiers = self.cfg.get("tiers") or [0.30, 0.40, 0.50]
+        try:
+            vals = sorted(float(x) for x in tiers)[:3]
+        except Exception:
+            vals = [0.30, 0.40, 0.50]
+        labels = ["小", "中", "大"]
+        return list(zip(labels[:len(vals)], vals))
+
+    def _nudge_scale(self, delta: float) -> None:
+        self._set_scale(max(0.15, min(1.0, round(self.scale + delta, 2))))
+
     def _set_scale(self, value: float) -> None:
-        self.scale = float(value)
+        self.scale = max(0.15, min(1.0, float(value)))
         native = self.idle_clip.native_size() if self.idle_clip else None
-        self.setFixedSize(int((native.width() if native else 128) * self.scale),
-                          int((native.height() if native else 104) * self.scale))
+        self.setFixedSize(int((native.width() if native else 640) * self.scale),
+                          int((native.height() if native else 360) * self.scale))
         self._save_geometry()
         self.update()
 
@@ -236,9 +269,15 @@ class PetWindow(QWidget):
         self._save_geometry()
 
     def _quit(self) -> None:
+        self._quitting = True
         self._save_geometry()
         QGuiApplication.instance().quit()
 
     def closeEvent(self, event) -> None:                           # noqa: N802
         self._save_geometry()
+        if self.hide_on_close and not self._quitting:
+            # 有托盘时：关窗只是藏起来，别让她「凭空消失」
+            event.ignore()
+            self.hide()
+            return
         super().closeEvent(event)
