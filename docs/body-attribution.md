@@ -33,6 +33,7 @@
 |---|---|---|
 | `body/anim.py` | frameseq 的「一段一目录 + meta.json(fps/frames)」组织；按 fps 索引进帧 | 未复制上游源码；数据结构是公开的素材格式 |
 | `body/pet_app.py` | 交互行为：点击回应、拖拽跟手、右键「动作→分类→点播」、位置记忆 | 行为参照上游产品设计，实现自写 |
+| `body/sound.py` | 音效播放 | **自研**：用 Qt 的 `QSoundEffect`（PySide6-Addons）+ winsound 降级。虽然方案讨论时参考过上游 `sound_winmm.py` 的「常驻播放器」思路，最终**没有采用/复制**它的代码 |
 | `docs/body-roadmap.md` | 缺失功能清单的划分维度（余额/碎碎念/工作状态等） | 只列功能名，不搬代码 |
 
 ## 4. 未借鉴 / 明确自研

@@ -118,6 +118,8 @@ def main(argv=None) -> int:
             volume=int(config.get("volume") or 70),
             muted=bool(config.get("mute")),
         )
+        ready = player.preload()          # 提前打开音频设备，第一次点击就不卡
+        log("音效后端=%s，预加载就绪 %d 个" % (player.backend, ready))
 
     try:
         win = PetWindow(config, sound=player)

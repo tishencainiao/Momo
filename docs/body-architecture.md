@@ -93,9 +93,11 @@ python body\main.py
 
 ## 7. 音效
 
-- 文件：`body/assets/sounds/click.wav`（点击）、`agent/{start,done,error}.wav`（v0.3 起给状态用）、`duck/*.mp3`（预留，winsound 播不了 mp3）。
-- 实现：读 WAV → 解析 16bit PCM → 样本乘音量系数并夹紧 → 后台线程里 `winsound.PlaySound(SND_MEMORY)` 顺序播放。
-- **坑**：winsound 不允许「内存 + 异步」同时用（会抛 `Cannot play asynchronously from memory`），所以只能后台线程同步播；队列上限 4，连点不会积压成噪音。
+- 文件：`body/assets/sounds/click.wav`（点击）、`agent/{start,done,error}.wav`（v0.3 起给状态用）、`duck/*.mp3`（预留，QSoundEffect 播不了 mp3）。
+- **后端：QSoundEffect（PySide6-Addons 里的 QtMultimedia）**——Qt 内部维护常驻音频输出，设备只开一次，点击即出声；自带 0~1 音量与多路混音。启动时 `preload()` 把 click + agent 音效都加载就绪，避免第一次点击还在开设备。
+- **为什么换掉 winsound（2026-11-06 实测）**：这段 160ms 的点击音，`winsound.PlaySound` 一次调用要阻塞约 **970ms**（大头是每次重新打开音频设备 + 系统音频栈里的 FxSound / 虚拟声卡）；本机 MCI 常驻通道也要 418~597ms。入队到真正调播放只花 0.5ms，所以延迟不在我们的线程/队列上。
+- **降级**：只装了 PySide6-Essentials 的机器上 `import QtMultimedia` 失败，会自动退回 winsound 后端（功能不中断，只是延迟高）——日志里会打 `音效后端=winsound`。
+- **坑**：winsound 不允许「内存 + 异步」同时用（`Cannot play asynchronously from memory`），所以降级后端只能后台线程同步播；QSoundEffect 则没有这个限制。
 
 ## 8. 托盘与大脑控制（安全口径）
 
