@@ -1,7 +1,7 @@
 # 借鉴与出处（Credits & Third-party Notices）
 
 > 本文件登记 Momo 使用或借鉴的第三方项目；原则见 [development.md](development.md) 第十节「代码复用原则」。
-> 更新：2026-11-04（v1.47.1）
+> 更新：2026-11-07（v1.72.0）
 
 ## 一、直接使用的第三方软件 / 模型
 
@@ -11,6 +11,8 @@
 | GPT-SoVITS 预训练权重 | lj1995 / XXXXRT（Hugging Face） | 随模型仓库声明 | v2Pro 权重、G2PW 中文模型 | 见模型仓库 |
 | edge-tts | rany2 | 许可未明确标注（PyPI 显示 Other） | 兜底 TTS（仅调用，未复制其代码） | — |
 | NapCatQQ | NapNeko | 协议端自带许可 | OneBot v11 协议端（用户自行安装，不包含在本仓库） | — |
+| PySide6 (Qt for Python) | The Qt Company | LGPLv3 / 商业双许可 | 自建身体 GUI（`body/`，v0.1 起） | 见 PyPI 包内许可证 |
+| PyInstaller | PyInstaller Development Team | GPL v2 + Bootloader 例外 | 身体打包 exe（v1.71.0 起） | 见 PyPI 包内许可证 |
 
 ## 二、借鉴的设计 / 代码
 

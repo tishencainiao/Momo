@@ -1,6 +1,6 @@
 # Momo 架构说明
 
-> 版本：v1.46.2 · 更新：2026-11-02
+> 版本：v1.72.1 · 更新：2026-11-07
 > 路径：`E:\Learn\Momo\`
 > 这份文档必须和代码同步。改了架构就改这里，别让它比代码旧。
 
@@ -19,7 +19,7 @@
 
 ```
 QQ ──WS──> SnowLuma ──WS(3001)──> 桥接 index.js
-                                   ├─ 插件平台（31 个插件 / 55 工具 / 24 命令）
+                                   ├─ 插件平台（40 个插件 / 71 个工具 / 26 个命令，以 check.js/运行日志为准）
                                    ├─ Agent 循环（最多 6 步 工具调用）
                                    ├─ 本地状态（data/ JSON + stickers.db）
                                    └─ DeepSeek API
@@ -38,16 +38,16 @@ QQ ──WS──> SnowLuma ──WS(3001)──> 桥接 index.js
 
 ```
 E:\Learn\Momo\
-├── index.js                 # 主程序（~3400 行）：消息路由 / agent 循环 / 数据层 / 预算
+├── index.js                 # 主程序（~3800 行）：消息路由 / agent 循环 / 数据层 / 预算
 ├── plugin-host.js           # 插件宿主：加载器 / ctx / 钩子 / 工具与命令注册表
 ├── sticker-store.js         # 表情包语义库（node:sqlite，非插件）
 ├── config.json              # 配置
-├── plugins/                 # 38 个功能插件
+├── plugins/                 # 40 个功能插件
 ├── body/                    # 自建身体（Python/PySide6，v0.1 起；见 body-architecture.md）
 ├── self/                    # 自我进化层（identity / reflections / skills / journal / pref）
 ├── data/                    # 运行时数据（不进版本库）
 ├── stickers/                # 表情包文件 + stickers.db 语义库
-├── test/                    # 35 个测试文件，纯 node 断言
+├── test/                    # 55 个测试文件，纯 node 断言
 ├── docs/                    # 文档（本文件、development.md、changelog/、decisions/）
 ├── archive/                 # 历史补丁脚本与旧文档
 ├── supervise.ps1            # 守护进程（崩溃自动重启）
@@ -132,12 +132,21 @@ E:\Learn\Momo\
 - `SELF_AWARENESS`：自我认知写成「事实点」而不是完整句子——完整句子会被逐字复读
 - 「当前活动」`current-activity.json`：被问「在干嘛」答案一致
 
-## 6. 插件清单（32 个）
+### 5.9 近期新增（v1.65–v1.72）
 
-`appellations` `birthdays` `browse` `budget-report` `capability-index` `dsh-link` `emotion`
-`evening-report` `evolution` `followup` `goals` `group-chat` `group-info` `group-memes`
-`health` `interact` `life-log` `memory` `meta-cog` `mute` `pc-tools` `proactive` `qzone` `report`
-`reminders` `settings` `stickers` `teach` `todos` `user-profile` `voice` `weather`
+- 身体 v0.4–v0.8：感官回流（键鼠空闲/前台窗口/锁屏/截图/投喂）、物理走路+甩抛、陪伴外挂（报时/天气/节日/待办播报/抽签/余额动画）、设置页+全局快捷键+免打扰、日志轮转+打包 exe+守护脚本
+- 隐私加固（v1.71.1–v1.71.3）：身体感官只给主人 + 只桌面渠道注入 + 落盘脱敏（清掉 body-events 历史窗口标题 191 条）
+- 报告中心（v1.72.0）：日报/周报/月报（`plugins/report.js`），她会自己写一段话
+- 提示词地图（`docs/prompt-map.md`，v1.72.0）：一轮请求的提示词分层与动态块清单
+- 主动性调参（v1.72.0）：沉默 60 分钟主动搭话、身体自娱概率 ×2、每日生活费上限 3 元
+
+## 6. 插件清单（40 个）
+
+`appellations` `birthdays` `browse` `budget-report` `buzz` `capability-index` `dsh-link` `emotion`
+`evening-report` `evolution` `followup` `fun-core` `goals` `group-chat` `group-info` `group-memes`
+`health` `hobby` `interact` `life-log` `memory` `memory-digest` `meta-cog` `mute` `pc-tools` `pet-body`
+`proactive` `puzzle` `qzone` `read-article` `reminders` `report` `roles` `settings` `stickers`
+`teach` `todos` `user-profile` `voice` `weather`
 
 ## 7. 配置（config.json 主要项）
 
@@ -145,7 +154,7 @@ E:\Learn\Momo\
 |---|---|---|
 | `chat.model` / `chat.reasoner_model` | 日常 / 推理模型 | `deepseek-v4-flash` / `deepseek-v4-pro` |
 | `chat.base_url` | **必须指向 DeepSeek**，别指向桌宠接口（会自环） | `https://api.deepseek.com` |
-| `budget.daily_cny` | 每日生活费上限 | `2` |
+| `budget.daily_cny` | 每日生活费上限 | `3` |
 | `qq.master_user` | 主人 QQ | `100000001` |
 | `qq.allowed_users` | 白名单 | 主人 + 1 位朋友 |
 | `qq.group_mention_words` | 群里触发词 | momo / 大肥鱼 / 肥鱼 … |
@@ -169,7 +178,7 @@ E:\Learn\Momo\
 - 重启：`taskkill /PID <node> /F` → supervisor 自动拉起（约 15 秒）
 - 自检：`node check.js`（语法 + 配置 + 插件结构）
 - 测试：`node test/<名字>.js`，全部跑一遍约 10 秒
-- 健康：日志出现 `插件平台就绪：31 个插件（工具 55 / 命令 24）` + `Bot 上线`
+- 健康：日志出现 `插件平台就绪：40 个插件（工具 71 / 命令 26）` + `Bot 上线`
 
 ## 10. 已知限制
 

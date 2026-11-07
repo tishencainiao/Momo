@@ -165,7 +165,7 @@ const PRIVACY_DIRECTIVE = "【隐私边界】主人的屏幕内容、他在不�
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.72.0";
+const BASE_VERSION = "1.72.1";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -328,18 +328,38 @@ function usageLine() {
 }
 function estimateTokens(text) { return Math.ceil(String(text || "").length * 0.6); }
 
-function resolveApiKey() {
+function resolveApiKey(quiet) {
   if (apiKey) return true;
   const py = cfg.pet.python_path, helper = cfg.pet.key_helper;
-  if (!fs.existsSync(py) || !fs.existsSync(helper)) { log("warn", "未找到 python/key_helper"); return false; }
+  if (!fs.existsSync(py) || !fs.existsSync(helper)) { if (!quiet) log("warn", "未找到 python/key_helper"); return false; }
   try {
     const r = spawnSync(py, [helper, "--emit"], { encoding: "utf8", timeout: 30000, windowsHide: true });
     const out = (r.stdout || "") + (r.stderr || "");
     const m = out.match(/SECRET=([A-Za-z0-9\-_.]+)/);
     if (m && m[1]) { apiKey = m[1]; log("info", `已从凭据库读取 DeepSeek API Key（长度 ${apiKey.length}）`); return true; }
-    log("warn", "凭据读取失败：" + out.trim().slice(0, 120));
+    if (!quiet) log("warn", "凭据读取失败：" + out.trim().slice(0, 120));
     return false;
-  } catch (e) { log("warn", "凭据读取异常：" + e.message); return false; }
+  } catch (e) { if (!quiet) log("warn", "凭据读取异常：" + e.message); return false; }
+}
+
+/* API Key 自愈：启动瞬间读凭据失败（开机时凭据服务未就绪等）不再整天失声——每 60 秒重读一次，读到即恢复；失败日志 10 分钟最多一条 */
+function startApiKeyWatchdog() {
+  let lastWarnAt = 0;
+  const timer = setInterval(() => {
+    if (apiKey) { clearInterval(timer); return; }
+    if (resolveApiKey(true)) {
+      log("info", "API Key 已自愈恢复（定时重读凭据成功，无需重启）");
+      clearInterval(timer);
+      return;
+    }
+    const now = Date.now();
+    if (now - lastWarnAt >= 10 * 60 * 1000) {
+      lastWarnAt = now;
+      log("warn", "API Key 仍缺失，已启动 60 秒定时重读（凭据服务/凭据条目异常？）");
+    }
+  }, 60 * 1000);
+  if (timer.unref) timer.unref();
+  return timer;
 }
 
 function petEvent(state, extra) {
@@ -3703,7 +3723,7 @@ function startPetApi() {
 }
 
 log("info", `== dsh-pet-qq-bridge v${BASE_VERSION} 启动 ==`);
-if (!resolveApiKey()) log("warn", "未能读取 API Key");
+if (!resolveApiKey()) { log("warn", "未能读取 API Key（已启动 60 秒定时重读，读到即自愈）"); startApiKeyWatchdog(); }
 loadProactiveState();
 seedActivity();
 loadMood();

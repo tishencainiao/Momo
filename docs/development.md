@@ -31,6 +31,10 @@ git commit -m "feat: 描述"
 
 # 4. 重启让改动生效
 #    taskkill 杀掉 node 进程，supervise.ps1 会自动拉起
+
+# 5. 发布：升版本 + CHANGELOG + tag + 公开镜像 + 双平台推送
+#    统一走 release.ps1（详见「十一、发布闭环」）
+powershell -NoProfile -ExecutionPolicy Bypass -File .\release.ps1 -Bump patch -Message "改了什么"
 ```
 
 ## 三、版本纪律（摘要，详见 [CHANGELOG.md](../CHANGELOG.md) 文件头）
@@ -462,4 +466,73 @@ module.exports = {
 - 永不进公开仓库：data/、.env、config.json（只放 config.example.json）、stickers/*.db*、*.bak、versions/、archive/、self/ 个人数据（只放模板 + skills.json）、docs/remote-backup-gitee.md；README 用公开版（本地 README 不同步）
 - 脱敏靠脚本统一替换：真实 QQ 号/机器人 QQ → 假号、用户名路径 → 占位符、文档里的求职相关段落 → 项目版措辞（见 sync-to-public.ps1 第 3 步，新增敏感类型时在脚本里补一条）
 - 红线：公开仓库永远不回拉覆盖本地；推送永远只从 Momo-public 出，本地 master 的完整历史绝不外推
+
+---
+
+## 十一、发布闭环（强制）
+
+> 2026-11-07 起：所有会话改完代码统一走 `release.ps1`，禁止手搓 commit+tag+push。升版串行；tag 与对外发布由总控（「Momo 项目总控」会话）统一收口，避免并行撞版本号/tag。
+
+一条命令（在 E:\Learn\Momo 下）：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File E:\Learn\Momo\release.ps1 -Bump patch -Message "改了什么"
+```
+
+七个阶段（脚本按顺序执行，任一步失败即停下并给退出码）：
+
+| 阶段 | 做什么 | 涉及命令 |
+|---|---|---|
+| 0 | 前置检查：node 定位（DSH runtime 优先，要求 ≥22）、git、当前版本、脏文件警告 | — |
+| 1 | 自检：node --check index.js → node check.js → test/*.js 全量（退出码+输出双判定）→ python body/main.py --selftest | node / python |
+| 2 | 版本 + CHANGELOG 门禁：版本合法性、BASE_VERSION 回写（-Bump）、CHANGELOG 必须已有 vX.Y.Z 条目 | — |
+| 3 | 本地提交：git add -A → commit → tag vX.Y.Z（撞号会停） | git |
+| 4 | 公开镜像：调 sync-to-public.ps1（复制干净文件集 → 脱敏 → 镜像内 commit+tag） | sync-to-public.ps1 |
+| 5 | 双平台推送：gitee/github 分支+tag、github master:main 强推；网络失败重试≤5次，凭据类错误立即失败 | git push |
+| 6 | docs 收口：调 `scripts/doc-check.js` 自动对账（版本头/数字口径/行号引用），提示刷新 docs/HANDOVER | node |
+| 7 | 发布清单：版本 / commit / tag / 镜像 / push 四路 / 剩余事项 | — |
+
+参数：
+
+- `-Version vX.Y.Z` 显式版本（不升号、不触发回写）
+- `-Bump patch|minor|major` 自动升版本号并回写 index.js（补丁=bug/调参、次=新功能、主=架构级）
+- `-Message "..."` 一句话改动摘要（进 commit 消息；CHANGELOG 条目仍需先写）
+- `-SkipTests` / `-SkipSync` / `-SkipPush` / `-NoDocs` 跳过对应阶段（演练用）
+- `-DryRun` 只打印计划，零写入（先看再发）
+- `-Force` 跳过 tag 撞号确认（覆盖已存在 tag）
+
+退出码（统一 Fail exit）：10 找不到 node；11 node<22；20 语法冒烟失败；21 疑似沙箱 EPERM（换完整权限会话重跑）；22 check.js 真实失败；23 测试失败；24 body selftest 失败；30 CHANGELOG 缺条目；31 版本号非法；32 tag 撞号；40 commit/tag 失败；50 sync 失败；52 push 超上限。
+
+前置条件：
+
+- 在完整权限会话里跑（受限沙箱里 check.js 依赖 spawnSync 会 EPERM，出现「全部 JS 语法错误」误报；脚本识别为 exit 21）
+- body 素材需已转换（缺 assets/frameseq 时 selftest 返回 2，脚本报 24）；selftest 已内置 offscreen，不需要桌面
+- GitHub/Gitee 凭据存 Windows 凭据管理器（脚本设 GIT_TERMINAL_PROMPT=0，凭据缺失快速失败而不是挂起）
+
+中断续跑：每阶段完成写 `data/.release-state.json`（stage=committed / mirrored / pushed）；中断后重跑同一命令会跳过已完成阶段，成功后自动清理。
+
+回滚：
+
+- 本地：`git tag -d vX.Y.Z` 删错建 tag；`git reset --soft HEAD~1` 撤提交保留工作区；整体回退 `git checkout v<旧版本> -- .` → 重启（supervise 自动拉起）
+- 镜像：`git -C E:\Learn\Momo-public reset --soft HEAD~1` 撤镜像提交；已推远端 tag 需人工 `git -C E:\Learn\Momo-public tag -d vX.Y.Z` + 推空引用删远端 tag（留痕）
+- 红线不变：本地完整历史永不外推、公开仓库永不回拉
+
+总控收口清单（会话发布后把发布清单报总控，总控四查）：
+
+1. BASE_VERSION = CHANGELOG 最新版本行 = git tag 最新号（三处一致）
+2. 脱敏已执行（公开镜像里搜不到真实 QQ 号 / 用户名 / 本地路径）
+3. push 四路全绿（github/gitee 分支+tag、github main 强推）
+4. docs/HANDOVER 已刷新（按「Momo 每次升版后刷新工作区 HANDOVER.md」执行）
+
+## 十二、文档纪律章程
+
+> 2026-11-07 起生效。目标：文档不再滞后于代码——宁可少写，不写旧值。
+
+1. **版本头**：每个文档必须带「适用版本 + 日期」头（如 architecture.md 第 3 行）；改了架构/流程就同步更新对应文档并升版本头。
+2. **数字口径**：插件数/工具数/命令数一律引用运行输出（node check.js 结果或运行日志的 `host.plugins.length`），正文不写死数字；需要举例就写「以 check.js 输出为准」。
+3. **引用代码**：用常量名/函数名（BASE_VERSION、agentChatOnce、isMaster、senseText），禁止行号（行号会漂移）。
+4. **文档变更随版本提交**：docs/ 随版本提交并登记 CHANGELOG 索引表；纯文档小修可以不升版，但 CHANGELOG 索引表补一行或并入下个版本。
+5. **公开同步**：docs/ 经 sync-to-public.ps1 进公开镜像（唯一排除 remote-backup-gitee.md），发布前核对脱敏清单（真实 QQ/用户名/路径不外泄）。
+6. **HANDOVER 例行**：Momo 每次升版后，由总控刷新工作区 HANDOVER.md（时点版本、口径、下一步、已知坑）。
+7. **发布前检查三件**：版本头 vs BASE_VERSION、数字口径、行号引用——已由 `scripts/doc-check.js` 自动完成（release.ps1 阶段 6 调用；发现偏差列清单、不阻塞发布）。
 
