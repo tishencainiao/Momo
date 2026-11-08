@@ -47,10 +47,14 @@ function loadConfig() {
   try { return JSON.parse(fs.readFileSync(path.join(ROOT, "config.json"), "utf8")); } catch (e) { return {}; }
 }
 function apiKey() {
+  // 从 .env 读 DEEPSEEK_API_KEY（旧：经 read_pet_key.py；2026-11-08 起改读 .env）
   try {
-    const out = execFileSync(process.env.PYTHON || "python", [path.join(ROOT, "read_pet_key.py"), "--emit"], { encoding: "utf8", timeout: 20000 });
-    const m = out.match(/SECRET=(.+)/);
-    if (m) return m[1].trim();
+    const envFile = path.join(ROOT, ".env");
+    if (fs.existsSync(envFile)) {
+      const txt = fs.readFileSync(envFile, "utf8");
+      const m = txt.match(/^\s*DEEPSEEK_API_KEY\s*=\s*(.*?)\s*$/m);
+      if (m && m[1]) return m[1].replace(/^["']|["']$/g, "");
+    }
   } catch (e) {}
   return process.env.DEEPSEEK_API_KEY || "";
 }

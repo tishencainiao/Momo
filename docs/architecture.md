@@ -1,6 +1,6 @@
 # Momo 架构说明
 
-> 版本：v1.72.1 · 更新：2026-11-07
+> 版本：v1.73.0 · 更新：2026-11-08
 > 路径：`E:\Learn\Momo\`
 > 这份文档必须和代码同步。改了架构就改这里，别让它比代码旧。
 
@@ -32,7 +32,7 @@ QQ ──WS──> SnowLuma ──WS(3001)──> 桥接 index.js
 - **Node.js 22+**（当前用 24）。**零 npm 依赖**，只用内置模块 + `node:sqlite`
 - Windows（截图 / Toast / 找文件 / 开软件 等能力依赖 PowerShell）
 - SnowLuma 在 `127.0.0.1:3000`（HTTP）/ `3001`（WS）暴露 OneBot v11
-- API Key 从 Windows 凭据管理器读（`read_pet_key.py --emit`），也支持环境变量
+- API Key 从 `.env` 读 `DEEPSEEK_API_KEY`（`.env` 已 gitignore，不进版本库）
 
 ## 3. 目录结构
 
@@ -93,7 +93,7 @@ E:\Learn\Momo\
 |---|---|---|
 | 会话历史 | `data/sessions/<key>.json` | 私聊 `QQ号`；群 `g<群号>_<QQ号>` |
 | 短期记忆 | `data/short-memory/<qq>.json` | 7 天 |
-| 长期记忆 | 主人走桌宠 `memory.json`；访客 `data/memory/<qq>.json` | 持久 |
+| 长期记忆 | `data/memory/<qq>.json`（主人/访客统一，2026-11-08 起不再与旧桌宠互通） | 持久 |
 | 自我记忆 | `self/identity.json` 等 | 持久 |
 
 - 检索：关键词 2-gram + 命中次数 + 时间衰减（轻量 RAG，**无 embedding**）

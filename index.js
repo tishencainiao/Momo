@@ -102,7 +102,6 @@ function validateConfig(c) {
   need("qq.allowed_users", c.qq && Array.isArray(c.qq.allowed_users) && c.qq.allowed_users.length > 0, "必须是非空数组");
   // chat.model 允许留空（会回退到桌宠 provider 的模型），故不校验
   need("budget.daily_cny", c.budget && Number(c.budget.daily_cny) > 0, "必须大于 0");
-  need("pet.config_path", c.pet && typeof c.pet.config_path === "string" && c.pet.config_path, "必须指定桌宠 config 路径");
   if (c.chat && c.chat.web_search && c.chat.web_search.enabled !== false) {
     const eng = String((c.chat.web_search.engine) || "baidu").toLowerCase();
     if (eng === "bocha" && !process.env.BOCHA_API_KEY) need("chat.web_search.bocha_api_key", false, "engine=bocha 但 .env 里没有 BOCHA_API_KEY");
@@ -165,7 +164,7 @@ const PRIVACY_DIRECTIVE = "【隐私边界】主人的屏幕内容、他在不�
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.72.1";
+const BASE_VERSION = "1.73.0";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -330,32 +329,26 @@ function estimateTokens(text) { return Math.ceil(String(text || "").length * 0.6
 
 function resolveApiKey(quiet) {
   if (apiKey) return true;
-  const py = cfg.pet.python_path, helper = cfg.pet.key_helper;
-  if (!fs.existsSync(py) || !fs.existsSync(helper)) { if (!quiet) log("warn", "未找到 python/key_helper"); return false; }
-  try {
-    const r = spawnSync(py, [helper, "--emit"], { encoding: "utf8", timeout: 30000, windowsHide: true });
-    const out = (r.stdout || "") + (r.stderr || "");
-    const m = out.match(/SECRET=([A-Za-z0-9\-_.]+)/);
-    if (m && m[1]) { apiKey = m[1]; log("info", `已从凭据库读取 DeepSeek API Key（长度 ${apiKey.length}）`); return true; }
-    if (!quiet) log("warn", "凭据读取失败：" + out.trim().slice(0, 120));
-    return false;
-  } catch (e) { if (!quiet) log("warn", "凭据读取异常：" + e.message); return false; }
+  const envKey = (process.env.DEEPSEEK_API_KEY || "").trim();
+  if (envKey) { apiKey = envKey; log("info", `已从 .env 读取 DeepSeek API Key（长度 ${apiKey.length}）`); return true; }
+  if (!quiet) log("warn", "未配置 DeepSeek API Key：请在 .env 写入 DEEPSEEK_API_KEY=xxx（.env 已 gitignore，不进版本库）");
+  return false;
 }
 
-/* API Key 自愈：启动瞬间读凭据失败（开机时凭据服务未就绪等）不再整天失声——每 60 秒重读一次，读到即恢复；失败日志 10 分钟最多一条 */
+/* API Key 自愈：启动瞬间 .env 尚未就绪等不再整天失声——每 60 秒重读一次，读到即恢复；失败日志 10 分钟最多一条 */
 function startApiKeyWatchdog() {
   let lastWarnAt = 0;
   const timer = setInterval(() => {
     if (apiKey) { clearInterval(timer); return; }
     if (resolveApiKey(true)) {
-      log("info", "API Key 已自愈恢复（定时重读凭据成功，无需重启）");
+      log("info", "API Key 已自愈恢复（定时重读到 .env 成功，无需重启）");
       clearInterval(timer);
       return;
     }
     const now = Date.now();
     if (now - lastWarnAt >= 10 * 60 * 1000) {
       lastWarnAt = now;
-      log("warn", "API Key 仍缺失，已启动 60 秒定时重读（凭据服务/凭据条目异常？）");
+      log("warn", "API Key 仍缺失，已启动 60 秒定时重读（请检查 .env 是否写了 DEEPSEEK_API_KEY）");
     }
   }, 60 * 1000);
   if (timer.unref) timer.unref();
@@ -438,24 +431,9 @@ function trimHistory(messages, lim, chars) {
   return out;
 }
 
-/* ---------------- 长期记忆库（按 QQ 号隔离；主人记忆与桌宠互通） ---------------- */
+/* ---------------- 长期记忆库（按 QQ 号隔离；主人记忆已于 2026-11-08 迁入本库，不再与旧桌宠互通） ---------------- */
 function memPath(userId) { return path.join(MEM_DIR, String(userId) + ".json"); }
-function petMemoryPath() {
-  const dir = (cfg.pet && cfg.pet.config_path) ? path.dirname(cfg.pet.config_path) : path.join(process.env.APPDATA || "", "dsh-pet-standalone-webm-chat");
-  const charId = (cfg.pet && cfg.pet.character_id) || "shenshen";
-  return path.join(dir, "sessions", charId, "memory.json");
-}
 function loadMemories(userId) {
-  if (isMaster(userId)) {
-    try {
-      const raw = JSON.parse(fs.readFileSync(petMemoryPath(), "utf8"));
-      const entries = (raw && Array.isArray(raw.entries)) ? raw.entries : [];
-      return entries.filter((e) => e && e.text).map((e) => ({
-        content: String(e.text), time: e.created_at || e.updated_at, hits: e.hits || 0,
-        layer: e.layer || "fact", id: e.id, source: e.source || "auto", keywords: e.keywords || [],
-      }));
-    } catch (e) { return []; }
-  }
   try { const d = JSON.parse(fs.readFileSync(memPath(userId), "utf8")); if (Array.isArray(d.items)) return d.items.filter((i) => i && i.content); } catch (e) {}
   return [];
 }
@@ -466,28 +444,6 @@ function topMemories(items, n) {
   return ranked.slice(0, n);
 }
 function saveMemories(userId, items) {
-  if (isMaster(userId)) {
-    const now = new Date().toISOString();
-    const entries = (items || []).map((m) => {
-      const ts = m.time || (m.created ? new Date(m.created * 1000).toISOString() : now);
-      return {
-        id: m.id || ("q" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10)),
-        text: String(m.content || "").slice(0, 500),
-        source: m.source || "auto",
-        layer: m.layer || "fact",
-        keywords: m.keywords || [],
-        created_at: ts,
-        updated_at: now,
-        hits: m.hits || 1,
-      };
-    });
-    try {
-      const dir = path.dirname(petMemoryPath());
-      fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(petMemoryPath(), JSON.stringify({ version: 1, entries }, null, 2));
-    } catch (e) { log("warn", "写桌宠记忆失败: " + e.message.slice(0, 120)); }
-    return;
-  }
   try {
     fs.mkdirSync(MEM_DIR, { recursive: true });
     /* 访客记忆封顶（阶段 4）：只保留最近 N 条，防陌生人刷存储 */
