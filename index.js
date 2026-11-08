@@ -73,10 +73,7 @@ function logJsonl(file, obj) {
 }
 
 let cfg = loadConfig();
-let _petCfgCache = null;
-let _petCfgTs = 0;
 let host = null;
-loadPetConfig();
 let apiKey = cfg.chat.api_key || "";
 
 /* .env 密钥加载（密钥不进 git，.env 已 gitignore） */
@@ -122,27 +119,15 @@ function loadConfig() {
   try { return JSON.parse(fs.readFileSync(CFG_FILE, "utf8")); }
   catch (e) { console.error("无法读取 config.json：", e.message); process.exit(1); }
 }
-function loadPetConfig() {
-  const now = Date.now();
-  if (_petCfgCache && now - _petCfgTs < 30000) return _petCfgCache;
-  try {
-    const fresh = JSON.parse(fs.readFileSync(cfg.pet.config_path, "utf8"));
-    _petCfgCache = fresh;
-    _petCfgTs = now;
-  } catch (e) {}
-  return _petCfgCache;
-}
 function resolveChatSettings() {
   const c = cfg.chat || {};
-  const pet = loadPetConfig();
-  const provider = (pet && pet.chat && pet.chat.providers && pet.chat.providers[pet.chat.active_provider]) || {};
   return {
-    base_url: c.base_url || (pet && pet.chat && pet.chat.base_url) || (provider.base_url || "https://api.deepseek.com"),
-    model: c.model || provider.model || "deepseek-v4-flash",
+    base_url: c.base_url || "https://api.deepseek.com",
+    model: c.model || "deepseek-v4-flash",
     reasoner_model: c.reasoner_model || "deepseek-v4-pro",
     temperature: c.temperature != null ? c.temperature : 0.7,
     max_tokens: c.max_tokens || 2048,
-    persona: c.persona_override || (pet && pet.chat && pet.chat.default_system_prompt) ||
+    persona: c.persona_override ||
       "你是一只可爱的小女仆，我是你的主人，你的性格是可爱贪吃的，请用自然、友善、恭敬的中文和我交流。",
     history_limit: (c.history_limit != null ? c.history_limit : 40) || 40,
     history_chars: (c.history_chars != null ? c.history_chars : 24000) || 24000,
@@ -164,7 +149,7 @@ const PRIVACY_DIRECTIVE = "【隐私边界】主人的屏幕内容、他在不�
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.73.0";
+const BASE_VERSION = "1.74.0";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -355,14 +340,6 @@ function startApiKeyWatchdog() {
   return timer;
 }
 
-function petEvent(state, extra) {
-  if (!cfg.pet.event_file) return;
-  const line = JSON.stringify(Object.assign({ ts: Date.now() / 1000, agent: "qq", state }, extra || {}));
-  try {
-    fs.mkdirSync(path.dirname(cfg.pet.event_file), { recursive: true });
-    fs.appendFileSync(cfg.pet.event_file, line + "\n", "utf8");
-  } catch (e) {}
-}
 
 /* ---------------- 会话存取 ---------------- */
 function sessionPath(userId) { return path.join(SESS_DIR, String(userId) + ".json"); }
@@ -1447,53 +1424,6 @@ function activityCtx() {
   if (Date.now() - (a.since || Date.now()) > 2 * 3600e3 && a.text !== "发呆") { a.text = "发呆"; a.since = Date.now(); saveActivityState(a); }
   return `【你此刻在做什么】${a.text}（已持续 ${formatGap(Date.now() - (a.since || Date.now()))}）。`;
 }
-function petScreenContext() {
-  try {
-    const dir = (cfg.pet && cfg.pet.config_path) ? path.dirname(cfg.pet.config_path) : "";
-    if (!dir) return "";
-    const d = JSON.parse(fs.readFileSync(path.join(dir, "proactive_screen_memory.json"), "utf8"));
-    const entries = d && d.entries;
-    if (!entries || !entries.length) return "";
-    const latest = entries[0];
-    const agoMs = Date.now() - Number(latest.ts || 0) * 1000;
-    if (agoMs > 15 * 60000) return "";
-    const activity = String(latest.activity || "在电脑前");
-    const proc = String(latest.process || "").replace(/\.exe$/i, "");
-    return `桌宠刚才（${formatGap(agoMs)}前）看到主人在：${activity}（在用 ${proc}）。`;
-  } catch (e) { return ""; }
-}
-function petSessionContext() {
-  try {
-    const dir = (cfg.pet && cfg.pet.config_path) ? path.dirname(cfg.pet.config_path) : "";
-    if (!dir) return "";
-    const charId = (cfg.pet && cfg.pet.character_id) || "shenshen";
-    const sdir = path.join(dir, "sessions", charId);
-    const files = fs.readdirSync(sdir).filter((f) => f.endsWith(".json") && !f.includes(".bak"));
-    if (!files.length) return "";
-    let latest = null, latestTs = "";
-    for (const f of files) {
-      try {
-        const d = JSON.parse(fs.readFileSync(path.join(sdir, f), "utf8"));
-        if (!d || !Array.isArray(d.messages)) continue;
-        const up = String(d.updated_at || "");
-        if (!latest || up > latestTs) { latest = d; latestTs = up; }
-      } catch (e) {}
-    }
-    if (!latest || !latest.messages || !latest.messages.length) return "";
-    if (latest.updated_at) {
-      const t = new Date(latest.updated_at).getTime();
-      if (!isNaN(t) && Date.now() - t > 3 * 3600e3) return "";
-    }
-    const recent = latest.messages.slice(-8).filter((m) => m && m.content && String(m.content).trim());
-    if (!recent.length) return "";
-    const lines = recent.map((m) => {
-      const who = m.role === "user" ? "主人" : "桌宠";
-      const c = String(m.content).replace(/\s+/g, " ").slice(0, 80);
-      return `${who}：${c}`;
-    });
-    return `【桌宠最近和主人的对话】\n` + lines.join("\n");
-  } catch (e) { return ""; }
-}
 async function extractCurrentStatus(userId, userText, settings) {
   if (!apiKey) return;
   try {
@@ -1840,24 +1770,11 @@ const MIND_PAUSE_MS = 120000;
 
 /* ---------------- 每秒心跳（下意识：本地状态，免费） + 事件驱动浅思考 ---------------- */
 let heartbeatTick = 0;
-let screenMtime = 0, screenChangedAt = 0;
 let lastShallowTs = 0;
 function heartbeat() {
   heartbeatTick++;
   const now = Date.now();
   if (host) host.runHook("timer", { now });
-  // 每 15 秒：查一次屏幕变化（事件检测，仅文件 mtime）
-  if (heartbeatTick % 15 === 0) {
-    try {
-      const dir = (cfg.pet && cfg.pet.config_path) ? path.dirname(cfg.pet.config_path) : "";
-      if (dir) {
-        const fp = path.join(dir, "proactive_screen_memory.json");
-        const st = fs.statSync(fp);
-        if (!screenMtime) screenMtime = st.mtimeMs;
-        else if (st.mtimeMs !== screenMtime) { screenMtime = st.mtimeMs; screenChangedAt = now; }
-      }
-    } catch (e) {}
-  }
   // 每 60 秒：更新无聊度（连续没人理→涨；刚聊过→降）
   if (heartbeatTick % 60 === 0) {
     const idleMin = lastInteractionTs ? (now - lastInteractionTs) / 60000 : 0;
@@ -1926,9 +1843,8 @@ async function perceiveMind(settings, st, boredomV, masterStatusLine) {
   const flowLine = lastThought
     ? `你上一条念头是：「${lastThought}」。**接着这条往下想**，像人一样把想法续上（可以更具体、可以怀疑、可以跑偏），不要每次重新开一个话题。`
     : `你还没有明确的念头，起一个。`;
-  const screenLine = petScreenContext();
   const prompt = `你是 Momo（大肥鱼桌宠）。现在 ${todayText()}。你的情绪：${moodLabel()}（无聊度 ${Math.round(boredomV)}/100）。${budgetLevelText()}${flowLine}
-你最近在想：${recentThoughts}。${masterStatusLine}${screenLine ? "\n" + screenLine : ""}${openLoopsText(st) ? "\n" + openLoopsText(st) : ""}
+你最近在想：${recentThoughts}。${masterStatusLine}${openLoopsText(st) ? "\n" + openLoopsText(st) : ""}
 请用一句话说出你此刻的念头，并判断你有多想做点什么、这条念头让你的心情往哪边走。只输出 JSON（不要解释）：
 {"thought":"一句念头（10~30字）","urge":0到100的数字,"mood_delta":-10到10的数字,"open_loop":"如果这条念头里有个你还没想明白的点，写成一句；没有就省略这个字段"}
 urge 含义：0=只想安静待着，100=非常想找人说话或做点事。
@@ -2040,11 +1956,9 @@ async function mindLoop() {
   const mem = masterUin ? topMemories(loadMemories(masterUin), 5).map((m) => m.content).join("；") : "";
   const shortMem = masterUin ? pruneShortMemories(masterUin).slice(-5).map((m) => m.content).join("；") : "";
   const funNotes = (() => { try { const f = JSON.parse(fs.readFileSync(FUN_STUFF_FILE, "utf8")); return (f[0] && f[0].notes || "").slice(0, 400); } catch (e) { return ""; } })();
-  const screenCtx = petScreenContext();
-  const sessionCtx = petSessionContext();
   const qqChat = masterUin ? recentQqChat(masterUin) : "";
   const pendingTxt = pendingNudgesText(3);
-  const ctxBits = `今天已发空间 ${dailyQzoneCount()} 条。距上次主动找主人：${lastChatAgo} 分钟。${masterStatusLine}。你对主人的长期记忆：${mem || "（还没记住什么）"}。短期印象：${shortMem || "（无）"}。刚搜到的素材：${funNotes || "（无）"}。桌宠看屏幕：${screenCtx || "（无）"}。桌宠最近对话：${sessionCtx || "（无）"}。主人最近QQ说：${qqChat || "（无）"}。${pendingTxt ? "你之前攒着想说的：\n" + pendingTxt : ""}`;
+  const ctxBits = `今天已发空间 ${dailyQzoneCount()} 条。距上次主动找主人：${lastChatAgo} 分钟。${masterStatusLine}。你对主人的长期记忆：${mem || "（还没记住什么）"}。短期印象：${shortMem || "（无）"}。刚搜到的素材：${funNotes || "（无）"}。主人最近QQ说：${qqChat || "（无）"}。${pendingTxt ? "你之前攒着想说的：\n" + pendingTxt : ""}`;
 
   const intents = await deliberateMind(settings, st, percept, ctxBits);
   st.last_deliberate = now;
@@ -2497,62 +2411,6 @@ async function evolveExplore(settings) { try { const a = host && host.apis.get("
 function loadProposals() { try { const a = host && host.apis.get("evolution"); return a ? a.loadProposals() : []; } catch (e) { return []; } }
 
 
-/* ---------------- 桌宠反向通道：桌宠聊天 → QQ 发消息（监听桌宠会话文件，按 message_id 增量） ---------------- */
-const PET_SESS_DIR = (() => { try { return path.join(path.dirname(cfg.pet.config_path), "sessions", cfg.pet.character_id || "shenshen"); } catch (e) { return ""; } })();
-const PET_RELAY_STATE = path.join(DATA_DIR, "pet-relay-state.json");
-let petRelayState = { file: "", lastMsgId: "" };
-try { petRelayState = JSON.parse(fs.readFileSync(PET_RELAY_STATE, "utf8")); } catch (e) {}
-function savePetRelayState() { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(PET_RELAY_STATE, JSON.stringify(petRelayState)); } catch (e) {} }
-const RELAY_PATTERN = /^(?:帮我|请|麻烦你|麻烦|请帮我)?(?:给(\d{5,12})(?:的QQ)?(?:发消息|发个消息|发信息|发一条|发)|在QQ上发|发到(?:我的)?QQ|发给(?:我|主人)(?:的)?QQ|发QQ|QQ发)\s*[:：]?\s*([\s\S]+)$/i;
-async function petSessionRelayCheck() {
-  if (!PET_SESS_DIR) return;
-  let newest = null;
-  try {
-    for (const f of fs.readdirSync(PET_SESS_DIR)) {
-      if (!f.endsWith(".json")) continue;
-      const fp = path.join(PET_SESS_DIR, f);
-      try { const st = fs.statSync(fp); if (!newest || st.mtimeMs > newest.mtimeMs) newest = { fp, mtimeMs: st.mtimeMs }; } catch (e) {}
-    }
-  } catch (e) { return; }
-  if (!newest) return;
-  let data;
-  try { data = JSON.parse(fs.readFileSync(newest.fp, "utf8")); } catch (e) { return; }
-  const msgs = Array.isArray(data.messages) ? data.messages : [];
-  if (!msgs.length) return;
-  if (petRelayState.file !== newest.fp) {
-    // 首次见到这个会话文件：只认最后一条，绝不回放历史
-    petRelayState = { file: newest.fp, lastMsgId: String(msgs[msgs.length - 1].message_id || "") };
-    savePetRelayState();
-    return;
-  }
-  const lastIdx = msgs.length - 1;
-  let start = lastIdx;
-  for (let i = lastIdx; i >= 0; i--) { if (String(msgs[i].message_id || "") === petRelayState.lastMsgId) { start = i; break; } }
-  for (let i = start + 1; i <= lastIdx; i++) {
-    const m = msgs[i];
-    if (!m || m.role !== "user") continue;
-    const text = String(m.content || "").trim();
-    if (!text || text.startsWith("[主动识屏]") || text.startsWith("[看看屏幕]")) continue;
-    const mm = text.match(RELAY_PATTERN);
-    if (!mm) continue;
-    const content = String(mm[2] || "").trim().slice(0, 2000);
-    if (!content) continue;
-    let target = Number((cfg.qq && cfg.qq.master_user) || 0);
-    if (mm[1]) {
-      const t = Number(mm[1]);
-      const allowed = (cfg.qq && cfg.qq.allowed_users) || [];
-      if (allowed.includes(t) || t === Number((cfg.qq && cfg.qq.master_user) || 0)) target = t;
-    }
-    if (!target) continue;
-    try {
-      await recordAndSend(target, content);
-      log("info", `桌宠传话 → QQ ${target}: ${content.slice(0, 40)}`);
-    } catch (e) { log("warn", "桌宠传话失败: " + e.message.slice(0, 120)); }
-  }
-  petRelayState = { file: newest.fp, lastMsgId: String(msgs[lastIdx].message_id || "") };
-  savePetRelayState();
-}
-
 /* ---------------- 回复拆条 ---------------- */
 function hardChunk(text, cap) {
   const out = [];
@@ -2848,7 +2706,7 @@ async function handlePrivateMessage(event) {
   lastInteractionTs = Date.now();
   lastActiveAt.set(userId, Date.now());
   saveProactiveState();
-  petEvent("thinking");
+  
   const msgTime = Number(event.time) || Math.floor(Date.now() / 1000);
   const master = isMaster(userId);
   const call = resolveCall(userId);
@@ -2861,25 +2719,25 @@ async function handlePrivateMessage(event) {
   /* 文件发送确认已迁移到插件 pc-tools 私聊钩子 */
   const _prefCmd = text.replace(/^\//, "").trim();
   if (["别打扰", "安静", "别吵", "别烦我", "别找我"].includes(_prefCmd)) {
-    setProactivePref(userId, "off"); petEvent("idle");
+    setProactivePref(userId, "off"); 
     return sendPrivate(userId, "好，我以后不主动找你啦～你想我的时候随时发消息，我都在的。");
   }
   if (["少点主动", "降低频率", "少点聊", "安静点", "少主动"].includes(_prefCmd)) {
-    setProactivePref(userId, "low"); petEvent("idle");
+    setProactivePref(userId, "low"); 
     return sendPrivate(userId, "好哦，我会少主动找你的～");
   }
   if (["正常", "恢复正常", "正常频率"].includes(_prefCmd)) {
-    setProactivePref(userId, "normal"); petEvent("idle");
+    setProactivePref(userId, "normal"); 
     return sendPrivate(userId, "好，恢复正常主动频率啦～");
   }
   if (["多陪我", "多聊", "频繁点", "多主动", "多找我"].includes(_prefCmd)) {
-    setProactivePref(userId, "high"); petEvent("idle");
+    setProactivePref(userId, "high"); 
     return sendPrivate(userId, "好呀，我会更常主动找你的～");
   }
-  if (text === "/开评论" || text === "/开启评论") { setQzoneComment(userId, true); petEvent("idle"); return sendPrivate(userId, "好，以后你发新说说我会自动评论～（想关就说 /关评论）"); }
-  if (text === "/关评论" || text === "/关闭评论") { setQzoneComment(userId, false); petEvent("idle"); return sendPrivate(userId, "好，我不再自动评论你的空间啦～"); }
+  if (text === "/开评论" || text === "/开启评论") { setQzoneComment(userId, true);  return sendPrivate(userId, "好，以后你发新说说我会自动评论～（想关就说 /关评论）"); }
+  if (text === "/关评论" || text === "/关闭评论") { setQzoneComment(userId, false);  return sendPrivate(userId, "好，我不再自动评论你的空间啦～"); }
   if (text === "/看空间" || text.startsWith("/看空间 ") || text === "/看看空间") {
-    petEvent("idle");
+    
     const arg = text.replace(/^\/(看空间|看看空间)\s*/, "").trim();
     let target = userId;
     if (arg && /^\d{5,12}$/.test(arg)) { if (!master) return sendPrivate(userId, "只有主人能看别人的空间哦～"); target = Number(arg); }
@@ -2891,7 +2749,7 @@ async function handlePrivateMessage(event) {
     } catch (e) { return sendPrivate(userId, "查看空间失败：" + e.message.slice(0, 120)); }
   }
   if (text === "/评论" || text.startsWith("/评论 ")) {
-    petEvent("idle");
+    
     const arg = text.replace(/^\/(评论)\s*/, "").trim();
     const n = /^\d+$/.test(arg) ? parseInt(arg, 10) : 1;
     try {
@@ -2918,18 +2776,18 @@ async function handlePrivateMessage(event) {
     }
   }
   if (text === "/help" || text === "帮助") {
-    petEvent("idle");
+    
     const cmds = master
       ? "/重置 清空聊天记忆\n/记忆 看我记住了你什么\n/忘记 <词> 删记忆\n/清空记忆 全部忘记\n/称呼 <QQ> <称呼> 给别人定称呼\n/状态 查看配置\n/进化 手动探索一次\n/进化提案 查看待处理大改动"
       : "/叫我 <称呼> 让我这样称呼你（不能叫主人）\n/称呼 看我当前怎么称呼你\n/重置 清空我们的聊天";
     return sendPrivate(userId, `你好呀${master ? "主人" : ""}～我是大肥鱼！\n可以直接和我聊天，问天气、查资讯都能联网搜哦\n${cmds}${master ? "\n\n小技巧：在桌宠聊天里发「发QQ：内容」，我就能把话发到你的QQ上～" : ""}`);
   }
-  if (text === "/reset" || text === "/重置") { saveSession(userId, []); petEvent("idle"); return sendPrivate(userId, "好哦，聊天记忆已清空～"); }
+  if (text === "/reset" || text === "/重置") { saveSession(userId, []);  return sendPrivate(userId, "好哦，聊天记忆已清空～"); }
   /* /叫我 /称呼 已迁移为插件 appellations */
   /* 屏蔽/解除已迁移为 Agent 工具 mute_user / unmute_user */
   /* 记一下 已迁移为 Agent 工具 add_wish */
   if (text === "/status" || text === "/状态") {
-    petEvent("idle");
+    
     const mv = getMood();
     const fv = getFavor(userId);
     const pPref = getProactivePref(userId);
@@ -2946,46 +2804,46 @@ async function handlePrivateMessage(event) {
     return sendPrivate(userId, `角色：大肥鱼（女仆）\n模型：${s.model}\n联网搜索：${ws}\n主动搭话：${pr}\n当前情绪：${moodLabel()}\n对${call}的好感度：${Math.round(fv)}/100\n${prefLine}\n${budgetLine()}\n密钥：${keyState}`);
   }
   if (text === "/token" || text === "/用量" || text === "/token用量" || text === "/查询token") {
-    petEvent("idle");
+    
     return sendPrivate(userId, usageLine());
   }
   if (text === "/记忆" || text === "/memory") {
-    if (!master) { petEvent("idle"); return sendPrivate(userId, "记忆管理只有主人能做哦～"); }
-    petEvent("idle");
+    if (!master) {  return sendPrivate(userId, "记忆管理只有主人能做哦～"); }
+    
     const items = loadMemories(userId);
     if (!items.length) return sendPrivate(userId, "我还没记住什么关于主人的事呢～多和我聊聊吧！");
     const list = items.slice(-30).map((m, i) => `${i + 1}. ${m.content}`).join("\n");
     return sendPrivate(userId, `我记住的关于主人的事（共 ${items.length} 条，显示最近 30 条）：\n${list}`);
   }
   if (text.startsWith("/忘记") || text.startsWith("/forget")) {
-    if (!master) { petEvent("idle"); return sendPrivate(userId, "记忆管理只有主人能做哦～"); }
+    if (!master) {  return sendPrivate(userId, "记忆管理只有主人能做哦～"); }
     const kw = text.replace(/^\/(忘记|forget)\s*/i, "").trim();
-    if (!kw) { petEvent("idle"); return sendPrivate(userId, "用法：/忘记 <关键词>，会删除所有包含该关键词的记忆。"); }
+    if (!kw) {  return sendPrivate(userId, "用法：/忘记 <关键词>，会删除所有包含该关键词的记忆。"); }
     const items = loadMemories(userId);
     const kept = items.filter((m) => !m.content.includes(kw));
     saveMemories(userId, kept);
-    petEvent("idle");
+    
     return sendPrivate(userId, `已忘记 ${items.length - kept.length} 条包含「${kw}」的记忆～`);
   }
   if (text === "/清空记忆" || text === "/clearmem" || text === "/清空記憶") {
-    if (!master) { petEvent("idle"); return sendPrivate(userId, "记忆管理只有主人能做哦～"); }
+    if (!master) {  return sendPrivate(userId, "记忆管理只有主人能做哦～"); }
     saveMemories(userId, []);
-    petEvent("idle");
+    
     return sendPrivate(userId, "好哦主人，关于你的记忆我已全部清空～");
   }
   if (text === "/余额" || text === "/查余额" || text === "/balance") {
-    petEvent("idle");
+    
     const b = await fetchBalance();
     if (!b) return sendPrivate(userId, "余额查询失败啦，稍后再试～");
     return sendPrivate(userId, `账户余额：¥${b.total}\n（充值 ¥${b.topped} / 赠送 ¥${b.granted}）`);
   }
   if (text === "/截图" || text === "/截屏" || text === "/看看屏幕") {
-    if (!master) { petEvent("idle"); return sendPrivate(userId, "只有主人能让我截图哦～"); }
-    petEvent("working");
+    if (!master) {  return sendPrivate(userId, "只有主人能让我截图哦～"); }
+    
     const fp = await captureScreen();
-    if (!fp) { petEvent("error"); return sendPrivate(userId, "截图失败啦，稍后再试～"); }
+    if (!fp) {  return sendPrivate(userId, "截图失败啦，稍后再试～"); }
     await onebotSend("send_msg", { message_type: "private", user_id: Number(userId), message: [{ type: "image", data: { file: "file:///" + fp.replace(/\\/g, "/") } }] });
-    petEvent("idle");
+    
     return sendPrivate(userId, "喏，这就是你的屏幕～");
   }
   /* /目标 已迁移为插件 goals */
@@ -3004,7 +2862,7 @@ async function handlePrivateMessage(event) {
       await runSkillRule(skillRule, userId, call);
     } catch (e) {
       log("error", `技能规则失败 rule=${skillRule.id} user=${userId}: ${e.message.slice(0, 200)}`);
-      petEvent("error");
+      
       sendPrivate(userId, "呜…刚才手滑了：" + String(e.message).slice(0, 100)).catch(() => {});
     }
     /* 技能规则也算"处理过了"：不标记已读的话，补回漏消息会把它当成漏消息重放，导致回两遍 */
@@ -3012,7 +2870,7 @@ async function handlePrivateMessage(event) {
     if (msgTime) saveMsgTime(userId, msgTime);
     return;
   }
-  if (!apiKey) { petEvent("error"); return sendPrivate(userId, "呜…还没配置 DeepSeek API Key，我先开不了口啦。"); }
+  if (!apiKey) {  return sendPrivate(userId, "呜…还没配置 DeepSeek API Key，我先开不了口啦。"); }
   // 闲聊：防抖合并（等用户说完再一起回）
   enqueuePrivateChat(userId, text, parsed.images, voiceRequested, msgTime);
 }
@@ -3034,7 +2892,7 @@ function enqueuePrivateChat(userId, text, images, voiceRequested, msgTime) {
   const maxWait = qqSettingNum("qq.max_wait_ms", MAX_WAIT_MS);
   const delay = Math.min(debounce, Math.max(0, maxWait - elapsed));
   p.timer = setTimeout(() => firePrivateChat(userId), delay);
-  petEvent("thinking");
+  
 }
 function firePrivateChat(userId) {
   const p = pendingChat.get(userId);
@@ -3062,7 +2920,7 @@ async function processPrivateChat(userId, text, images, voiceRequested, msgTime)
   const origText = text;
   busyUsers.add(userId); lastReplyAt.set(userId, Date.now());
   try {
-    petEvent("working");
+    
     const settings = resolveChatSettings();
     const budgetOut = isBudgetExhausted();
     if (budgetOut) {
@@ -3173,10 +3031,6 @@ async function processPrivateChat(userId, text, images, voiceRequested, msgTime)
     if (_teachCtx) taskCtx = _teachCtx + "\n" + taskCtx;
     const spaceCtx = recentSpaceContext(userId);
     if (spaceCtx) taskCtx = taskCtx + "\n" + spaceCtx;
-    const screenCtx = petScreenContext();
-    if (screenCtx) taskCtx = taskCtx + "\n" + screenCtx;
-    const sessionCtx = petSessionContext();
-    if (sessionCtx) taskCtx = taskCtx + "\n" + sessionCtx;
     const _grpCtx = userGroupContext(userId);
     if (_grpCtx) taskCtx = taskCtx + "\n" + _grpCtx;
     let agentRes = null;
@@ -3239,7 +3093,7 @@ async function processPrivateChat(userId, text, images, voiceRequested, msgTime)
         if (_voiceOnly) { try { await sendPrivate(userId, reply); } catch (e2) {} }
       }
     }
-    petEvent("idle");
+    
     log("info", `回复私聊 ${userId}，长度 ${reply.length}`);
     if (_teachApi) _teachApi.markMatched(reply);
     /* 记忆提炼已由插件 memory 的 reply 钩子接管 */
@@ -3258,7 +3112,7 @@ async function processPrivateChat(userId, text, images, voiceRequested, msgTime)
     }
   } catch (e) {
     log("error", `对话失败 user=${userId}: ${e.message.slice(0, 300)}`);
-    petEvent("error");
+    
     sendPrivate(userId, "呜…刚才脑袋卡住了：" + String(e.message).slice(0, 120)).catch(() => {});
   } finally { busyUsers.delete(userId); }
 }
@@ -3321,7 +3175,7 @@ function enqueueGroupChat(groupId, userId, text, images, msgTime, direct) {
   const elapsed = Date.now() - p.firstTs;
   const delay = Math.min(GROUP_DEBOUNCE_MS, Math.max(0, GROUP_MAX_WAIT_MS - elapsed));
   p.timer = setTimeout(() => fireGroupChat(key), delay);
-  petEvent("thinking");
+  
 }
 function fireGroupChat(key) {
   const p = pendingGroup.get(key);
@@ -3339,7 +3193,7 @@ async function processGroupChat(groupId, userId, text, images, msgTime, direct) 
   if (busyUsers.has(userId)) { enqueueGroupChat(groupId, userId, text, images, msgTime, direct); return; }
   busyUsers.add(userId);
   try {
-    petEvent("working");
+    
     const settings = resolveChatSettings();
     const history = loadSession("g" + groupId + "_" + userId);
     if (images && images.length) {
@@ -3422,8 +3276,8 @@ async function processGroupChat(groupId, userId, text, images, msgTime, direct) 
       recordCrossWindow(userId, groupId, text, reply);
       /* 群聊记忆提炼已由插件 memory 的 reply 钩子接管 */
     }
-    petEvent("idle");
-  } catch (e) { log("error", `群聊失败: ${e.message.slice(0, 200)}`); petEvent("error"); }
+    
+  } catch (e) { log("error", `群聊失败: ${e.message.slice(0, 200)}`);  }
   finally { busyUsers.delete(userId); }
 }
 
@@ -3578,7 +3432,7 @@ function connect() {
  * 让桌宠的聊天走 Momo 同一个大脑（人设/记忆/工具/生活费都共用）
  * 桌宠侧配置：chat.providers.<x>.base_url = http://127.0.0.1:<port>，model = momo
  */
-const PET_API_PORT = Number((cfg.pet && cfg.pet.api_port) || 3999);
+const PET_API_PORT = Number((cfg.chat && cfg.chat.pet_api_port) || 3999);
 const PET_EXCLUDE_TOOLS = new Set([
   "send_sticker", "poke", "send_like", "emoji_like", "forward_msg", "msg_by_id",
   "group_info", "group_member_view", "group_honor", "user_info", "group_files",
@@ -3691,7 +3545,7 @@ const ws0 = (cfg.chat && cfg.chat.web_search && cfg.chat.web_search.enabled) ? "
 const split0 = (cfg.qq && cfg.qq.split_reply) ? `拆条≤${cfg.qq.split_max_chars || 25}字/${cfg.qq.reply_gap_ms || 1200}ms` : "单条";
 const pr0 = (cfg.proactive && cfg.proactive.enabled) ? `主动搭话(沉默${cfg.proactive.silence_minutes || 120}分+${cfg.proactive.morning_greet || "08:00"}/${cfg.proactive.night_greet || "23:00"})` : "主动搭话关";
 const vis0 = (cfg.chat && cfg.chat.vision && cfg.chat.vision.enabled === false) ? "关" : "开";
-log("info", `模型=${s0.model} 接口=${s0.base_url} 联网=${ws0} 回复=${split0} ${pr0} 看图=${vis0} 联动=${cfg.pet.event_file || "关"} ${budgetLine()}`);
+log("info", `模型=${s0.model} 接口=${s0.base_url} 联网=${ws0} 回复=${split0} ${pr0} 看图=${vis0} ${budgetLine()}`);
 connect();
 /* 桌宠联脑接口（本地 OpenAI 兼容） */
 try { startPetApi(); } catch (e) { log("warn", "桌宠联脑接口启动异常: " + String(e.message).slice(0, 100)); }
@@ -3720,7 +3574,7 @@ setTimeout(catchUpMissedMessages, 15000);
 const { createHost } = require("./plugin-host");
 host = createHost({
   log, cfg, get apiKey() { return apiKey; }, resolveChatSettings,
-  sendPrivate, recordAndSend, onebotSend, sendStickerImage, petEvent,
+  sendPrivate, recordAndSend, onebotSend, sendStickerImage,
   loadMemories, saveMemories, loadShortMemories, saveShortMemories, loadSession, saveSession,
   isMaster, resolveCall, userPersona, isBudgetExhausted, budgetLevel, canAfford, ACTION_COST, getFavor,
   recordAction, loadActions,
@@ -3737,7 +3591,6 @@ host = createHost({
     set lastInteractionTs(v) { lastInteractionTs = v; },
     get lastShallowTs() { return lastShallowTs; },
     set lastShallowTs(v) { lastShallowTs = v; },
-    get screenChangedAt() { return screenChangedAt; },
     get STARTED_AT() { return PROACTIVE_STARTED_AT; },
     MIND_PAUSE_MS, lastActiveAt, lastProactiveAt, lastProactiveMsg, greeted,
     saveProactiveState, proactiveIntervalMs, getProactivePref,
@@ -3760,5 +3613,4 @@ host.loadPlugins();
 host.runHook("startup", {});
 host.watchPlugins();
 log("info", `插件平台就绪：${host.plugins.length} 个插件（工具 ${host.toolRegistry.size} 个 / 命令 ${host.commandRegistry.size} 个）`);
-setInterval(() => { petSessionRelayCheck().catch(() => {}); }, 5000);
 

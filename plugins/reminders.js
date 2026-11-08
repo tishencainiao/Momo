@@ -108,41 +108,6 @@ function showDesktopToast(title, body) {
 
 let lastCheck = 0;
 
-/* 桌宠待办文件：桌宠**只在启动时**读它，运行中会被它内存里的那份覆盖。
- * 所以写进去的条目能出现在「下次桌宠启动后的待办列表」里，但可能被桌宠自己的写入冲掉。 */
-function petTodoFile() {
-  try {
-    const cp = _ctx.config && _ctx.config.pet && _ctx.config.pet.config_path;
-    if (!cp) return null;
-    return path.join(path.dirname(cp), "todo_items.json");
-  } catch (e) { return null; }
-}
-function writePetTodo(text, dueTs) {
-  if (!cfgBool("reminder.sync_pet_todo", true)) return false;
-  const f = petTodoFile();
-  if (!f) return false;
-  try {
-    if (!fs.existsSync(f)) return false;
-    const d = new Date(dueTs);
-    const pad = (n) => String(n).padStart(2, "0");
-    const item = {
-      id: crypto.randomBytes(16).toString("hex"),
-      title: String(text || "").slice(0, 60),
-      kind: "once",
-      time: pad(d.getHours()) + ":" + pad(d.getMinutes()),
-      date: d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()),
-      enabled: true,
-      fired_lead_slot: "",
-      fired_due_slot: "",
-    };
-    const cur = JSON.parse(fs.readFileSync(f, "utf8"));
-    cur.items = Array.isArray(cur.items) ? cur.items : [];
-    cur.items.push(item);
-    fs.writeFileSync(f, JSON.stringify(cur, null, 2));
-    return true;
-  } catch (e) { return false; }
-}
-
 module.exports = {
   name: "reminders",
   version: "1.1.0",
@@ -150,7 +115,6 @@ module.exports = {
   api: { reminders: { parseReminder, parseAmount, cnToNum, showDesktopToast } },
   settings: [
     { key: "reminder.desktop_toast", label: "提醒时弹桌面通知", type: "boolean", default: true, desc: "到期除了发 QQ，还在桌面上弹一个系统通知" },
-    { key: "reminder.sync_pet_todo", label: "提醒同步到桌宠待办", type: "boolean", default: true, desc: "写进桌宠的待办列表（桌宠启动时才会读到）" },
   ],
   tools: [{
     def: {
@@ -170,8 +134,7 @@ module.exports = {
       const r = loadReminders();
       r.push({ id: "r" + Date.now().toString(36), userId: info.userId, text: rem.text, dueTs: rem.dueTs, done: false });
       saveReminders(r);
-      const synced = writePetTodo(rem.text, rem.dueTs);
-      return `【成功】已设置提醒：${_ctx.formatGap(rem.dueTs - Date.now())}后提醒「${rem.text}」${synced ? "（也记进桌宠待办了）" : ""}`;
+      return `【成功】已设置提醒：${_ctx.formatGap(rem.dueTs - Date.now())}后提醒「${rem.text}」`;
     },
   }],
   commands: [{

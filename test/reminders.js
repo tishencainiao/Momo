@@ -80,9 +80,9 @@ check("失败的没落盘", saved.filter((x) => x.text === "喝水").length === 
 
 // 8. 桌面通知开关存在
 check("暴露桌面通知开关", (plugin.settings || []).some((s) => s.key === "reminder.desktop_toast"));
-check("暴露桌宠待办同步开关", (plugin.settings || []).some((s) => s.key === "reminder.sync_pet_todo"));
+check("桌宠待办同步开关已移除", !(plugin.settings || []).some((s) => s.key === "reminder.sync_pet_todo"));
 
-// 9. 同步到桌宠待办（模拟桌宠目录）
+// 9. 旧桌宠已废弃（M2）：提醒不再写桌宠待办，成功文案也不再提「记进桌宠待办」
 const PET = path.join(DIR, "pet");
 fs.mkdirSync(PET, { recursive: true });
 const petTodo = path.join(PET, "todo_items.json");
@@ -94,32 +94,14 @@ plugin.init({
   formatGap: () => "3 分钟",
   recordAndSend: async () => {},
   sendPrivate: () => {},
-  config: { pet: { config_path: path.join(PET, "config.json") } },
+  config: { runtime: { python_path: "python" } },
 });
 const tool2 = plugin.tools.find((t) => t.def.function.name === "set_reminder");
 const msg2 = tool2.handler({ content: "三分钟后提醒我喝水" }, { userId: 1000 });
-check("成功文案提到记进待办", msg2.indexOf("记进桌宠待办") >= 0, msg2);
+check("提醒仍设置成功", msg2.indexOf("【成功】") === 0, msg2);
+check("成功文案不再提桌宠待办", msg2.indexOf("记进桌宠待办") < 0, msg2);
 const petData = JSON.parse(fs.readFileSync(petTodo, "utf8"));
-check("桌宠待办保留了旧条目", petData.items.some((x) => x.id === "old"));
-check("桌宠待办新增了提醒", petData.items.some((x) => x.title === "喝水" && x.enabled === true));
-const added = petData.items.find((x) => x.title === "喝水");
-check("新条目字段齐全", added && added.kind === "once" && /^\d{2}:\d{2}$/.test(added.time) && /^\d{4}-\d{2}-\d{2}$/.test(added.date) && added.fired_lead_slot === "" && added.fired_due_slot === "", JSON.stringify(added));
-
-// 10. 关掉同步
-const plugin2 = require("E:/Learn/Momo/plugins/reminders.js");
-plugin2.init({
-  DATA_DIR: DIR,
-  log: () => {},
-  getSetting: (k, d) => (k === "reminder.sync_pet_todo" ? false : d),
-  formatGap: () => "3 分钟",
-  recordAndSend: async () => {},
-  sendPrivate: () => {},
-  config: { pet: { config_path: path.join(PET, "config.json") } },
-});
-const before = JSON.parse(fs.readFileSync(petTodo, "utf8")).items.length;
-plugin2.tools.find((t) => t.def.function.name === "set_reminder").handler({ content: "五分钟后提醒我站起来" }, { userId: 1000 });
-const after = JSON.parse(fs.readFileSync(petTodo, "utf8")).items.length;
-check("关掉同步后不写桌宠待办", after === before, before + " → " + after);
+check("桌宠待办文件未被改动", petData.items.length === 1 && petData.items[0].id === "old", JSON.stringify(petData));
 
 console.log(`\n通过 ${pass} / 失败 ${fail}`);
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch (e) {}

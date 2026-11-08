@@ -87,19 +87,11 @@ function person(uid) {
   try { favor = Number(_ctx.getFavor(id)) || 0; } catch (e) {}
   let memoryCount = 0;
   try {
-    let file = "";
-    if (role === ROLE.ADMIN) {
-      /* 主人记忆与桌宠互通：读桌宠的 sessions/<char>/memory.json */
-      const pet = (_ctx.config && _ctx.config.pet) || {};
-      const dir = pet.config_path ? path.dirname(pet.config_path) : "";
-      if (dir) file = path.join(dir, "sessions", pet.character_id || "shenshen", "memory.json");
-    } else {
-      file = path.join(_ctx.DATA_DIR, "memory", String(id) + ".json");
-    }
-    if (file) {
-      const arr = JSON.parse(fs.readFileSync(file, "utf8"));
-      memoryCount = Array.isArray(arr) ? arr.length : 0;
-    }
+    /* M2：主人记忆已统一到 data/memory/<id>.json，不再走旧桌宠 */
+    const file = path.join(_ctx.DATA_DIR, "memory", String(id) + ".json");
+    const obj = JSON.parse(fs.readFileSync(file, "utf8"));
+    const arr = Array.isArray(obj) ? obj : (obj && Array.isArray(obj.items) ? obj.items : []);
+    memoryCount = arr.length;
   } catch (e) {}
   const name = (profile && profile.nickname) || appellation || String(id);
   return {

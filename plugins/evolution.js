@@ -163,7 +163,6 @@ async function runSkillRule(rule, userId, call) {
   }
   /* 摸头类规则：真的记一笔情感（心情 + 动作日志 + 供下次聊天提起的标记） */
   if (rule.touch_feel) { try { applyHeadpatFeel(userId); } catch (e) {} }
-  _ctx.petEvent("idle");
   _ctx.log("info", `技能规则命中 rule=${rule.id || "?"} user=${userId} 好感度=${Math.round(_ctx.getFavor(userId))}`);
 }
 
@@ -491,7 +490,7 @@ function notifyMaster(text) {
     if (master) _ctx.sendPrivate(master, text).catch(() => {});
   } catch (e) {}
 }
-const CTX_CHEATSHEET = `ctx 可用：log(level,msg)、config、apiKey、settings()、sendPrivate(u,t)、sendGroup(g,t)、recordAndSend(u,t)（先记会话再发）、onebotSend(action,params)、sendStickerImage(u,s)、petEvent(s)、loadMemories(u)、saveMemories(u,items)、loadShortMemories(u)、saveShortMemories(u,items)、loadSession(u)、saveSession(u,msgs)、isMaster(u)、resolveCall(u)、userPersona(u,s)、isBudgetExhausted()、getEmotion()、getMood()、getBoredom()、getFavor(u)、todayText()、periodOfDay()、nowHM()、formatGap(ms)、dayStr(off)、todayMMDD()、parseMemoryJson(raw)、completeOnce(msgs,settings,max,temp)、reasonComplete(msgs,settings,max)、textSimilar(a,b)、DATA_DIR、registry.list()`;
+const CTX_CHEATSHEET = `ctx 可用：log(level,msg)、config、apiKey、settings()、sendPrivate(u,t)、sendGroup(g,t)、recordAndSend(u,t)（先记会话再发）、onebotSend(action,params)、sendStickerImage(u,s)、loadMemories(u)、saveMemories(u,items)、loadShortMemories(u)、saveShortMemories(u,items)、loadSession(u)、saveSession(u,msgs)、isMaster(u)、resolveCall(u)、userPersona(u,s)、isBudgetExhausted()、getEmotion()、getMood()、getBoredom()、getFavor(u)、todayText()、periodOfDay()、nowHM()、formatGap(ms)、dayStr(off)、todayMMDD()、parseMemoryJson(raw)、completeOnce(msgs,settings,max,temp)、reasonComplete(msgs,settings,max)、textSimilar(a,b)、DATA_DIR、registry.list()`;
 async function generatePluginCode(goalDesc) {
   const prompt = `你是 Momo（大肥鱼桌宠）的代码生成器。请为下面的目标写一个**完整可运行**的 Node.js 插件文件（CommonJS）。\n\n目标：${goalDesc}\n\n插件格式（必须严格遵循）：\n\`\`\`javascript\nmodule.exports = {\n  name: "self-英文小写单词",\n  version: "1.0.0",\n  init(ctx) { _ctx = ctx; },\n  tools: [{ def: {type:"function",function:{name:"工具名",description:"何时调用",parameters:{type:"object",properties:{}}}}, handler(args, info) { return "结果文本"; } }],\n  commands: [{ key: "/命令", regex: /^\\/命令/, handler(msg) { /* 用 _ctx.sendPrivate(msg.userId, "回复") */ } }],\n  hooks: { timer(payload) { const now = payload && payload.now || Date.now(); /* 自行节流 */ } },\n};\n\`\`\`\n\n可用 API（只能调用这些 + Node 内置模块 fs/path）：\n${CTX_CHEATSHEET}\n\n硬性规则：\n1. name 必须匹配 /^self-[a-z0-9-]{1,30}$/\n2. 不能修改、读取或启动任何外部进程以外的核心文件；不要 require 网络依赖\n3. 所有可能抛错的地方都要 try-catch，绝不能 process.exit\n4. 只输出一个 javascript 代码块（\`\`\`javascript ... \`\`\`），不要任何解释文字`;
   const raw = await _ctx.reasonComplete([{ role: "user", content: prompt }], _ctx.settings(), 3000);

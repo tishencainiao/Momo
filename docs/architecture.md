@@ -12,7 +12,7 @@
 
 | 组件 | 作用 | 位置 |
 |---|---|---|
-| 桌宠（PySide6） | 桌面形象、看屏幕、自己的聊天窗口 | `%APPDATA%\dsh-pet-standalone-webm-chat` |
+| 桌宠（PySide6，自建身体） | 桌面形象、看屏幕、自己的聊天窗口 | `E:\Learn\Momo\body\` |
 | **桥接（本仓库）** | 大脑：对话、记忆、情绪、工具、主动循环 | `E:\Learn\Momo\index.js` |
 | SnowLuma | QQ 协议端（OneBot v11），由 NapCatQQ Desktop 提供 | `C:\ProgramData\NapCatQQ Desktop\components\SnowLuma` |
 | DeepSeek API | 语言与推理 | `https://api.deepseek.com` |
@@ -158,7 +158,7 @@ E:\Learn\Momo\
 | `qq.master_user` | 主人 QQ | `100000001` |
 | `qq.allowed_users` | 白名单 | 主人 + 1 位朋友 |
 | `qq.group_mention_words` | 群里触发词 | momo / 大肥鱼 / 肥鱼 … |
-| `pet.character_id` | 桌宠人设 | `shenshen` |
+| `runtime.python_path` | 跑 tts.py / digest.py / 标注脚本的 Python | runtime 的 python.exe |
 
 **运行时参数**（可被她自己调、也可在 QQ 里设）：一律走插件 `settings` 注册表，不是写死在代码里。
 

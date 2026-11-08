@@ -106,7 +106,7 @@ function info() {
 
 function runDigest(args) {
   return new Promise((resolve) => {
-    const py = (_ctx.config.pet && _ctx.config.pet.python_path) || "python";
+    const py = (_ctx.config.runtime && _ctx.config.runtime.python_path) || "python";
     const script = path.join(__dirname, "..", "digest.py");
     let out = "", err = "";
     let p;

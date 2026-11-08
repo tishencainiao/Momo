@@ -653,7 +653,7 @@ module.exports = {
           const pending = store.all().filter((r) => r.tier !== "trash" && !r.annotatedAt && !r.manualLocked);
           if (pending.length && (!_ctx.canAfford || _ctx.canAfford("low"))) {
             const { spawn } = require("child_process");
-            const py = (_ctx.config.pet && _ctx.config.pet.python_path) || "python";
+            const py = (_ctx.config.runtime && _ctx.config.runtime.python_path) || "python";
             const script = path.join(__dirname, "..", "scripts", "annotate-stickers.js");
             const child = spawn(process.execPath, [script, "--limit", "5"], {
               cwd: path.join(__dirname, ".."), windowsHide: true,

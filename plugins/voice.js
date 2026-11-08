@@ -12,7 +12,7 @@ function stripStageDirections(text) {
   return String(text).replace(/[（(][^（()）]*[）)]/g, " ").replace(/\s+/g, " ").trim();
 }
 async function sendVoice(userId, text) {
-  const py = _ctx.config.pet.python_path;
+  const py = _ctx.config.runtime.python_path;
   const ttsScript = path.join(__dirname, "..", "tts.py");
   const voice = (_ctx.config.chat && _ctx.config.chat.tts && _ctx.config.chat.tts.voice) || "zh-CN-XiaoxiaoNeural";
   const t = stripStageDirections(text).slice(0, 200);
@@ -75,8 +75,8 @@ function warmVoice() {
   if (now - _lastWarm < 5 * 60000) return { ok: false, skipped: true, reason: "throttled" };
   _lastWarm = now;
   try {
-    const pet = (_ctx.config && _ctx.config.pet) || {};
-    const py = pet.python_path;
+    const rt = (_ctx.config && _ctx.config.runtime) || {};
+    const py = rt.python_path;
     const ttsScript = path.join(__dirname, "..", "tts.py");
     if (!py) return { ok: false, reason: "no python_path" };
     if (!fs.existsSync(py)) return { ok: false, reason: "python not found" };
@@ -136,8 +136,8 @@ function voiceRateOk(userId, now) {
 function synthesize(text, file) {
   return new Promise((resolve) => {
     try {
-      const pet = (_ctx.config && _ctx.config.pet) || {};
-      const py = pet.python_path;
+      const rt = (_ctx.config && _ctx.config.runtime) || {};
+      const py = rt.python_path;
       const script = path.join(__dirname, "..", "tts.py");
       if (!py) return resolve({ ok: false, error: "no python_path" });
       const { spawn } = require("child_process");

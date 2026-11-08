@@ -47,7 +47,6 @@ function createHost(core) {
     recordAndSend: (u, t) => core.recordAndSend(u, t),
     onebotSend: (a, p) => core.onebotSend(a, p),
     sendStickerImage: (u, s) => core.sendStickerImage(u, s),
-    petEvent: (s) => core.petEvent(s),
     describeImageFile: (file, prompt) => core.describeImageFile(file, prompt),
     loadMemories: (u) => core.loadMemories(u),
     saveMemories: (u, i) => core.saveMemories(u, i),
