@@ -33,12 +33,15 @@ check("参数可配置（云服务器可调）", src.includes('mindCfg("pulse_se
 // ---------- 行为级 ----------
 let woke = 0;
 let mood = 10;
+const mindApi = {
+  loadMindState: () => ({ last_think: Date.now() - 20 * 60000 }),
+  loadOpenLoops: () => [{ text: "a" }, { text: "b" }],
+};
 const ctx = {
   Date, Math, JSON, String, Number, Array, Object,
   cfg: { mind: {} },
   lastInteractionTs: Date.now() - 45 * 60000,
-  loadMindState: () => ({ last_think: Date.now() - 20 * 60000 }),
-  loadOpenLoops: () => [{ text: "a" }, { text: "b" }],
+  host: { apis: { get: (ns) => (ns === "mind" ? mindApi : {}) } },
   getMood: () => mood,
   savePulse: () => {},
   log: () => {},

@@ -28,8 +28,13 @@ function makeCtx(settings) {
 let n = 0;
 function check(name, fn) { fn(); n++; console.log("✓ " + name); }
 
-check("默认关闭时不注入", () => {
+check("默认开启时注入", () => {
   DIGEST.init(makeCtx({}));
+  const t = DIGEST.api.memoryDigest.digestText(42);
+  assert.ok(t.includes("我总操心对方有没有按时吃饭"));
+});
+check("显式关闭时不注入", () => {
+  DIGEST.init(makeCtx({ "mem.digest.enabled": false }));
   assert.strictEqual(DIGEST.api.memoryDigest.digestText(42), null);
 });
 check("打开后注入本人桶 + 通用桶", () => {

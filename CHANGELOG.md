@@ -22,10 +22,17 @@
 > v1.46.2 起按月份拆分：明细在 `docs/changelog/<年>-<月>.md`，本文件只留规则与索引。
 > 较早版本的完整正文可直接读对应月份文件，或 `git log`。
 
-### 2026-11（75 个版本）→ [docs/changelog/2026-11.md](docs/changelog/2026-11.md)
+### 2026-11（82 个版本）→ [docs/changelog/2026-11.md](docs/changelog/2026-11.md)
 
 | 版本 | 日期 | 一句话 |
 |---|---|---|
+| v1.80.0 | 2026-11-08 | 抽群成员/群日志/跨窗口到 plugins/group-info.js（内核瘦身第三步，M8 第一部分） |
+| v1.80.1 | 2026-11-08 | 抽心智数据层到 plugins/mind.js（内核瘦身第四步，M8 第二部分） |
+| v1.78.0 | 2026-11-08 | 抽提示词常量到 prompts.js（内核瘦身第一步，M6） |
+| v1.79.0 | 2026-11-08 | 抽搜索+视觉到 plugins/search.js、plugins/vision.js（内核瘦身第二步，M7） |
+| v1.77.0 | 2026-11-08 | 清理 .bak 残留：已跟踪 6 个删掉、根目录 6 个移到 backups/、.gitignore 加 *.bak（M5） |
+| v1.76.0 | 2026-11-08 | 记忆质量治理：清 prompt 泄漏污染 + 老反思补时间戳 + 反思去重加强（M4） |
+| v1.75.0 | 2026-11-08 | 激活记忆消化：mem.digest.enabled 默认 false→true（认识注入成为默认，M3） |
 | v1.74.0 | 2026-11-08 | 移除旧桌宠：删 pet 链路 + config.pet → runtime.python_path + 插件清理（M2） |
 | v1.73.0 | 2026-11-08 | 主人记忆迁移到 data/memory + API Key 迁 .env（M1：与旧桌宠脱钩第一步） |
 | v1.72.1 | 2026-11-07 | 发布闭环工具链（release.ps1/doc-check）+ 文档纪律清偿 + API Key 自愈修复 |

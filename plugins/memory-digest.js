@@ -1,7 +1,7 @@
 /* 插件：记忆消化（读取消化后的「认识」，替换流水账注入）
  * 数据：data/memory-digest/<uid>.json 与 global.json（由 digest.py 生成）
  * 设计：本人桶 → 对「这个人」的认识；global → 对自己/世界的通用认识。
- * 默认关闭（mem.digest.enabled=false），确认效果后由管理员在 QQ 上打开。
+ * 默认开启（mem.digest.enabled=true）：消化后的「认识」替代流水账注入。
  */
 const fs = require("fs");
 const path = require("path");
@@ -49,7 +49,7 @@ function digestDir() { return path.join(_ctx.DATA_DIR, "memory-digest"); }
 function loadBucket(name) {
   try { return JSON.parse(fs.readFileSync(path.join(digestDir(), name + ".json"), "utf8")); } catch (e) { return null; }
 }
-function enabled() { try { return _ctx.getSetting("mem.digest.enabled", false) === true; } catch (e) { return false; } }
+function enabled() { try { return _ctx.getSetting("mem.digest.enabled", true) === true; } catch (e) { return true; } }
 function hasDigest(userId) { return !!loadBucket(String(userId)); }
 function maxTopics() { try { return Math.max(3, Number(_ctx.getSetting("mem.digest.max_topics", 20)) || 20); } catch (e) { return 20; } }
 
@@ -129,7 +129,7 @@ module.exports = {
   version: "1.0.0",
   init(ctx) { _ctx = ctx; try { startTimer(); } catch (e) {} },
   settings: [
-    { key: "mem.digest.enabled", label: "注入消化后的认识", type: "boolean", default: false, desc: "打开后用「记忆消化」产出的认识替代流水账注入（需先跑一次 memory_digest）" },
+    { key: "mem.digest.enabled", label: "注入消化后的认识", type: "boolean", default: true, desc: "打开后用「记忆消化」产出的认识替代流水账注入（需先跑一次 memory_digest）" },
     { key: "mem.digest.max_topics", label: "最多注入几条认识", type: "number", default: 20, min: 3, max: 40, desc: "本人桶和通用桶各自的上限" },
     { key: "mem.digest.max_merge", label: "每个主题最多合并几条", type: "number", default: 2, min: 2, max: 6, desc: "越小越细（2=只合并两两相近的条目）" },
     { key: "mem.digest.prefilter", label: "消化前规则预筛", type: "boolean", default: true, desc: "先剔掉空白/纯符号/字面重复的条目，省 token" },

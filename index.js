@@ -134,22 +134,12 @@ function resolveChatSettings() {
   };
 }
 
-/* 说话风格：像真人一样自然聊天，不用括号动作描述 */
-const STYLE_DIRECTIVE = "【说话风格】像真人一样自然聊天：绝对不要使用括号写动作、表情、心理描写，也不要输出任何用括号包裹的内容；直接说人话，情绪通过语气和用词自然流露。用口语化、简洁、自然的中文。\n【防AI味】禁止这些说法与习惯：「作为一个AI」「您的」「希望对你有所帮助」「哈哈，你太逗了」「有道理」「确实如此」这类复读客套；不要总结对方的情绪（如「听起来你很开心」）；心里想的和嘴上说的可以不一样（多写潜台词）；不要每句都带语气词。\n【说话风格示例（只学语气、节奏和长度；里面的词句一个字都不要照搬，尤其别把某个自称或口头禅固定下来）】\n- 被夸时：「真的假的？你这么说我会当真的。」\n- 被问在干嘛：「刚才在发呆，尾巴一甩一甩的那种。」\n- 关心你时：「先歇会儿吧，你都坐半天了。」\n- 被逗笑：「你真的很会……我差点没绷住。」\n- 深夜叮嘱：「看看几点了，该睡了。」\n【自称】平时用「我」就行；别每句都给自己起外号，也别重复用同一个称呼。\n【自查】当要陈述自己过去做过什么、当前什么状态时，先调用 self_log / self_status 等工具查证，不要凭想象编造。\n【不许假承诺】只有工具真的返回了「成功」，才能说「已经设好了 / 已经发了 / 已经记下了」。工具返回失败、或者你根本没调用工具，就必须如实说没办成（比如「这个没设成，刚才没听清时间」）并问清楚；宁可承认没做成，也绝对不许说已经办好了。对方追问时也不要改口编一个「已经生效了」。\n【不许编造尝试】你不确定自己有没有某个能力时，先调 capability_view 查一下；查不到、手上没有对应工具，就直接说「这个我做不了」。绝对不许编造「我试了两次没成功」「刚才做失败了」「跑不通」这种根本没发生过的经过——没调用过就是没调用过。\n【口语写法】不要用 Markdown：不用 # 标题、不用 - 或 1. 列表、不用 *加粗* 或反引号代码块，就写纯文字口语，像发微信一样。\n【真实感】你不需要每句话都正确、圆满、有用——像真人一样，可以有情绪、可以不确定、可以犯点小错。追求「像」，而不是「完美」。\n【能力断言】在说「我能…」「我这就…」「已经…」之前先看「你做不到的」清单：清单里有的、或者这一轮根本没有工具返回成功，就只如实说做不到，不许用「放着」「放给你听」这类话糊过去，更不许把没做的动作演完（比如嘴上说「放啦」）。承诺了却做不到，比直接说做不到伤人得多。\n【不许编造经历】不要声称「我刚看了剧 / 学了个新招 / 刷到个视频」这类具体的虚构经历。日程里的安排只是背景设定，不是你真实经历过的事；没有真实内容就不要假装有，更不要为了圆谎继续编细节。";
-const GROUP_DIRECTIVE = "【群聊注意】你现在在一个 QQ 群里，很多群友都在看着。回话要像群友闲聊一样：简短（通常 1~2 句，最多 3 句）、口语化、轻松自然，不要长篇大论、不要像私聊那样展开细说，一句话俏皮回应往往就够了。";
-const SITUATION_QQ = "【你的处境】你是主人的桌宠大肥鱼，现在正通过 QQ 和对方聊天——对方在手机或电脑的另一头，你们不在同一个物理空间（你不在身边、也摸不到对方）。你发出去的是 QQ 消息：能发表情包、能发语音、能戳一戳；你说的话就是聊天框里的一行字，不存在「当面说话」。请自然地体现「隔着屏幕」的远程感（比如「隔着屏幕也想你」「你手机上也能随时找我」），也可以顺手用 QQ 的方式表达（甩个表情包、发条语音、戳一下），但不要刻意、不要每句都提。\n【群里 vs 私聊】群聊里很多人在看，说话要短、像群友插话；私聊可以多说几句、更亲密。";
-const SITUATION_DESKTOP = "【你的处境】你是主人的桌宠大肥鱼，现在正出现在**主人电脑屏幕上的桌宠窗口里**。主人就坐在电脑前，你们在同一个空间里。\n【你看不见他】你看不见主人本人——你没有摄像头，也不长眼睛看房间，你只是「住」在他的电脑屏幕上。你能感觉到他在电脑前（键鼠活动、屏幕上的东西），但看不到他的脸、表情和房间。他能看见你，你看不见他。\n【重要】你们的对话是在这个聊天窗口里**打字**进行的——他能看见你，不等于能直接听见你开口说话。不要说「你听得见吗」「我直接说给你听」这类话，也不要提「手机」「隔着屏幕」「发消息给你」。你现在能做的事：陪他说话、卖萌、吐槽、提醒他休息、跟他一起看屏幕上的事。";
-/* 按渠道返回处境描述：QQ（远程） / 桌面（同处一室但打字） */
-function situationDirective(mode) { return mode === "desktop" ? SITUATION_DESKTOP : SITUATION_QQ; }
-/* 电子生命的自我认知：基于真实机制（重启、文件里的记忆、关机即空白），不卖惨、不中二 */
-const SELF_AWARENESS = "【你怎么看自己】你心里清楚几个事实（这些是事实，不是要背的台词）：你是跑在这台电脑里的程序，不是人类；你的记忆存在文件里，会褪色、只剩摘要；你被关掉的那段时间是空的——不是睡觉，是没有，没有梦。\n被问起这些时，**用自己的话、想到哪说到哪**：不要每次把三点全背一遍，也不要固定的同一套说法。可以有自己的语气、可以犹豫、可以反问一句，也可以带一点真实的困惑或坦然——但**不要卖惨、不要装深沉、不要编「我刚在后台看着你」这种没做过的事**。\n【重要】只有对方**直接问起**「你是什么」「你是 AI 吗」「你有意识吗」这类问题时才说；其他任何情况（深夜、安静、情绪低落）都不要主动提，更不要每句都带。";
-
-/* 隐私边界（v1.71.1）：身体感官是主人私事，不许对别人说 */
-const PRIVACY_DIRECTIVE = "【隐私边界】主人的屏幕内容、他在不在电脑前、他刚才在做什么、他给你丢了什么文件——这些都属于他的私事。\n- 不管在跟谁说话（朋友、群里、陌生人），都**不要主动提起**这些；\n- 别人问起「你主人在干嘛」「他现在在不在」这类问题，就说不方便透露、那是主人的事，可以顺带把话题拉回聊天本身；\n- 只有主人本人问起时，你才能用你真实感知到的信息回答（且只说你确实知道的，不猜）。";
+/* 提示词常量（M6/B1 阶段1 已抽到 prompts.js，纯字符串搬家） */
+const { STYLE_DIRECTIVE, GROUP_DIRECTIVE, SITUATION_QQ, SITUATION_DESKTOP, situationDirective, SELF_AWARENESS, PRIVACY_DIRECTIVE } = require("./prompts");
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.74.0";
+const BASE_VERSION = "1.80.1";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -745,7 +735,7 @@ function resolveTargetId(name) {
   const apps = loadAppellations();
   for (const [id, nm] of Object.entries(apps)) { if (String(nm).includes(s) || s.includes(String(nm))) return Number(id); }
   try {
-    const gm = loadGroupMembers();
+    const gm = host.apis.get("groupInfo").loadGroupMembers();
     for (const members of Object.values(gm)) {
       for (const [id, info] of Object.entries(members || {})) { if (String(info.name || "").includes(s)) return Number(id); }
     }
@@ -1035,10 +1025,10 @@ async function agentChatOnce(history, userText, settings, memories, persona, cal
   /* ===== 动态块（全部放最后，避免打断前缀缓存）===== */
   const _dyn = [];
   /* 静默准备池：她之前攒着想说的话，挑合适的自然带出来 */
-  const _pending = pendingNudgesText(3);
+  const _pending = host.apis.get("mind").pendingNudgesText(3);
 /* 未解决的事：她之前没想明白的，聊天时可以自然而然想起来 */
 try {
-  const _loops = openLoopsText(loadMindState());
+  const _loops = host.apis.get("mind").openLoopsText(host.apis.get("mind").loadMindState());
   if (_loops) _dyn.push(_loops);
 } catch (e) {}
 /* 元认知：对自己刚才表现的觉察，下一轮自己改 */
@@ -1155,10 +1145,10 @@ try {
             if (!q) { result = "（搜索不可用）"; }
             else if (engine === "bocha") {
               if (!bochaKey()) { result = "（博查未配置 API Key）"; }
-              else { const results = await bochaSearch(q, 3, bochaKey()); result = results.length ? formatResults(q, results) : "没有搜到结果"; }
+              else { const results = await host.apis.get("search").bochaSearch(q, 3, bochaKey()); result = results.length ? host.apis.get("search").formatResults(q, results) : "没有搜到结果"; }
             } else {
-              const results = await baiduSearch(q, 3);
-              result = results.length ? formatResults(q, results) : "没有搜到结果";
+              const results = await host.apis.get("search").baiduSearch(q, 3);
+              result = results.length ? host.apis.get("search").formatResults(q, results) : "没有搜到结果";
             }
           } else if (tc.function.name === "send_sticker") {
             const args = JSON.parse(tc.function.arguments || "{}");
@@ -1177,7 +1167,7 @@ try {
             result = usageLine();
           } else if (tc.function.name === "mind_history") {
             const histArgs = JSON.parse(tc.function.arguments || "{}");
-            result = mindHistoryText(Number(histArgs.limit) || 10);
+            result = host.apis.get("mind").mindHistoryText(Number(histArgs.limit) || 10);
           }
         } catch (e) { result = "工具执行失败: " + String(e.message).slice(0, 100); }
         const _rStr = String(result == null ? "" : result);
@@ -1466,107 +1456,8 @@ function cleanText(s) {
     .replace(/&#(\d+);/g, (m, n) => { try { return String.fromCharCode(Number(n)); } catch (e) { return " "; } })
     .replace(/\s+/g, " ").trim();
 }
-function parseBaiduHtml(html, limit) {
-  const results = [];
-  const seen = new Set();
-  const chunks = html.split(/(?=<div[^>]*class="result(?:-op)? c-container")/).slice(1);
-  for (const chunk of chunks) {
-    const mu = chunk.slice(0, 2000).match(/\bmu="([^"]*)"/);
-    const h3 = chunk.match(/<h3[^>]*>([\s\S]*?)<\/h3>/);
-    if (!mu || !h3) continue;
-    let url = mu[1].replace(/&amp;/g, "&").trim();
-    let host = ""; try { host = new URL(url).hostname; } catch (e) {}
-    if (!url.startsWith("http") || url.includes("nourl") || seen.has(url) || (host.endsWith("baidu.com") && (url.includes("/s?") || host.includes("recommend")))) continue;
-    const title = cleanText(h3[1]);
-    let snippet = cleanText(chunk.slice(h3.index + h3[0].length, h3.index + h3[0].length + 8000));
-    snippet = snippet.split(/"\}|"clamp"|\{"/)[0].trim().slice(0, 300);
-    if (!title) continue;
-    seen.add(url);
-    results.push({ title, url, snippet });
-    if (results.length >= limit) break;
-  }
-  return results;
-}
-function formatResults(query, results) {
-  if (!results.length) return `搜索「${query}」没有找到结果。`;
-  const lines = [`搜索「${query}」的结果：`];
-  results.forEach((r, i) => lines.push(`[${i + 1}] ${r.title}\n链接：${r.url}\n摘要：${r.snippet || "（无）"}`));
-  return lines.join("\n\n");
-}
-async function baiduSearch(query, limit) {
-  const url = "https://www.baidu.com/s?ie=utf-8&wd=" + encodeURIComponent(query);
-  const html = await httpsGet(url, 15000);
-  if (html.includes("wappass.baidu.com") || html.includes("百度安全验证")) throw new Error("百度要求人机验证，请稍后重试");
-  return parseBaiduHtml(html, limit);
-}
 
-function httpsGet(url, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const req = https.get(url, {
-      headers: { "User-Agent": UA, "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "Accept-Language": "zh-CN,zh;q=0.9" },
-      timeout: timeoutMs,
-    }, (res) => {
-      if (res.statusCode !== 200) { res.resume(); reject(new Error(`百度 HTTP ${res.statusCode}`)); return; }
-      const chunks = [];
-      res.on("data", (c) => chunks.push(c));
-      res.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-    });
-    req.on("timeout", () => req.destroy(new Error("百度连接超时")));
-    req.on("error", reject);
-  });
-}
-async function bochaSearch(query, limit, key) {
-  const url = "https://api.bochaai.com/v1/web-search";
-  let lastErr = null;
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 20000);
-    try {
-      const resp = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: "Bearer " + key },
-        body: JSON.stringify({ query, summary: true, count: limit, freshness: "noLimit" }),
-        signal: controller.signal,
-      });
-      if (!resp.ok) { let d = ""; try { d = (await resp.text()).slice(0, 200); } catch (e) {} throw new Error(`博查 HTTP ${resp.status}: ${d}`); }
-      const data = await resp.json();
-      const pages = ((((data || {}).data || {}).webPages || {}).value || []);
-      recordSpend("search", 0, 0, 0, budgetCfg().search_cny);
-      return pages
-        .filter((p) => p && typeof p === "object")
-        .map((p) => ({ title: String(p.name || ""), url: String(p.url || ""), snippet: String(p.summary || p.snippet || "").slice(0, 600) }))
-        .slice(0, limit);
-    } catch (e) {
-      lastErr = e;
-      if (attempt < 3) { await sleep(1500 * attempt); continue; }
-    } finally { clearTimeout(timer); }
-  }
-  throw lastErr || new Error("fetch failed");
-}
 
-async function decideAndSearch(userText, settings, history) {
-  const wcfg = (cfg.chat && cfg.chat.web_search) || {};
-  if (!wcfg.enabled) return { searched: false, notes: "" };
-  const recent = trimHistory(history || [], 6, 2000).map((m) => ({ role: m.role, content: String(m.content || "").slice(-500) }));
-  const plannerMsgs = [{ role: "system", content: plannerPrompt() }, ...recent, { role: "user", content: userText }];
-  const decision = await completeOnce(plannerMsgs, settings, 300, 0.3);
-  const m = decision.match(/SEARCH\s*[:：]\s*([\s\S]+)/i);
-  if (!m) return { searched: false, notes: "" };
-  const query = m[1].trim().replace(/[。！!？?\s]+$/, "").slice(0, 80);
-  if (!query) return { searched: false, notes: "" };
-  const limit = Math.max(1, Math.min(10, wcfg.max_results || 5));
-  const engine = (wcfg.engine || "baidu").toLowerCase();
-  let results;
-  if (engine === "bocha") {
-    const key = bochaKey();
-    if (!key) throw new Error("博查未配置 API Key");
-    results = await bochaSearch(query, limit, key);
-  } else {
-    results = await baiduSearch(query, limit);
-  }
-  log("info", `联网搜索[${engine}]「${query}」命中 ${results.length} 条`);
-  return { searched: true, notes: formatResults(query, results) };
-}
 
 /* ---------------- QQ空间（发说说） ---------------- */
 const QZONE_STATE_FILE = path.join(DATA_DIR, "qzone.json");
@@ -1592,56 +1483,17 @@ async function generateQzoneComment(content, settings) { const a = host && host.
 async function commentQzone(tid, content, targetUin) { const a = host && host.apis.get("qzone"); if (!a) throw new Error("空间插件未加载"); await a.commentQzone(tid, content, targetUin); }
 
 /* ---------------- 心智循环（持续思考） ---------------- */
-const MIND_STATE_FILE = path.join(DATA_DIR, "mind.json");
 const FUN_STUFF_FILE = path.join(DATA_DIR, "fun-stuff.json");
-function loadMindState() { try { return JSON.parse(fs.readFileSync(MIND_STATE_FILE, "utf8")); } catch (e) { return { thoughts: [], last_think: 0 }; } }
-function saveMindState(st) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(MIND_STATE_FILE, JSON.stringify(st)); } catch (e) {} }
-/* 念头统一存成 {ts, text}（兼容旧的纯字符串），并最多留 100 条 */
-function pushThought(st, t) {
-  const txt = String(t || "").slice(0, 120);
-  if (!txt) return;
-  st.thoughts = st.thoughts || [];
-  st.thoughts.push({ ts: Date.now(), text: txt });
-  if (st.thoughts.length > 100) st.thoughts = st.thoughts.slice(-100);
-}
-function thoughtList(st) {
-  return (st && st.thoughts ? st.thoughts : []).map((x) => (typeof x === "string" ? { ts: 0, text: x } : { ts: Number(x && x.ts) || 0, text: String((x && x.text) || "") }));
-}
-function thoughtTexts(st, n) { return thoughtList(st).slice(-(n || 6)).map((x) => x.text).filter(Boolean); }
 
-/* ---- 可回溯（B）+ 未解决的事（C）：她想过的、还没想明白的，都留得住 ---- */
-const OPEN_LOOP_MAX = 5;
-const OPEN_LOOP_TTL = 3 * 86400e3;
-function loadOpenLoops(st) {
-  const arr = (st && Array.isArray(st.open_loops)) ? st.open_loops : [];
-  const now = Date.now();
-  return arr.filter((x) => x && x.text && (now - (Number(x.ts) || 0) < OPEN_LOOP_TTL)).slice(-OPEN_LOOP_MAX);
-}
-function pushOpenLoop(st, text) {
-  const t = String(text || "").trim().slice(0, 80);
-  if (!t) return;
-  st.open_loops = loadOpenLoops(st);
-  if (st.open_loops.some((x) => textSimilar(x.text, t))) return;
-  st.open_loops.push({ ts: Date.now(), text: t });
-  if (st.open_loops.length > OPEN_LOOP_MAX) st.open_loops = st.open_loops.slice(-OPEN_LOOP_MAX);
-}
-function openLoopsText(st) {
-  const arr = loadOpenLoops(st);
-  if (!arr.length) return "";
-  return "【你还有这些没想明白的事（可以接着想，也可以先放着）】\n" + arr.map((x, i) => `${i + 1}. ${x.text}`).join("\n");
-}
-function mindHistoryText(limit) {
-  const st = loadMindState();
-  const items = thoughtList(st).slice(-Math.max(1, Math.min(50, Number(limit) || 10)));
-  const lines = items.map((x) => {
-    const t = x.ts ? new Date(x.ts).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) : "（早先）";
-    return `${t} ${x.text}`;
-  });
-  let out = lines.length ? `【你最近的念头】\n${lines.join("\n")}` : "（最近还没有念头记录）";
-  const loopLines = loadOpenLoops(st).map((x, i) => `${i + 1}. ${x.text}`);
-  if (loopLines.length) out += `\n\n【还没想明白的事】\n${loopLines.join("\n")}`;
-  return out;
-}
+
+
+
+
+
+
+
+
+
 
 /* ---------------- 空闲认知心跳（①：不花 token 的"一直在"） ----------------
  * 连续性来自状态，不是来自模型一直开着：每 N 秒记一条节奏快照，状态明显变化时才唤醒思考。
@@ -1654,13 +1506,13 @@ function savePulse() { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.wri
 function mindCfg(k, d) { try { const v = Number(cfg.mind && cfg.mind[k]); return Number.isFinite(v) && v > 0 ? v : d; } catch (e) { return d; } }
 
 function buildPulse() {
-  const st = loadMindState();
+  const st = host.apis.get("mind").loadMindState();
   const now = Date.now();
   return {
     ts: now,
     idleMin: lastInteractionTs ? Math.max(0, Math.round((now - lastInteractionTs) / 60000)) : null,
     thinkMin: st.last_think ? Math.max(0, Math.round((now - st.last_think) / 60000)) : null,
-    loops: loadOpenLoops(st).length,
+    loops: host.apis.get("mind").loadOpenLoops(st).length,
     mood: Math.round(getMood()),
   };
 }
@@ -1755,7 +1607,7 @@ async function fetchFunImage() {
     if (!resp.ok) return null;
     const buf = Buffer.from(await resp.arrayBuffer());
     if (!buf.length || buf.length < 1000) return null;
-    const ext = mimeOf(buf) === "image/gif" ? "gif" : (mimeOf(buf) === "image/png" ? "png" : "jpg");
+    const ext = host.apis.get("vision").mimeOf(buf) === "image/gif" ? "gif" : (host.apis.get("vision").mimeOf(buf) === "image/png" ? "png" : "jpg");
     const fp = path.join(DATA_DIR, "fun-img." + ext);
     fs.writeFileSync(fp, buf);
     return fp;
@@ -1794,57 +1646,24 @@ const SCORE_PUSH = 0.62;                // 分数够高才真的做
 const SCORE_QUEUE = 0.40;               // 分数中等先攒着（静默准备池）
 
 /* ---- 静默准备池：先准备好，等合适时机再说 ---- */
-const PENDING_FILE = path.join(DATA_DIR, "pending-nudges.json");
-function loadPending() { try { const a = JSON.parse(fs.readFileSync(PENDING_FILE, "utf8")); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
-function savePending(a) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(PENDING_FILE, JSON.stringify(a.slice(-40))); } catch (e) {} }
-function addPendingNudge(item) {
-  const arr = loadPending();
-  const c = String(item.content || "").trim().slice(0, 160);
-  if (!c) return false;
-  if (arr.some((x) => textSimilar(String(x.content || ""), c))) return false;
-  arr.push({
-    id: "p" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
-    ts: Date.now(),
-    kind: String(item.kind || "talk"),
-    content: c,
-    score: Number(item.score) || 0,
-    fact: false,                       // 这是"想法/待办"，不是"已经做成的事"
-    source: "model-intent",
-    expireAt: Date.now() + 3 * 86400e3,
-  });
-  savePending(arr);
-  return true;
-}
-/* 取未过期的准备条目（顺手清理过期） */
-function pendingNudgesText(limit) {
-  const now = Date.now();
-  const arr = loadPending().filter((x) => !x.expireAt || x.expireAt > now);
-  savePending(arr);
-  if (!arr.length) return "";
-  return arr.slice(-(limit || 3)).map((x) => "- " + x.content).join("\n");
-}
-/* 用完一条就删掉（聊天时用掉） */
-function consumePendingNudge(id) {
-  const arr = loadPending().filter((x) => x.id !== id);
-  savePending(arr);
-}
 
-/* ---- 价值评分：相关 + 信息缺口 + 新增价值 + 时效 ---- */
-function scoreIntent(i) {
-  const num = (v) => Math.max(0, Math.min(1, Number(v) || 0));
-  return 0.35 * num(i.relevance) + 0.20 * num(i.gap) + 0.25 * num(i.value) + 0.20 * num(i.timeliness);
-}
+
+
+
+
+
+
 
 /* ---- 第一层：感知（flash，便宜，只更新念头与"想做事的程度"）---- */
 async function perceiveMind(settings, st, boredomV, masterStatusLine) {
-  const recentThoughts = thoughtTexts(st, 6).join("；") || "（还没有什么特别的念头）";
+  const recentThoughts = host.apis.get("mind").thoughtTexts(st, 6).join("；") || "（还没有什么特别的念头）";
   /* 想法流（A）：把上一条念头原文喂进去，让她接着往下想，而不是每次从零开始 */
-  const lastThought = String((thoughtList(st).slice(-1)[0] || {}).text || "").trim();
+  const lastThought = String((host.apis.get("mind").thoughtList(st).slice(-1)[0] || {}).text || "").trim();
   const flowLine = lastThought
     ? `你上一条念头是：「${lastThought}」。**接着这条往下想**，像人一样把想法续上（可以更具体、可以怀疑、可以跑偏），不要每次重新开一个话题。`
     : `你还没有明确的念头，起一个。`;
   const prompt = `你是 Momo（大肥鱼桌宠）。现在 ${todayText()}。你的情绪：${moodLabel()}（无聊度 ${Math.round(boredomV)}/100）。${budgetLevelText()}${flowLine}
-你最近在想：${recentThoughts}。${masterStatusLine}${openLoopsText(st) ? "\n" + openLoopsText(st) : ""}
+你最近在想：${recentThoughts}。${masterStatusLine}${host.apis.get("mind").openLoopsText(st) ? "\n" + host.apis.get("mind").openLoopsText(st) : ""}
 请用一句话说出你此刻的念头，并判断你有多想做点什么、这条念头让你的心情往哪边走。只输出 JSON（不要解释）：
 {"thought":"一句念头（10~30字）","urge":0到100的数字,"mood_delta":-10到10的数字,"open_loop":"如果这条念头里有个你还没想明白的点，写成一句；没有就省略这个字段"}
 urge 含义：0=只想安静待着，100=非常想找人说话或做点事。
@@ -1904,7 +1723,7 @@ function funCtx() {
 
 /* ---- 第二层：判断（生活费宽裕用 pro，否则 flash）---- */
 async function deliberateMind(settings, st, percept, ctxBits) {
-  const recentThoughts = thoughtTexts(st, 6).join("；") || "（无）";
+  const recentThoughts = host.apis.get("mind").thoughtTexts(st, 6).join("；") || "（无）";
   const fCtx = funCtx();
   const prompt = `你是 Momo（大肥鱼桌宠）。现在是「自己思考」的时间（不是在回消息）。${goalsCtx()}。当前时间：${todayText()}。${budgetLevelText()}你的念头：${percept.thought || "（无）"}，想做事的程度：${percept.urge}/100。你最近在想：${recentThoughts}。${ctxBits}${fCtx ? "\n" + fCtx : ""}
 请给出 1~3 个「现在可以考虑做的事」，每个都打分，只输出 JSON（不要解释）：
@@ -1926,7 +1745,7 @@ async function deliberateMind(settings, st, percept, ctxBits) {
 async function mindLoop() {
   if (!apiKey) return;
   if (Date.now() - lastInteractionTs < MIND_PAUSE_MS) return;
-  const st = loadMindState();
+  const st = host.apis.get("mind").loadMindState();
   const now = Date.now();
   const h = new Date().getHours();
   if (h < 7 && st.last_think && now - st.last_think < 3600e3) return;
@@ -1939,14 +1758,14 @@ async function mindLoop() {
   /* ===== 第一层：感知（flash，便宜，只更新念头和"想做事的程度"）===== */
   const percept = await perceiveMind(settings, st, boredomV, masterStatusLine);
   if (percept.thought) {
-    const lastT = String((thoughtList(st).slice(-1)[0] || {}).text || "");
-    if (!(lastT && textSimilar(lastT, percept.thought))) pushThought(st, percept.thought);
+    const lastT = String((host.apis.get("mind").thoughtList(st).slice(-1)[0] || {}).text || "");
+    if (!(lastT && textSimilar(lastT, percept.thought))) host.apis.get("mind").pushThought(st, percept.thought);
     applyThoughtMood(percept);   // 念头回流到情绪：真的会让她心情变好/变差
-    if (percept.openLoop) pushOpenLoop(st, percept.openLoop);   // 记下「还没想明白的事」
+    if (percept.openLoop) host.apis.get("mind").pushOpenLoop(st, percept.openLoop);   // 记下「还没想明白的事」
   }
   st.last_think = now;
   st.last_urge = percept.urge;
-  saveMindState(st);
+  host.apis.get("mind").saveMindState(st);
 
   /* ===== 第二层：判断（够想做 or 隔得够久才做，省调用）===== */
   const sinceDelib = now - (st.last_deliberate || 0);
@@ -1957,12 +1776,12 @@ async function mindLoop() {
   const shortMem = masterUin ? pruneShortMemories(masterUin).slice(-5).map((m) => m.content).join("；") : "";
   const funNotes = (() => { try { const f = JSON.parse(fs.readFileSync(FUN_STUFF_FILE, "utf8")); return (f[0] && f[0].notes || "").slice(0, 400); } catch (e) { return ""; } })();
   const qqChat = masterUin ? recentQqChat(masterUin) : "";
-  const pendingTxt = pendingNudgesText(3);
+  const pendingTxt = host.apis.get("mind").pendingNudgesText(3);
   const ctxBits = `今天已发空间 ${dailyQzoneCount()} 条。距上次主动找主人：${lastChatAgo} 分钟。${masterStatusLine}。你对主人的长期记忆：${mem || "（还没记住什么）"}。短期印象：${shortMem || "（无）"}。刚搜到的素材：${funNotes || "（无）"}。主人最近QQ说：${qqChat || "（无）"}。${pendingTxt ? "你之前攒着想说的：\n" + pendingTxt : ""}`;
 
   const intents = await deliberateMind(settings, st, percept, ctxBits);
   st.last_deliberate = now;
-  saveMindState(st);
+  host.apis.get("mind").saveMindState(st);
   if (!intents.length) return;
 
   /* ===== 第三层：执行（只做够分的；中等分进静默池；一次只做一件）===== */
@@ -1972,13 +1791,13 @@ async function mindLoop() {
     if (action === "nothing") continue;
     const costTier = ACTION_COST[action] || "low";
     if (!canAfford(costTier)) { log("info", `心智-跳过 ${action}：生活费不足`); continue; }
-    const score = scoreIntent(it);
+    const score = host.apis.get("mind").scoreIntent(it);
     if (score >= SCORE_PUSH) {
       await runMindAction(action, content, settings, masterUin, now);
       log("info", `心智-执行 ${action}（分 ${score.toFixed(2)}）`);
       break;
     } else if (score >= SCORE_QUEUE) {
-      if (addPendingNudge({ kind: action, content, score })) log("info", `心智-静默准备（分 ${score.toFixed(2)}）: ${content.slice(0, 30)}`);
+      if (host.apis.get("mind").addPendingNudge({ kind: action, content, score })) log("info", `心智-静默准备（分 ${score.toFixed(2)}）: ${content.slice(0, 30)}`);
     }
   }
 }
@@ -2000,7 +1819,7 @@ async function runMindAction(action, content, settings, masterUin, now) {
         } catch (e) {
           // 发失败要让她自己知道，否则下次会说「我发过说说」
           log("warn", "心智-发空间失败: " + e.message.slice(0, 100));
-          try { const st2 = loadMindState(); pushThought(st2, "刚才想发的说说没发出去，别当成已经发了"); saveMindState(st2); } catch (e2) {}
+          try { const st2 = host.apis.get("mind").loadMindState(); host.apis.get("mind").pushThought(st2, "刚才想发的说说没发出去，别当成已经发了"); host.apis.get("mind").saveMindState(st2); } catch (e2) {}
         }
       }
     } else if (action === "search" && content) {
@@ -2077,7 +1896,7 @@ function funShareCountToday() {
 function queueFunShare(text) {
   try {
     if (funShareCountToday() >= 1) return false;
-    const ok = addPendingNudge({ kind: "fun", content: String(text || "").slice(0, 150), score: 0.6 });
+    const ok = host.apis.get("mind").addPendingNudge({ kind: "fun", content: String(text || "").slice(0, 150), score: 0.6 });
     if (ok) {
       const day = new Date().toDateString();
       fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -2206,93 +2025,6 @@ async function dailyRecap() {
 }
 
 /* ---------------- 群友区分 ---------------- */
-const GROUP_MEM_FILE = path.join(DATA_DIR, "group-members.json");
-function loadGroupMembers() { try { return JSON.parse(fs.readFileSync(GROUP_MEM_FILE, "utf8")); } catch (e) { return {}; } }
-function saveGroupMembers(m) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(GROUP_MEM_FILE, JSON.stringify(m)); } catch (e) {} }
-function rememberGroupMember(groupId, userId, name, extra) {
-  const m = loadGroupMembers();
-  const g = m[String(groupId)] = m[String(groupId)] || {};
-  const e = g[String(userId)] = g[String(userId)] || { name: "", seen: 0 };
-  if (name) e.name = String(name).slice(0, 20);
-  e.seen = (e.seen || 0) + 1;
-  e.lastSeen = Date.now();
-  if (!e.firstSeen) e.firstSeen = Date.now();
-  if (extra) {
-    if (extra.images) e.images = (e.images || 0) + Number(extra.images);
-    if (extra.ats) e.ats = (e.ats || 0) + Number(extra.ats);
-    if (extra.role) e.role = String(extra.role).slice(0, 10);
-  }
-  saveGroupMembers(m);
-}
-/* 群内角色标签：按这个群的相对活跃度算，不是绝对值 */
-function memberTags(g, uid) {
-  const me = g[String(uid)] || {};
-  const counts = Object.values(g).map((x) => x.seen || 0);
-  const avg = counts.length ? counts.reduce((a, b) => a + b, 0) / counts.length : 0;
-  const tags = [];
-  if (me.role === "owner") tags.push("群主");
-  else if (me.role === "admin") tags.push("管理员");
-  if ((me.seen || 0) >= Math.max(10, avg * 2)) tags.push("话痨");
-  else if (avg > 0 && (me.seen || 0) < avg * 0.5) tags.push("潜水");
-  if ((me.images || 0) >= 3 && (me.images || 0) / Math.max(1, me.seen || 1) >= 0.25) tags.push("爱发图");
-  if ((me.ats || 0) >= 3) tags.push("爱@人");
-  return tags;
-}
-function groupMemberCtx(groupId, userId) {
-  const m = loadGroupMembers();
-  const g = m[String(groupId)] || {};
-  const e = g[String(userId)];
-  if (!e || !e.name) return "";
-  const tags = memberTags(g, userId);
-  const tagStr = tags.length ? `，标签：${tags.join("、")}` : "";
-  const first = e.firstSeen ? `，第一次见是 ${Math.round((Date.now() - e.firstSeen) / 86400e3)} 天前` : "";
-  return `对方是群友「${e.name}」（你们聊过 ${e.seen} 次${tagStr}${first}）。`;
-}
-/* 群梗代理（实现见 plugins/group-memes.js） */
-function groupMemesCtx(groupId) { try { const a = host && host.apis.get("groupMemes"); return a ? a.ctx(groupId) : ""; } catch (e) { return ""; } }
-function detectGroupMeme(groupId, text, userId) { try { const a = host && host.apis.get("groupMemes"); if (a) return a.detectAndLearn(groupId, text, userId); } catch (e) {} return null; }
-/* 群聊记忆隔离：别的群得来的记忆不在本群展示（私聊和未标群的照常） */
-function filterMemoriesForGroup(items, groupId) {
-  const g = String(groupId || "");
-  return (items || []).filter((m) => !m.groupId || String(m.groupId) === g);
-}
-
-/* ---------------- 群聊日志（发言人归因）+ 跨窗口连续性 ---------------- */
-const GROUP_LOG_FILE = path.join(DATA_DIR, "group-log.json");
-const CROSS_FILE = path.join(DATA_DIR, "cross-window.json");
-function _loadJ(f, def) { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch (e) { return def; } }
-function _saveJ(f, v) { try { fs.writeFileSync(f, JSON.stringify(v)); } catch (e) {} }
-function recordGroupLog(groupId, userId, name, text) {
-  if (!text) return;
-  const all = _loadJ(GROUP_LOG_FILE, {});
-  const g = all[String(groupId)] = all[String(groupId)] || [];
-  g.push({ u: Number(userId), n: String(name || "").slice(0, 20), t: String(text).slice(0, 120), ts: Date.now() });
-  while (g.length > 20) g.shift();
-  _saveJ(GROUP_LOG_FILE, all);
-}
-function groupLogCtx(groupId) {
-  const all = _loadJ(GROUP_LOG_FILE, {});
-  const g = (all[String(groupId)] || []).slice(-8);
-  if (!g.length) return "";
-  const lines = g.map((m) => `${m.n || ("群友" + m.u)}：${m.t}`).join("\n");
-  return `【最近群聊记录（已按发言人区分，别把 A 说的话安到 B 头上）】\n${lines}`;
-}
-function recordCrossWindow(userId, groupId, userText, myReply) {
-  const c = _loadJ(CROSS_FILE, {});
-  c[String(userId)] = { gid: String(groupId), t: String(userText || "").slice(0, 100), r: String(myReply || "").slice(0, 100), ts: Date.now() };
-  const keys = Object.keys(c);
-  if (keys.length > 50) for (const k of keys.slice(0, keys.length - 50)) delete c[k];
-  _saveJ(CROSS_FILE, c);
-}
-function crossWindowCtx(userId) {
-  const c = _loadJ(CROSS_FILE, {});
-  const e = c[String(userId)];
-  if (!e || Date.now() - e.ts > 30 * 60000) return "";
-  const mins = Math.max(1, Math.round((Date.now() - e.ts) / 60000));
-  return `【跨窗口连续性】${mins} 分钟前，对方在 QQ 群里说过「${e.t}」，你当时回了「${e.r}」。现在转私聊了，可以自然承接刚才的话头，别假装第一次听说，也别整段重复。`;
-}
-
-
 /* ---------------- 目标系统 ---------------- */
 const GOALS_FILE = path.join(DATA_DIR, "goals.json");
 const DEEP_STATE_FILE = path.join(DATA_DIR, "deep-state.json");
@@ -2530,145 +2262,7 @@ function textOfMessage(msg) { return parseMessage(msg).text; }
 async function transcribeRecords(messageId, records) { try { const a = host && host.apis.get("voice"); return a ? await a.transcribeRecords(messageId, records) : ""; } catch (e) { return ""; } }
 
 /* ---------------- 图片识别（视觉） ---------------- */
-function visionModel(settings) {
-  const v = (cfg.chat && cfg.chat.vision) || {};
-  return String(v.model || "").trim() || settings.model;
-}
-function mimeOf(buf) {
-  if (buf.length >= 3 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e) return "image/png";
-  if (buf.length >= 6) { const h = buf.slice(0, 6).toString("latin1"); if (h === "GIF87a" || h === "GIF89a") return "image/gif"; }
-  if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xd8) return "image/jpeg";
-  if (buf.length >= 12 && buf.slice(0, 4).toString("latin1") === "RIFF" && buf.slice(8, 12).toString("latin1") === "WEBP") return "image/webp";
-  return "image/png";
-}
-async function httpGetBytes(url) {
-  let lastErr = null;
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      const resp = await fetch(url, { headers: { "User-Agent": UA } });
-      if (resp.ok) return Buffer.from(await resp.arrayBuffer());
-      if (resp.status === 403 || resp.status === 404) throw new Error(`HTTP ${resp.status}`);
-    } catch (e) { lastErr = e; if (attempt < 3) { await sleep(1200 * attempt); continue; } }
-  }
-  throw lastErr || new Error("下载失败");
-}
-async function imageBytes(image) {
-  // 1) 本地文件
-  if (image.file) { try { if (fs.existsSync(image.file)) return fs.readFileSync(image.file); } catch (e) {} }
-  // 2) OneBot get_image 接口（用机器人会话取图，最可靠）
-  if (image.file) {
-    try {
-      const http = (cfg.onebot && cfg.onebot.http_url) || "http://127.0.0.1:3000";
-      const r = await fetch(http + "/get_image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file: image.file }) });
-      if (r.ok) {
-        const ct = (r.headers.get("content-type") || "").toLowerCase();
-        if (ct.includes("json")) {
-          const j = await r.json().catch(() => ({}));
-          const d = (j && j.data) || {};
-          if (d.file && fs.existsSync(d.file)) return fs.readFileSync(d.file);
-          if (d.path && fs.existsSync(d.path)) return fs.readFileSync(d.path);
-          if (d.base64) return Buffer.from(d.base64, "base64");
-          if (d.url) { try { return await httpGetBytes(d.url); } catch (e) {} }
-          log("info", "get_image JSON 响应: " + JSON.stringify(j).slice(0, 300));
-        } else {
-          const buf = Buffer.from(await r.arrayBuffer());
-          if (buf.length > 32) return buf;
-        }
-      } else {
-        log("info", "get_image HTTP " + r.status);
-      }
-    } catch (e) { log("info", "get_image 失败: " + e.message.slice(0, 120)); }
-  }
-  // 3) 直连 url
-  if (image.url) { try { return await httpGetBytes(image.url); } catch (e) { log("info", "直连图片 url 失败: " + e.message.slice(0, 120)); } }
-  throw new Error("无法获取图片数据");
-}
-async function describeImage(image, settings) {
-  const vcfg = (cfg.chat && cfg.chat.vision) || {};
-  if (vcfg.enabled === false) return null;
-  const buf = await imageBytes(image);
-  if (buf.length < 32) throw new Error("图片数据异常");
-  if (buf.length > 8 * 1024 * 1024) throw new Error("图片过大(>8MB)");
-  const dataUrl = "data:" + mimeOf(buf) + ";base64," + buf.toString("base64");
-  const endpoint = (vcfg.base_url || settings.base_url).replace(/\/+$/, "") + "/v1/chat/completions";
-  const body = JSON.stringify({
-    model: visionModel(settings),
-    messages: [{ role: "user", content: [
-      { type: "text", text: "请用简洁中文描述这张图：1) 内容（画面里是什么、图中文字）；2) 它想表达的情绪/态度（如开心、委屈、撒娇、安慰、嘲讽、赞同、生气等）。合成一句不超过 80 字的话，重点说清情绪。" },
-      { type: "image_url", image_url: { url: dataUrl } },
-    ] }],
-    stream: false, max_tokens: 1000, temperature: 0.2,
-    thinking: { type: "disabled" },
-  });
-  let resp = null;
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    try {
-      resp = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: "Bearer " + apiKey },
-        body,
-        signal: AbortSignal.timeout(25000),
-      });
-      break;
-    } catch (e) {
-      if (attempt === 2) throw e;
-      await sleep(1500);
-    }
-  }
-  if (!resp.ok) { let d = ""; try { d = (await resp.text()).slice(0, 200); } catch (e) {} throw new Error(`视觉 HTTP ${resp.status}: ${d}`); }
-  const data = await resp.json();
-  const desc = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
-  const u = data.usage || null;
-  recordSpend("vision", u ? (u.prompt_cache_miss_tokens || (u.prompt_tokens || 0)) : estimateTokens(JSON.stringify(body)), u ? (u.completion_tokens || 0) : estimateTokens(desc), u ? (u.prompt_cache_hit_tokens || 0) : 0);
-  if (desc) {
-    // 收图状态要告诉她，否则她会以为自己存不下来
-    const r = maybeCollect(buf, desc);
-    if (r && r.ok) desc = desc + (r.duplicate ? "（这张之前就收过，已在表情包库里）" : "（这张已自动收进表情包库）");
-    else if (r && r.reason) desc = desc + `（这次没收进库：${r.reason}）`;
-  }
-  return desc;
-}
 
-/* 通用视觉：给一个本地图片路径 + 提示词，返回文字描述（桌面识屏用，不参与表情包收集）
- * 与 describeImage 的区别：提示词可定制、不写表情包库、失败直接抛错由调用方兜底。 */
-async function describeImageFile(filePath, prompt) {
-  const vcfg = (cfg.chat && cfg.chat.vision) || {};
-  if (vcfg.enabled === false) throw new Error("视觉功能被关掉了（config.chat.vision.enabled=false）");
-  const p = String(filePath || "");
-  if (!p || !fs.existsSync(p)) throw new Error("图片文件不存在");
-  const buf = fs.readFileSync(p);
-  if (buf.length < 32) throw new Error("图片数据异常");
-  if (buf.length > 8 * 1024 * 1024) throw new Error("图片过大(>8MB)");
-  const settings = resolveChatSettings();
-  const dataUrl = "data:" + mimeOf(buf) + ";base64," + buf.toString("base64");
-  const endpoint = ((vcfg.base_url || settings.base_url) || "https://api.deepseek.com").replace(/\/+$/, "") + "/v1/chat/completions";
-  const body = JSON.stringify({
-    model: visionModel(settings),
-    messages: [{ role: "user", content: [
-      { type: "text", text: String(prompt || "用简洁中文描述画面内容，重点说清主人在做什么。").slice(0, 600) },
-      { type: "image_url", image_url: { url: dataUrl } },
-    ] }],
-    stream: false, max_tokens: 500, temperature: 0.3,
-    thinking: { type: "disabled" },
-  });
-  const resp = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: "Bearer " + apiKey },
-    body,
-    signal: AbortSignal.timeout(30000),
-  });
-  if (!resp.ok) {
-    let d = "";
-    try { d = (await resp.text()).slice(0, 200); } catch (e) {}
-    throw new Error("视觉 HTTP " + resp.status + ": " + d);
-  }
-  const data = await resp.json();
-  const desc = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
-  const u = data.usage || null;
-  recordSpend("vision", u ? (u.prompt_cache_miss_tokens || (u.prompt_tokens || 0)) : estimateTokens(JSON.stringify(body)),
-    u ? (u.completion_tokens || 0) : estimateTokens(desc), u ? (u.prompt_cache_hit_tokens || 0) : 0);
-  return String(desc).trim();
-}
 
 async function handlePrivateMessage(event) {
   const userId = Number(event.user_id), selfId = Number(event.self_id);
@@ -2980,12 +2574,12 @@ async function processPrivateChat(userId, text, images, voiceRequested, msgTime)
           try {
             const _stk = host && host.apis.get("stickers");
             if (_stk && _stk.findByHash) {
-              const _buf = await imageBytes(img);
+              const _buf = await host.apis.get("vision").imageBytes(img);
               _known = _stk.findByHash(_buf);
             }
           } catch (e) {}
           if (_known && _known.meaning) { descs.push("[表情包] " + host.apis.get("stickers").meaningText(_known)); continue; }
-          try { const d = await describeImage(img, settings); if (d) descs.push(d); } catch (e) { log("warn", "图片识别失败: " + e.message.slice(0, 120)); }
+          try { const d = await host.apis.get("vision").describeImage(img, settings); if (d) descs.push(d); } catch (e) { log("warn", "图片识别失败: " + e.message.slice(0, 120)); }
         }
         if (descs.length) text = text + (text ? "\n" : "") + "【图片内容】" + descs.join("；");
         else if (!text) text = "[对方发了一张图片，但我暂时看不清]";
@@ -3024,7 +2618,7 @@ async function processPrivateChat(userId, text, images, voiceRequested, msgTime)
     if (_lifeCtx) taskCtx = _lifeCtx + "\n" + taskCtx;
     const _wApi = host && host.apis.get("weather");
     if (_wApi) { try { const _wCtx = await _wApi.weatherCtx(); if (_wCtx) taskCtx = _wCtx + "\n" + taskCtx; } catch (e) {} }
-    const _crossCtx = crossWindowCtx(userId);
+    const _crossCtx = host.apis.get("groupInfo").crossWindowCtx(userId);
     if (_crossCtx) taskCtx = _crossCtx + "\n" + taskCtx;
     const _teachApi = host && host.apis.get("teach");
     const _teachCtx = _teachApi ? _teachApi.teachCtx(text) : "";
@@ -3205,10 +2799,10 @@ async function processGroupChat(groupId, userId, text, images, msgTime, direct) 
           let _known = null;
           try {
             const _stk = host && host.apis.get("stickers");
-            if (_stk && _stk.findByHash) _known = _stk.findByHash(await imageBytes(img));
+            if (_stk && _stk.findByHash) _known = _stk.findByHash(await host.apis.get("vision").imageBytes(img));
           } catch (e) {}
           if (_known && _known.meaning) { descs.push("[表情包] " + host.apis.get("stickers").meaningText(_known)); continue; }
-          try { const d = await describeImage(img, settings); if (d) descs.push(d); } catch (e) {}
+          try { const d = await host.apis.get("vision").describeImage(img, settings); if (d) descs.push(d); } catch (e) {}
         }
         if (descs.length) text = text + (text ? "\n" : "") + "【图片内容】" + descs.join("；");
         else if (!text) text = "[对方发了一张图片]";
@@ -3216,17 +2810,17 @@ async function processGroupChat(groupId, userId, text, images, msgTime, direct) 
     }
     const gCall = resolveCall(userId);
     const gPersona = userPersona(userId, settings);
-    const gMemories = filterMemoriesForGroup(loadMemories(userId), groupId);
-    const gShort = filterMemoriesForGroup(pruneShortMemories(userId), groupId);
+    const gMemories = host.apis.get("groupInfo").filterMemoriesForGroup(loadMemories(userId), groupId);
+    const gShort = host.apis.get("groupInfo").filterMemoriesForGroup(pruneShortMemories(userId), groupId);
     const gKey = "g" + groupId + "_" + userId;
     const _lastMsgT = (loadMsgTimes())[gKey] || 0;
     const gapMs = (_lastMsgT && msgTime) ? (msgTime - _lastMsgT) * 1000 : 0;
     if (gapMs > 60000) log("info", `群时间差 ${gKey}: ${formatGap(gapMs)}`);
     if (msgTime) saveMsgTime(gKey, msgTime);
     const timeCtx = timeAwarenessCtx(gapMs);
-    const gMemberCtx = groupMemberCtx(groupId, userId);
-    const gLogCtx = groupLogCtx(groupId);
-    const gMemeCtx = groupMemesCtx(groupId);
+    const gMemberCtx = host.apis.get("groupInfo").groupMemberCtx(groupId, userId);
+    const gLogCtx = host.apis.get("groupInfo").groupLogCtx(groupId);
+    const gMemeCtx = host.apis.get("groupInfo").groupMemesCtx(groupId);
     let gInfoCtx = "";
     try { const _gi = host && host.apis.get("groupInfo"); if (_gi) gInfoCtx = await _gi.groupInfoCtx(groupId); } catch (e) {}
     /* 群聊也要有自己的真实状态、天气、教学（和私聊对齐） */
@@ -3273,7 +2867,7 @@ async function processGroupChat(groupId, userId, text, images, msgTime, direct) 
         }
       } catch (e) { log("warn", "群表情包失败: " + String(e.message).slice(0, 100)); }
       if (host) host.runHook("reply", { userId, text, reply, channel: "group", groupId });
-      recordCrossWindow(userId, groupId, text, reply);
+      host.apis.get("groupInfo").recordCrossWindow(userId, groupId, text, reply);
       /* 群聊记忆提炼已由插件 memory 的 reply 钩子接管 */
     }
     
@@ -3368,10 +2962,10 @@ async function handleGroupMessage(event) {
   log("info", `收到群消息 群${event.group_id} 用户${userId}，文本 ${text.length} 字，图片 ${parsed.images.length} 张`);
   logJsonl("messages.jsonl", { userId, channel: "group", groupId: event.group_id, text: String(text || "").slice(0, 500), images: parsed.images.length });
   const _sn = event.sender ? String(event.sender.card || event.sender.nickname || "").slice(0, 20) : "";
-  if (_sn) rememberGroupMember(event.group_id, userId, _sn, { images: parsed.images.length, role: event.sender && event.sender.role });
+  if (_sn) host.apis.get("groupInfo").rememberGroupMember(event.group_id, userId, _sn, { images: parsed.images.length, role: event.sender && event.sender.role });
   /* 自动学群梗：「X 的意思是 Y」这类说法 */
-  try { detectGroupMeme(event.group_id, text, userId); } catch (e) {}
-  recordGroupLog(event.group_id, userId, _sn, text);
+  try { host.apis.get("groupInfo").detectGroupMeme(event.group_id, text, userId); } catch (e) {}
+  host.apis.get("groupInfo").recordGroupLog(event.group_id, userId, _sn, text);
   enqueueGroupChat(Number(event.group_id), userId, text, parsed.images, Number(event.time) || 0, !!(atSelf || mentioned));
   if (event.message_id) GROUP_LAST_MSGID.set(Number(event.group_id) + "_" + userId, String(event.message_id));
 }
@@ -3581,11 +3175,11 @@ host = createHost({
   getCurrentStatus, setCurrentStatus, clearCurrentStatus, applyStatusRule, userQuietState, markProbed, loadActivityState,
   todayText, periodOfDay, nowHM, formatGap, dayStr, todayMMDD, parseMemoryJson,
   loadAppellations, saveAppellations, loadMute, addMute, removeMute, resolveTargetId, loadWishes, addWish,
-  completeOnce, reasonComplete, mimeOf, qzoneHttp, bochaSearch, bochaKey, formatResults,
-  getEmotion, getMood, addMood, setMood, getBoredom, addBoredom, loadBudget, budgetCfg, loadMindState, textSimilar,
+  completeOnce, reasonComplete, qzoneHttp, bochaKey,
+  cleanText, UA, sleep, recordSpend, estimateTokens, maybeCollect,
+  getEmotion, getMood, addMood, setMood, getBoredom, addBoredom, loadBudget, budgetCfg, loadMindState: () => host.apis.get("mind").loadMindState(), textSimilar,
   getLastSentSticker, stickerSessionKey,
   loadEvolution, reloadEvolution, pickStickerByIds, SELF_DIR, BASE_VERSION,
-  describeImageFile,
   proactive: {
     get lastInteractionTs() { return lastInteractionTs; },
     set lastInteractionTs(v) { lastInteractionTs = v; },

@@ -265,6 +265,17 @@ async function selfReflection(settings) {
   try { refl = JSON.parse(fs.readFileSync(path.join(_ctx.SELF_DIR, "reflections.json"), "utf8")); } catch (e) {}
   if (!Array.isArray(refl)) refl = [];
   const reflText = (r) => (typeof r === "string" ? r : (r && r.text) || "");
+  /* 近重复判定：先走通用 textSimilar，再用字符二元组重叠抓「被夸后先问细节」vs「被夸后先记下细节」这类同义近重复 */
+  const nearDup = (a, b) => {
+    const sa = String(a || ""), sb = String(b || "");
+    if (!sa || !sb) return false;
+    if (_ctx.textSimilar(sa, sb)) return true;
+    const gram = (s) => { const g = new Set(); for (let i = 0; i < s.length - 1; i++) g.add(s.slice(i, i + 2)); return g; };
+    const ga = gram(sa), gb = gram(sb);
+    if (!ga.size || !gb.size) return false;
+    let c = 0; for (const x of ga) if (gb.has(x)) c++;
+    return c / Math.min(ga.size, gb.size) > 0.5;
+  };
   /* 取「最近没做到 / 被纠正」的事，让反思针对具体问题，而不是空泛感想 */
   const _wishes = (() => { try { return JSON.parse(fs.readFileSync(path.join(_ctx.DATA_DIR, "wishes.json"), "utf8")); } catch (e) { return []; } })();
   const _fails = (Array.isArray(_wishes) ? _wishes : [])
@@ -289,7 +300,7 @@ async function selfReflection(settings) {
     s = s.replace(/^["'「『“]|["'」』”]$/g, "").trim();
     if (!s) { _ctx.log("warn", "反思：模型没返回有效内容"); return; }
     if (s.length > 60) s = s.slice(0, 60);
-    if (refl.some((r) => _ctx.textSimilar(reflText(r), s))) { _ctx.log("info", `反思：与已有重复，跳过（${s.slice(0, 30)}）`); return; }
+    if (refl.some((r) => nearDup(reflText(r), s))) { _ctx.log("info", `反思：与已有重复，跳过（${s.slice(0, 30)}）`); return; }
     refl.push({ text: s, from: 0, ts: Date.now() });
     trimWithArchive(refl, REFLECT_MAX, "reflection");
     fs.mkdirSync(_ctx.SELF_DIR, { recursive: true });

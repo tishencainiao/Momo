@@ -21,8 +21,8 @@ function extractFunc(s, name) {
   return s.slice(start, i + 1);
 }
 
-/* ---- 1. filterMemoriesForGroup（index.js） ---- */
-const idxSrc = fs.readFileSync(path.join(ROOT, "index.js"), "utf8");
+/* ---- 1. filterMemoriesForGroup（plugins/group-info.js） ---- */
+const idxSrc = fs.readFileSync(path.join(ROOT, "plugins/group-info.js"), "utf8");
 const fnSrc = extractFunc(idxSrc, "filterMemoriesForGroup");
 if (!fnSrc) { console.error("✗ 没找到 filterMemoriesForGroup"); process.exit(1); }
 const ctx = {};

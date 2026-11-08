@@ -29,10 +29,10 @@
 | 层 | 来源 | 内容 | 可变性 |
 |---|---|---|---|
 | persona | `userPersona()` | 人设 + 称呼/身份/权限 + 记忆消化摘要 + 成长记忆 + 复盘经验 | 每轮按用户身份拼，但大体稳定 |
-| STYLE_DIRECTIVE | `STYLE_DIRECTIVE`（index.js 常量） | 说话风格、防 AI 味、示例、假承诺禁令 | 常量 |
-| situationDirective | `SITUATION_QQ` / `SITUATION_DESKTOP`（index.js 常量） | QQ（远程）或桌面（同处一室但打字） | 按渠道二选一 |
-| SELF_AWARENESS | `SELF_AWARENESS`（index.js 常量） | 她是程序、记忆会褪色、关机是空白 | 常量 |
-| PRIVACY_DIRECTIVE | `PRIVACY_DIRECTIVE`（index.js 常量） | 不透露主人屏幕/在场/动作 | 常量 |
+| STYLE_DIRECTIVE | `STYLE_DIRECTIVE`（prompts.js 常量） | 说话风格、防 AI 味、示例、假承诺禁令 | 常量 |
+| situationDirective | `SITUATION_QQ` / `SITUATION_DESKTOP`（prompts.js 常量） | QQ（远程）或桌面（同处一室但打字） | 按渠道二选一 |
+| SELF_AWARENESS | `SELF_AWARENESS`（prompts.js 常量） | 她是程序、记忆会褪色、关机是空白 | 常量 |
+| PRIVACY_DIRECTIVE | `PRIVACY_DIRECTIVE`（prompts.js 常量） | 不透露主人屏幕/在场/动作 | 常量 |
 | capabilityCtx | `plugins/capability-index.js` | 「你能做什么」与「你做不到的」清单 | 随能力索引变 |
 | stickerPrompt | `index.js` 内函数 | 表情包怎么发、什么时候发 | 有表情时才加 |
 | summaryCtx | `index.js` 内函数 | 对话摘要（超长时压缩） | 动态 |
@@ -191,11 +191,11 @@ settings.persona
 | 想改什么 | 改哪里 |
 |---|---|
 | 人设/身份底色 | `config.json → chat.persona_override` |
-| 说话风格 / 防 AI 味 | `index.js` 的 `STYLE_DIRECTIVE`（改完必须升 `BASE_VERSION`） |
-| 处境描述 | `SITUATION_QQ` / `SITUATION_DESKTOP` |
-| 隐私口径 | `PRIVACY_DIRECTIVE` + `plugins/pet-body.js` 的 contextProvider 闸门 |
+| 说话风格 / 防 AI 味 | `prompts.js` 的 `STYLE_DIRECTIVE`（改完必须升 `BASE_VERSION`） |
+| 处境描述 | `prompts.js` 的 `SITUATION_QQ` / `SITUATION_DESKTOP` |
+| 隐私口径 | `prompts.js` 的 `PRIVACY_DIRECTIVE` + `plugins/pet-body.js` 的 contextProvider 闸门 |
 | 加一个新的实时信息块 | 插件 export `contextProvider()`（由内核统一收集），或直接加进 `_dyn` |
-| 群聊行为 | `GROUP_DIRECTIVE` |
+| 群聊行为 | `prompts.js` 的 `GROUP_DIRECTIVE` |
 
 ## 8. 几条设计约束（都是踩过坑换来的）
 

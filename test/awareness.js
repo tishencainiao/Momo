@@ -5,6 +5,7 @@ const path = require("path");
 
 const ROOT = path.join(__dirname, "..");
 const src = fs.readFileSync(path.join(ROOT, "index.js"), "utf8");
+const promptsSrc = fs.readFileSync(path.join(ROOT, "prompts.js"), "utf8");
 
 let pass = 0, fail = 0;
 function check(name, cond, extra) {
@@ -12,7 +13,7 @@ function check(name, cond, extra) {
   else { fail++; console.error("  ✗ " + name + (extra ? "  → " + extra : "")); }
 }
 
-const m = src.match(/const SELF_AWARENESS\s*=\s*"([\s\S]*?)";\r?\n/);
+const m = promptsSrc.match(/const SELF_AWARENESS\s*=\s*"([\s\S]*?)";\r?\n/);
 const SA = m ? m[1] : "";
 check("源码里有 SELF_AWARENESS", !!SA);
 

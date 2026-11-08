@@ -19,7 +19,7 @@
 
 ```
 QQ ──WS──> SnowLuma ──WS(3001)──> 桥接 index.js
-                                   ├─ 插件平台（40 个插件 / 71 个工具 / 26 个命令，以 check.js/运行日志为准）
+                                   ├─ 插件平台（43 个插件 / 71 个工具 / 26 个命令，以 check.js/运行日志为准）
                                    ├─ Agent 循环（最多 6 步 工具调用）
                                    ├─ 本地状态（data/ JSON + stickers.db）
                                    └─ DeepSeek API
@@ -178,7 +178,7 @@ E:\Learn\Momo\
 - 重启：`taskkill /PID <node> /F` → supervisor 自动拉起（约 15 秒）
 - 自检：`node check.js`（语法 + 配置 + 插件结构）
 - 测试：`node test/<名字>.js`，全部跑一遍约 10 秒
-- 健康：日志出现 `插件平台就绪：40 个插件（工具 71 / 命令 26）` + `Bot 上线`
+- 健康：日志出现 `插件平台就绪：43 个插件（工具 71 / 命令 26）` + `Bot 上线`
 
 ## 10. 已知限制
 

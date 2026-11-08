@@ -5,7 +5,7 @@ const path = require("path");
 const vm = require("vm");
 
 const ROOT = path.join(__dirname, "..");
-const src = fs.readFileSync(path.join(ROOT, "index.js"), "utf8");
+const src = fs.readFileSync(path.join(ROOT, "prompts.js"), "utf8");
 
 let pass = 0, fail = 0;
 function check(name, cond, extra) {

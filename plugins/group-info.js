@@ -216,11 +216,98 @@ async function setSelfProfile(nickname, note, by) {
   } catch (e) { return { ok: false, msg: "（改资料失败：" + String(e.message).slice(0, 60) + "）" }; }
 }
 
+/* ---------- 群成员/群日志/跨窗口（从 index.js 迁入 M8） ---------- */
+const groupMemFile = () => path.join(_ctx.DATA_DIR, "group-members.json");
+function loadGroupMembers() { try { return JSON.parse(fs.readFileSync(groupMemFile(), "utf8")); } catch (e) { return {}; } }
+function saveGroupMembers(m) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); fs.writeFileSync(groupMemFile(), JSON.stringify(m)); } catch (e) {} }
+function rememberGroupMember(groupId, userId, name, extra) {
+  const m = loadGroupMembers();
+  const g = m[String(groupId)] = m[String(groupId)] || {};
+  const e = g[String(userId)] = g[String(userId)] || { name: "", seen: 0 };
+  if (name) e.name = String(name).slice(0, 20);
+  e.seen = (e.seen || 0) + 1;
+  e.lastSeen = Date.now();
+  if (!e.firstSeen) e.firstSeen = Date.now();
+  if (extra) {
+    if (extra.images) e.images = (e.images || 0) + Number(extra.images);
+    if (extra.ats) e.ats = (e.ats || 0) + Number(extra.ats);
+    if (extra.role) e.role = String(extra.role).slice(0, 10);
+  }
+  saveGroupMembers(m);
+}
+/* 群内角色标签：按这个群的相对活跃度算，不是绝对值 */
+function memberTags(g, uid) {
+  const me = g[String(uid)] || {};
+  const counts = Object.values(g).map((x) => x.seen || 0);
+  const avg = counts.length ? counts.reduce((a, b) => a + b, 0) / counts.length : 0;
+  const tags = [];
+  if (me.role === "owner") tags.push("群主");
+  else if (me.role === "admin") tags.push("管理员");
+  if ((me.seen || 0) >= Math.max(10, avg * 2)) tags.push("话痨");
+  else if (avg > 0 && (me.seen || 0) < avg * 0.5) tags.push("潜水");
+  if ((me.images || 0) >= 3 && (me.images || 0) / Math.max(1, me.seen || 1) >= 0.25) tags.push("爱发图");
+  if ((me.ats || 0) >= 3) tags.push("爱@人");
+  return tags;
+}
+function groupMemberCtx(groupId, userId) {
+  const m = loadGroupMembers();
+  const g = m[String(groupId)] || {};
+  const e = g[String(userId)];
+  if (!e || !e.name) return "";
+  const tags = memberTags(g, userId);
+  const tagStr = tags.length ? `，标签：${tags.join("、")}` : "";
+  const first = e.firstSeen ? `，第一次见是 ${Math.round((Date.now() - e.firstSeen) / 86400e3)} 天前` : "";
+  return `对方是群友「${e.name}」（你们聊过 ${e.seen} 次${tagStr}${first}）。`;
+}
+/* 群梗代理（实现见 plugins/group-memes.js） */
+function groupMemesCtx(groupId) { try { const a = _ctx.getApi("groupMemes"); return a ? a.ctx(groupId) : ""; } catch (e) { return ""; } }
+function detectGroupMeme(groupId, text, userId) { try { const a = _ctx.getApi("groupMemes"); if (a) return a.detectAndLearn(groupId, text, userId); } catch (e) {} return null; }
+/* 群聊记忆隔离：别的群得来的记忆不在本群展示（私聊和未标群的照常） */
+function filterMemoriesForGroup(items, groupId) {
+  const g = String(groupId || "");
+  return (items || []).filter((m) => !m.groupId || String(m.groupId) === g);
+}
+
+/* ---------------- 群聊日志（发言人归因）+ 跨窗口连续性 ---------------- */
+const groupLogFile = () => path.join(_ctx.DATA_DIR, "group-log.json");
+const crossFile = () => path.join(_ctx.DATA_DIR, "cross-window.json");
+function _loadJ(f, def) { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch (e) { return def; } }
+function _saveJ(f, v) { try { fs.writeFileSync(f, JSON.stringify(v)); } catch (e) {} }
+function recordGroupLog(groupId, userId, name, text) {
+  if (!text) return;
+  const all = _loadJ(groupLogFile(), {});
+  const g = all[String(groupId)] = all[String(groupId)] || [];
+  g.push({ u: Number(userId), n: String(name || "").slice(0, 20), t: String(text).slice(0, 120), ts: Date.now() });
+  while (g.length > 20) g.shift();
+  _saveJ(groupLogFile(), all);
+}
+function groupLogCtx(groupId) {
+  const all = _loadJ(groupLogFile(), {});
+  const g = (all[String(groupId)] || []).slice(-8);
+  if (!g.length) return "";
+  const lines = g.map((m) => `${m.n || ("群友" + m.u)}：${m.t}`).join("\n");
+  return `【最近群聊记录（已按发言人区分，别把 A 说的话安到 B 头上）】\n${lines}`;
+}
+function recordCrossWindow(userId, groupId, userText, myReply) {
+  const c = _loadJ(crossFile(), {});
+  c[String(userId)] = { gid: String(groupId), t: String(userText || "").slice(0, 100), r: String(myReply || "").slice(0, 100), ts: Date.now() };
+  const keys = Object.keys(c);
+  if (keys.length > 50) for (const k of keys.slice(0, keys.length - 50)) delete c[k];
+  _saveJ(crossFile(), c);
+}
+function crossWindowCtx(userId) {
+  const c = _loadJ(crossFile(), {});
+  const e = c[String(userId)];
+  if (!e || Date.now() - e.ts > 30 * 60000) return "";
+  const mins = Math.max(1, Math.round((Date.now() - e.ts) / 60000));
+  return `【跨窗口连续性】${mins} 分钟前，对方在 QQ 群里说过「${e.t}」，你当时回了「${e.r}」。现在转私聊了，可以自然承接刚才的话头，别假装第一次听说，也别整段重复。`;
+}
+
 module.exports = {
   name: "group-info",
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },
-  api: { groupInfo: { fetchGroupInfo, fetchMembers, fetchHonor, fetchStranger, groupInfoCtx, emojiLike, forwardToGroup, fetchGroupFiles, fetchMsg, setSelfProfile } },
+  api: { groupInfo: { fetchGroupInfo, fetchMembers, fetchHonor, fetchStranger, groupInfoCtx, emojiLike, forwardToGroup, fetchGroupFiles, fetchMsg, setSelfProfile, loadGroupMembers, saveGroupMembers, rememberGroupMember, memberTags, groupMemberCtx, groupMemesCtx, detectGroupMeme, filterMemoriesForGroup, recordGroupLog, groupLogCtx, recordCrossWindow, crossWindowCtx } },
   tools: [
     {
       def: { type: "function", function: { name: "group_info", description: "查看当前群的名称、人数。群友问「这是什么群」「群里有多少人」时调用。", parameters: { type: "object", properties: {} } } },
