@@ -22,10 +22,11 @@
 > v1.46.2 起按月份拆分：明细在 `docs/changelog/<年>-<月>.md`，本文件只留规则与索引。
 > 较早版本的完整正文可直接读对应月份文件，或 `git log`。
 
-### 2026-11（89 个版本）→ [docs/changelog/2026-11.md](docs/changelog/2026-11.md)
+### 2026-11（90 个版本）→ [docs/changelog/2026-11.md](docs/changelog/2026-11.md)
 
 | 版本 | 日期 | 一句话 |
 |---|---|---|
+| v1.86.2 | 2026-11-09 | 聊天去「时间味」：时间改成被动背景，不再指令式提时间间隔 |
 | v1.86.1 | 2026-11-09 | 修复 QQ 看图崩溃：describeImage 的 desc 误用 const 重赋值（改 let） |
 | v1.86.0 | 2026-11-09 | 插件平台巩固 P5：脚手架 scaffold-plugin.js + 进化层 selfModify 模板带完整清单 |
 | v1.85.0 | 2026-11-09 | 插件平台巩固 P4：归因收口——docs/attribution.md 统一登记 + 4 插件补 attribution 字段 |

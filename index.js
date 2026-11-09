@@ -139,7 +139,7 @@ const { STYLE_DIRECTIVE, GROUP_DIRECTIVE, SITUATION_QQ, SITUATION_DESKTOP, situa
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.86.1";
+const BASE_VERSION = "1.86.2";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -1310,11 +1310,11 @@ function formatGap(ms) {
   return hh ? `${d} 天 ${hh} 小时` : `${d} 天`;
 }
 function timeAwarenessCtx(gapMs) {
-  let s = `【时间观念】现在是 ${todayText()}（${periodOfDay()}）。`;
-  if (gapMs > 60000) {
-    s += ` 距离你上次和对方聊天，已经过了 ${formatGap(gapMs)}。回应时请自然地提到这个间隔（例如"隔了${formatGap(gapMs)}才想起我呀""都这么久没聊啦"），语气要符合真实的时间流逝。`;
+  let s = `【当前时间】现在是 ${todayText()}（${periodOfDay()}）`;
+  if (gapMs > 3600e3) {
+    s += `（距上次聊天 ${formatGap(gapMs)}）`;
   }
-  s += ` 请自然地结合当前时间与时段说话（深夜温柔叮嘱休息、饭点问吃饭、周末问安排），但不要生硬地报时间点。`;
+  s += `。时间仅作背景参考：除非对话自然需要（比如久别重逢、深夜、饭点），否则不要主动报时间、也不要主动提时间间隔。`;
   return s;
 }
 /* ---------------- 当前状态（进行态）+ 静默窗口 ---------------- */
