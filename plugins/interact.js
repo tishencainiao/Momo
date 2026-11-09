@@ -119,11 +119,16 @@ async function onPoke(obj) {
 
 module.exports = {
   name: "interact",
+  displayName: "互动",
+  description: "名片点赞、拍一拍",
+  permissions: ["isMaster", "log", "onebotSend", "recordAction", "resolveCall", "resolveTargetId", "sendPrivate"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },
   settings: [
     { key: "interact.poke_cooldown", label: "被拍后多久才再回应（秒）", type: "number", default: 60, min: 5, max: 600, desc: "同一个人连续拍她时的回应间隔" },
   ],
+  apiSpec: {"interact":{"sendLike":{"input":"","output":"","sideEffect":""},"likeStatus":{"input":"","output":"","sideEffect":""},"poke":{"input":"","output":"","sideEffect":""},"onPoke":{"input":"","output":"","sideEffect":""},"checkThirdParty":{"input":"","output":"","sideEffect":"只读"}}},
+
   api: { interact: { sendLike, likeStatus, poke, onPoke, checkThirdParty } },
   tools: [
     {

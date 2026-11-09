@@ -4,6 +4,9 @@ function rec(e) { try { if (_ctx.recordAction) _ctx.recordAction(e); } catch (er
 
 module.exports = {
   name: "appellations",
+  displayName: "称呼",
+  description: "给自己和别人起称呼（/叫我、/称呼 命令）",
+  permissions: ["isMaster", "loadAppellations", "log", "recordAction", "resolveCall", "resolveTargetId", "saveAppellations", "sendPrivate"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },
   tools: [{

@@ -1,4 +1,4 @@
-﻿/* 插件：目标系统（工具 set_goal + 命令 /目标 + 今日计划 + 上下文注入） */
+/* 插件：目标系统（工具 set_goal + 命令 /目标 + 今日计划 + 上下文注入） */
 const fs = require("fs");
 const path = require("path");
 let _dir = "", _ctx = null;
@@ -20,9 +20,13 @@ let lastPlan = 0;
 
 module.exports = {
   name: "goals",
+  displayName: "目标系统",
+  description: "定目标、看目标、今日计划、上下文注入",
+  permissions: ["DATA_DIR", "apiKey", "dayStr", "isBudgetExhausted", "isMaster", "log", "parseMemoryJson", "sendPrivate", "settings"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; _dir = ctx.DATA_DIR; },
-  api: { goalsCtx },
+  apiSpec: { goals: { goalsCtx: { input: "无", output: "长期目标+今日计划文本", sideEffect: "只读" } } },
+  api: { goals: { goalsCtx } },
   tools: [{
     def: {
       type: "function",

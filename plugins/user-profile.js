@@ -123,12 +123,23 @@ function resetProfile(userId) {
 
 module.exports = {
   name: "user-profile",
+  displayName: "用户画像",
+  description: "结构化用户画像",
+  permissions: ["DATA_DIR", "completeOnce", "getSetting", "isMaster", "loadSession", "log", "resolveTargetId", "settings"],
   version: "1.0.0",
+  attribution: {
+    source: "角色扮演提示词指南（用户画像抽取）",
+    license: "思路借鉴（未复用代码）",
+    note: "从聊天提炼稳定画像的字段维度",
+    importedAt: "2026-11-09",
+  },
   init(ctx) { _ctx = ctx; },
   settings: [
     { key: "profile.auto_extract", label: "自动记录用户画像", type: "boolean", default: true, desc: "从聊天里提炼对方的兴趣、性格、偏好，记住他" },
     { key: "profile.every_n", label: "每几次对话提炼一次", type: "number", default: 15, min: 5, max: 100 },
   ],
+  apiSpec: {"userProfile":{"profileCtx":{"input":"","output":"","sideEffect":""},"extract":{"input":"","output":"","sideEffect":""},"profileText":{"input":"","output":"","sideEffect":""},"resetProfile":{"input":"","output":"","sideEffect":""}}},
+
   api: { userProfile: { profileCtx, extract, profileText, resetProfile } },
   tools: [{
     def: {

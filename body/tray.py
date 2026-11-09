@@ -147,6 +147,9 @@ class BodyTray(QObject):
         act_settings = QAction("设置…", self.menu)
         act_settings.triggered.connect(self._open_settings)
         self.menu.addAction(act_settings)
+        act_plugins = QAction("插件面板", self.menu)
+        act_plugins.triggered.connect(self._open_plugins)
+        self.menu.addAction(act_plugins)
         self.act_dnd = QAction("免打扰", self.menu, checkable=True)
         self.act_dnd.setChecked(bool(getattr(window, "dnd_manual", False)))
         self.act_dnd.toggled.connect(self._toggle_dnd)
@@ -238,6 +241,12 @@ class BodyTray(QObject):
             self.window.open_settings()
         except Exception as exc:
             self._notify("打开设置失败：%s" % exc)
+
+    def _open_plugins(self) -> None:
+        try:
+            self.window.open_plugin_panel()
+        except Exception as exc:
+            self._notify("打开插件面板失败：%s" % exc)
 
     def _toggle_dnd(self, checked: bool) -> None:
         try:

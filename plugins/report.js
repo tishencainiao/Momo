@@ -195,6 +195,9 @@ let running = false;
 
 module.exports = {
   name: "report",
+  displayName: "给主人的报告",
+  description: "日报/周报/月报整合，每天 23:00 用 LLM 口吻写",
+  permissions: ["DATA_DIR", "SELF_DIR", "apiKey", "completeOnce", "config", "getSetting", "isMaster", "log", "recordAction", "recordAndSend", "sendPrivate", "settings", "todayText"],
   version: "2.0.0",
   init(ctx) { _ctx = ctx; },
   tools: [

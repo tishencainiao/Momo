@@ -16,6 +16,9 @@ function atOthersMode() {
 
 module.exports = {
   name: "group-chat",
+  displayName: "群聊行为设置",
+  description: "声明群聊可调参数（具体逻辑在内核）",
+  permissions: ["getSetting"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },
   settings: [
@@ -36,5 +39,7 @@ module.exports = {
       desc: "smart=让模型判断这句在跟谁说话；strict=@了别人就不接话；ignore=不管@了谁",
     },
   ],
+  apiSpec: {"groupChat":{"atMode":{"input":"","output":"","sideEffect":""},"atOthersMode":{"input":"","output":"","sideEffect":""}}},
+
   api: { groupChat: { atMode, atOthersMode } },
 };

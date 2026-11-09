@@ -71,7 +71,7 @@ E:\Learn\Momo\
 
 - 架构与运行：`docs/body-architecture.md`
 - 分批计划与「还没实现的功能」：`docs/body-roadmap.md`
-- 借鉴署名（素材来自 dsh-pet，非商用）：`docs/body-attribution.md`
+- 借鉴署名（素材来自 dsh-pet，非商用）：`docs/attribution.md`
 
 ## 5. 核心模块（index.js）
 

@@ -148,8 +148,13 @@ let lastConsolidate = 0;
 
 module.exports = {
   name: "memory",
+  displayName: "记忆",
+  description: "短期提炼 + 长期固化（数据层存取在内核）",
+  permissions: ["DATA_DIR", "apiKey", "completeOnce", "config", "loadMemories", "loadShortMemories", "log", "parseMemoryJson", "reasonComplete", "recordAction", "resolveCall", "saveMemories", "saveShortMemories", "sendPrivate", "settings"],
   version: "1.1.0",
   init(ctx) { _ctx = ctx; },
+  apiSpec: {"memory":{"dropAgentDeeds":{"input":"","output":"","sideEffect":""},"mergeMemories":{"input":"","output":"","sideEffect":""},"pruneMemories":{"input":"","output":"","sideEffect":""},"extractMemoriesBatch":{"input":"","output":"","sideEffect":""},"consolidateUserMemories":{"input":"","output":"","sideEffect":""}}},
+
   api: { memory: { dropAgentDeeds, mergeMemories, pruneMemories, extractMemoriesBatch, consolidateUserMemories } },
   tools: [
     {

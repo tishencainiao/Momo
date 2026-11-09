@@ -83,6 +83,12 @@ async function bochaSearch(query, limit, key) {
 
 module.exports = {
   name: "search",
+  displayName: "搜索",
+  version: "1.0.0",
+  description: "百度网页搜索 + 博查 API 搜索（M7 下沉）",
+  permissions: ["UA", "budgetCfg", "cleanText", "recordSpend", "sleep"],
   init(ctx) { _ctx = ctx; },
+  apiSpec: {"search":{"parseBaiduHtml":{"input":"html","output":"[{title,url,snippet}]","sideEffect":"无"},"formatResults":{"input":"results, n","output":"string","sideEffect":"无"},"baiduSearch":{"input":"q, n","output":"[result]","sideEffect":"联网"},"httpsGet":{"input":"url, opt","output":"text","sideEffect":"联网"},"bochaSearch":{"input":"q, n","output":"[result]","sideEffect":"联网(花钱)"}}},
+
   api: { search: { parseBaiduHtml, formatResults, baiduSearch, httpsGet, bochaSearch } },
 };

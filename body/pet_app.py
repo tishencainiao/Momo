@@ -451,6 +451,12 @@ class PetWindow(QWidget):
         dlg.applied.connect(self.apply_settings)
         dlg.exec()
 
+    def open_plugin_panel(self) -> None:
+        from plugin_panel import PluginPanel
+
+        dlg = PluginPanel(self, brain_url=(self.cfg.get("brain_url") or "http://127.0.0.1:3999"))
+        dlg.exec()
+
     def apply_settings(self, new_cfg: dict) -> None:
         """把设置页的改动落到运行时（大小/音量/开关/免打扰）并落盘。"""
         self.cfg.update(new_cfg or {})
@@ -744,6 +750,17 @@ class PetWindow(QWidget):
         self.update()
 
     # ---------- 鼠标 ----------
+    def contextMenuEvent(self, event) -> None:                     # noqa: N802
+        from PySide6.QtWidgets import QMenu
+
+        menu = QMenu(self)
+        act_panel = menu.addAction("插件面板")
+        act_panel.triggered.connect(self.open_plugin_panel)
+        act_settings = menu.addAction("设置")
+        act_settings.triggered.connect(self.open_settings)
+        menu.exec(event.globalPos())
+        event.accept()
+
     def mousePressEvent(self, event) -> None:                      # noqa: N802
         if event.button() == Qt.LeftButton:
             self._drag_origin = event.globalPosition().toPoint()

@@ -4,6 +4,9 @@ function rec(e) { try { if (_ctx.recordAction) _ctx.recordAction(e); } catch (er
 
 module.exports = {
   name: "mute",
+  displayName: "屏蔽",
+  description: "屏蔽/解除屏蔽（主人专属，数据层在内核）",
+  permissions: ["addMute", "isMaster", "log", "recordAction", "removeMute", "resolveTargetId"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },
   tools: [

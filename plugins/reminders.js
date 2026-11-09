@@ -110,8 +110,13 @@ let lastCheck = 0;
 
 module.exports = {
   name: "reminders",
+  displayName: "提醒",
+  description: "设提醒 + /提醒 + 到期检查定时器",
+  permissions: ["DATA_DIR", "formatGap", "getApi", "getSetting", "log", "recordAndSend", "sendPrivate"],
   version: "1.1.0",
   init(ctx) { _ctx = ctx; _dir = ctx.DATA_DIR; },
+  apiSpec: {"reminders":{"parseReminder":{"input":"","output":"","sideEffect":""},"parseAmount":{"input":"","output":"","sideEffect":""},"cnToNum":{"input":"","output":"","sideEffect":""},"showDesktopToast":{"input":"","output":"","sideEffect":""}}},
+
   api: { reminders: { parseReminder, parseAmount, cnToNum, showDesktopToast } },
   settings: [
     { key: "reminder.desktop_toast", label: "提醒时弹桌面通知", type: "boolean", default: true, desc: "到期除了发 QQ，还在桌面上弹一个系统通知" },

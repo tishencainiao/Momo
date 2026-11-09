@@ -305,8 +305,13 @@ function crossWindowCtx(userId) {
 
 module.exports = {
   name: "group-info",
+  displayName: "群/用户信息",
+  description: "OneBot 扩展接口：群成员/群日志/跨窗口（M8 下沉）",
+  permissions: ["DATA_DIR", "config", "getApi", "isMaster", "log", "onebotSend", "recordAction"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },
+  apiSpec: {"groupInfo":{"fetchGroupInfo":{"input":"","output":"","sideEffect":"只读"},"fetchMembers":{"input":"","output":"","sideEffect":"只读"},"fetchHonor":{"input":"","output":"","sideEffect":"只读"},"fetchStranger":{"input":"","output":"","sideEffect":"只读"},"groupInfoCtx":{"input":"","output":"","sideEffect":""},"emojiLike":{"input":"","output":"","sideEffect":""},"forwardToGroup":{"input":"","output":"","sideEffect":""},"fetchGroupFiles":{"input":"","output":"","sideEffect":"只读"},"fetchMsg":{"input":"","output":"","sideEffect":"只读"},"setSelfProfile":{"input":"","output":"","sideEffect":"写盘"},"loadGroupMembers":{"input":"","output":"","sideEffect":"只读"},"saveGroupMembers":{"input":"","output":"","sideEffect":"写盘"},"rememberGroupMember":{"input":"","output":"","sideEffect":""},"memberTags":{"input":"","output":"","sideEffect":""},"groupMemberCtx":{"input":"","output":"","sideEffect":""},"groupMemesCtx":{"input":"","output":"","sideEffect":""},"detectGroupMeme":{"input":"","output":"","sideEffect":""},"filterMemoriesForGroup":{"input":"","output":"","sideEffect":""},"recordGroupLog":{"input":"","output":"","sideEffect":"写盘"},"groupLogCtx":{"input":"","output":"","sideEffect":""},"recordCrossWindow":{"input":"","output":"","sideEffect":"写盘"},"crossWindowCtx":{"input":"","output":"","sideEffect":""}}},
+
   api: { groupInfo: { fetchGroupInfo, fetchMembers, fetchHonor, fetchStranger, groupInfoCtx, emojiLike, forwardToGroup, fetchGroupFiles, fetchMsg, setSelfProfile, loadGroupMembers, saveGroupMembers, rememberGroupMember, memberTags, groupMemberCtx, groupMemesCtx, detectGroupMeme, filterMemoriesForGroup, recordGroupLog, groupLogCtx, recordCrossWindow, crossWindowCtx } },
   tools: [
     {

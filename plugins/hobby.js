@@ -114,11 +114,16 @@ function collect(quote, sourceUrl, sourceText, kind) {
 
 module.exports = {
   name: "hobby",
+  displayName: "兴趣档案",
+  description: "爱好 + 收藏夹",
+  permissions: ["SELF_DIR", "getSetting", "log"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },
   settings: [
     { key: "interest.min_evidence", label: "升为「爱好」需要的证据次数", type: "number", default: 3, min: 2, max: 10, desc: "同一主题累积几次才算喜欢" },
     { key: "interest.min_days", label: "升为「爱好」需要跨几天", type: "number", default: 2, min: 2, max: 14, desc: "防止听了一次就永远喜欢" },
   ],
+  apiSpec: {"hobby":{"load":{"input":"","output":"","sideEffect":"只读"},"save":{"input":"","output":"","sideEffect":"写盘"},"vote":{"input":"","output":"","sideEffect":""},"decay":{"input":"","output":"","sideEffect":""},"hobbyText":{"input":"","output":"","sideEffect":""},"loadCollection":{"input":"","output":"","sideEffect":"只读"},"collect":{"input":"","output":"","sideEffect":""}}},
+
   api: { hobby: { load, save, vote, decay, hobbyText, loadCollection, collect } },
 };

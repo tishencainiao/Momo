@@ -38,8 +38,13 @@ function pendingCtx(userId) {
 
 module.exports = {
   name: "followup",
+  displayName: "未完话头",
+  description: "主动问过的事避免反复追问，可作主动搭话由头",
+  permissions: ["DATA_DIR"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },
+  apiSpec: {"followup":{"recordOutbound":{"input":"","output":"","sideEffect":"写盘"},"markAnswered":{"input":"","output":"","sideEffect":""},"pendingFor":{"input":"","output":"","sideEffect":""},"pendingCtx":{"input":"","output":"","sideEffect":""}}},
+
   api: { followup: { recordOutbound, markAnswered, pendingFor, pendingCtx } },
   hooks: {
     reply(payload) {

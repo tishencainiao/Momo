@@ -178,8 +178,13 @@ function summary() {
 
 module.exports = {
   name: "teach",
+  displayName: "教学系统",
+  description: "主人主动教 Momo 东西，并跟踪哪些教学真的生效",
+  permissions: ["DATA_DIR", "config", "getApi", "isMaster", "loadMemories", "log", "saveMemories", "sendPrivate", "stickerSessionKey"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },
+  apiSpec: {"teach":{"addItem":{"input":"","output":"","sideEffect":"写盘"},"removeByKeyword":{"input":"","output":"","sideEffect":"写盘"},"teachCtx":{"input":"","output":"","sideEffect":""},"markMatched":{"input":"","output":"","sideEffect":""},"evaluate":{"input":"","output":"","sideEffect":""},"summary":{"input":"","output":"","sideEffect":"只读"},"activeItems":{"input":"","output":"","sideEffect":""}}},
+
   api: { teach: { addItem, removeByKeyword, teachCtx, markMatched, evaluate, summary, activeItems } },
   tools: [{
     def: {

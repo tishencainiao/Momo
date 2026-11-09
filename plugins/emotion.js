@@ -19,7 +19,12 @@ async function detectEmotion(userText, settings, userId) {
 
 module.exports = {
   name: "emotion",
+  displayName: "情绪检测",
+  description: "LLM 轻量判断情绪（状态存储/惯性/衰减在内核）",
+  permissions: ["completeOnce", "getFavor", "log"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },
+  apiSpec: {"emotion":{"detectEmotion":{"input":"","output":"","sideEffect":""}}},
+
   api: { emotion: { detectEmotion } },
 };

@@ -24,7 +24,16 @@ function mine(t, uid) { return t.filter((x) => x.status === "pending" && Number(
 
 module.exports = {
   name: "todos",
+  displayName: "待办",
+  description: "待办增删查 + /待办 + 到期提醒",
+  permissions: ["DATA_DIR", "formatGap", "log", "recordAndSend", "sendPrivate"],
   version: "1.0.0",
+  attribution: {
+    source: "DSH dsh-memory-evolve (dtodo)",
+    license: "思路借鉴（未复用代码）",
+    note: "待办数据结构 + 到期提醒思路",
+    importedAt: "2026-11-09",
+  },
   init(ctx) { _ctx = ctx; _dir = ctx.DATA_DIR; },
   tools: [
     {

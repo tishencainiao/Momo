@@ -212,11 +212,16 @@ async function readArticle(settings) {
 
 module.exports = {
   name: "read-article",
+  displayName: "读文章",
+  description: "读一篇文章并复述（read_article）",
+  permissions: ["DATA_DIR", "SELF_DIR", "addMood", "completeOnce", "getApi", "getSetting", "log"],
   version: "1.0.0",
   requires: ["fun-core", "hobby"],
   init(ctx) { _ctx = ctx; },
   settings: [
     { key: "read_article.body_max", label: "每次最多读多少字", type: "number", default: 3000, min: 800, max: 6000, desc: "截断长度，太长会贵" },
   ],
+  apiSpec: {"read-article":{"readArticle":{"input":"","output":"","sideEffect":"只读"},"pickAndFetch":{"input":"","output":"","sideEffect":""},"fetchArticle":{"input":"","output":"","sideEffect":"只读"},"parseList":{"input":"","output":"","sideEffect":""},"parseParagraphs":{"input":"","output":"","sideEffect":""},"parseTitle":{"input":"","output":"","sideEffect":""}}},
+
   api: { "read-article": { readArticle, pickAndFetch, fetchArticle, parseList, parseParagraphs, parseTitle, SOURCES } },
 };

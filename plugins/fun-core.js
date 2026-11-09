@@ -82,12 +82,17 @@ function canPlay(type, perTypeMax, costCny) {
 
 module.exports = {
   name: "fun-core",
+  displayName: "娱乐公共底座",
+  description: "活动流水 + 每日次数闸门 + 娱乐预算闸门",
+  permissions: ["DATA_DIR", "dayStr", "getSetting", "isBudgetExhausted"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },
   settings: [
     { key: "entertainment.daily_self_max", label: "每天自娱总次数上限", type: "number", default: 2, min: 0, max: 6, desc: "所有娱乐活动加起来，超过就不玩了" },
     { key: "entertainment.daily_cny", label: "每天娱乐预算上限（元）", type: "number", default: 0.3, min: 0, max: 2, desc: "独立于生活费的小钱包" },
   ],
+  apiSpec: {"fun-core":{"loadActivities":{"input":"","output":"","sideEffect":"只读"},"appendActivity":{"input":"","output":"","sideEffect":""},"todayList":{"input":"","output":"","sideEffect":""},"todayCount":{"input":"","output":"","sideEffect":""},"todayTotal":{"input":"","output":"","sideEffect":""},"lastOfType":{"input":"","output":"","sideEffect":""},"canPlay":{"input":"","output":"","sideEffect":""},"funSpentToday":{"input":"","output":"","sideEffect":""},"addFunSpent":{"input":"","output":"","sideEffect":"写盘"},"dailyTotalMax":{"input":"","output":"","sideEffect":""},"dailyCnyCap":{"input":"","output":"","sideEffect":""}}},
+
   api: {
     "fun-core": { loadActivities, appendActivity, todayList, todayCount, todayTotal, lastOfType, canPlay, funSpentToday, addFunSpent, dailyTotalMax, dailyCnyCap },
   },

@@ -52,5 +52,19 @@ for (const f of fs.readdirSync(plugDir)) {
 }
 ok(n + " 个插件结构正常");
 
+// 4. 插件体检（Manifest 完整性 + requires 依赖 + api 命名空间冲突，红项阻断、黄项只提示）
+console.log("[4] 插件体检");
+try {
+  const { diagnose } = require("./scripts/plugin-doctor");
+  const idx = fs.readFileSync(path.join(ROOT, "index.js"), "utf8");
+  const vm = idx.match(/const BASE_VERSION\s*=\s*["']([^"']+)["']/);
+  const report = diagnose({ kernelVersion: vm ? vm[1] : "0.0.0", pluginsDir: plugDir });
+  for (const p of report.plugins) {
+    if (p.level === "red") for (const it of p.issues) if (it.level === "red") fail("体检红 " + p.name + ": " + it.msg);
+  }
+  if (report.summary.yellow > 0) console.log("  ⚠ 有 " + report.summary.yellow + " 个插件缺元数据（不阻断，见 /插件体检）");
+  ok(report.summary.total + " 个插件体检（绿 " + report.summary.green + " / 黄 " + report.summary.yellow + " / 红 " + report.summary.red + "）");
+} catch (e) { fail("插件体检失败: " + e.message); }
+
 console.log(failed ? "\n✗ 自检未通过" : "\n✓ 自检全部通过");
 process.exit(failed ? 1 : 0);

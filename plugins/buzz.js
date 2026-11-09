@@ -111,9 +111,14 @@ async function readBuzz(settings) {
 
 module.exports = {
   name: "buzz",
+  displayName: "吃瓜",
+  description: "读百度实时热搜、写一句自己的看法（read_buzz）",
+  permissions: ["DATA_DIR", "addBoredom", "completeOnce", "getApi", "log"],
   version: "1.0.0",
   requires: ["fun-core", "hobby"],
   init(ctx) { _ctx = ctx; },
+  apiSpec: {"buzz":{"readBuzz":{"input":"","output":"","sideEffect":"只读"},"fetchBoard":{"input":"","output":"","sideEffect":"只读"},"pickTopic":{"input":"","output":"","sideEffect":""},"writeView":{"input":"","output":"","sideEffect":"写盘"},"loadBuzz":{"input":"","output":"","sideEffect":"只读"}}},
+
   api: { buzz: { readBuzz, fetchBoard, pickTopic, writeView, loadBuzz } },
 };
 

@@ -163,11 +163,16 @@ async function browse(settings) {
 
 module.exports = {
   name: "browse",
+  displayName: "刷视频",
+  description: "看 B 站热门视频并「看懂」一条（browse 工具）",
+  permissions: ["DATA_DIR", "completeOnce", "getApi", "getSetting", "isBudgetExhausted", "log"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },
   /* 可调参数：宿主收集，Momo 可自己改 */
   settings: [
     { key: "browse.daily_max", label: "每天刷内容次数", type: "number", default: 3, min: 1, max: 10, desc: "超过就不刷了" },
   ],
+  apiSpec: {"browse":{"browse":{"input":"","output":"","sideEffect":""},"fetchHot":{"input":"","output":"","sideEffect":"只读"},"fetchComments":{"input":"","output":"","sideEffect":"只读"},"fetchZhihu":{"input":"","output":"","sideEffect":"只读"},"fetchMusic":{"input":"","output":"","sideEffect":"只读"},"gather":{"input":"","output":"","sideEffect":""},"digest":{"input":"","output":"","sideEffect":""},"loadHistory":{"input":"","output":"","sideEffect":"只读"},"todayCount":{"input":"","output":"","sideEffect":""}}},
+
   api: { browse: { browse, fetchHot, fetchComments, fetchZhihu, fetchMusic, gather, digest, loadHistory, todayCount } },
 };

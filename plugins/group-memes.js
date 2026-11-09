@@ -70,8 +70,13 @@ function list(groupId) {
 
 module.exports = {
   name: "group-memes",
+  displayName: "群梗",
+  description: "学群里的黑话/梗，只在对应群生效",
+  permissions: ["DATA_DIR", "log"],
   version: "1.0.0",
   init(ctx2) { _ctx = ctx2; },
+  apiSpec: {"groupMemes":{"learn":{"input":"text, key","output":"无","sideEffect":"写盘"},"detectAndLearn":{"input":"text, ctx","output":"无","sideEffect":"写盘"},"ctx":{"input":"无","output":"string","sideEffect":"只读"},"list":{"input":"无","output":"[meme]","sideEffect":"只读"}}},
+
   api: { groupMemes: { learn, detectAndLearn, ctx, list } },
   tools: [
     {

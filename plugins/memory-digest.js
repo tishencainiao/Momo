@@ -125,7 +125,10 @@ function runDigest(args) {
 }
 
 module.exports = {
-  name: "memoryDigest",
+  name: "memory-digest",
+  displayName: "记忆消化",
+  description: "读消化后的「认识」，替换流水账注入（mem.digest）",
+  permissions: ["DATA_DIR", "config", "getApi", "getSetting", "isMaster", "log"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; try { startTimer(); } catch (e) {} },
   settings: [
@@ -140,6 +143,8 @@ module.exports = {
     { key: "mem.digest.daily", label: "每晚自动消化", type: "boolean", default: true, desc: "每天到点自动跑一次消化（依赖下面那个小时）" },
     { key: "mem.digest.hour", label: "每天几点消化", type: "number", default: 22, min: 0, max: 23, desc: "整点，默认 22 点" },
   ],
+  apiSpec: {"memoryDigest":{"digestText":{"input":"","output":"","sideEffect":""},"info":{"input":"","output":"","sideEffect":""},"runDigest":{"input":"","output":"","sideEffect":""},"enabled":{"input":"","output":"","sideEffect":""},"hasDigest":{"input":"","output":"","sideEffect":"只读"},"dailyDue":{"input":"","output":"","sideEffect":""},"tick":{"input":"","output":"","sideEffect":""}}},
+
   api: { memoryDigest: { digestText, info, runDigest, enabled, hasDigest, dailyDue, tick } },
   tools: [
     {

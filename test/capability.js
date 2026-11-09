@@ -8,7 +8,14 @@ const ALL_CMDS = ["/叫我", "/称呼", "/生日", "/花费", "/dsh通知", "/�
 
 plugin.init({
   config: { qq: { master_user: 100000001, allowed_users: [100000001, 100000002] } },
-  registry: { tools: () => ALL_TOOLS.slice(), commands: () => ALL_CMDS.slice() },
+  registry: {
+    tools: () => ALL_TOOLS.slice(),
+    commands: () => ALL_CMDS.slice(),
+    apiSpecs: () => [
+      { name: "mind", displayName: "心智数据层", apiSpec: { mind: { loadMindState: { input: "无", output: "{thoughts}", sideEffect: "只读" }, saveMindState: { input: "state", output: "boolean", sideEffect: "写盘" } } } },
+      { name: "search", displayName: "联网搜索", apiSpec: { search: { baiduSearch: { input: "q, n", output: "[result]", sideEffect: "联网" } } } },
+    ],
+  },
   log: () => {},
 });
 
@@ -62,6 +69,11 @@ const v4 = C.capabilityView(ME, "空间");
 check("查「空间」能命中内部能力", v4.indexOf("空间") >= 0, v4);
 const v5 = C.capabilityView(ME, "");
 check("空关键词返回完整详情清单", v5.indexOf("能力详情") >= 0 && v5.indexOf("截图") >= 0, v5.slice(0, 60));
+
+// ---------- describeApis（apiSpec 自动派生） ----------
+const dapis = C.describeApis();
+check("describeApis 含插件显示名", dapis.indexOf("心智数据层") >= 0 && dapis.indexOf("联网搜索") >= 0, dapis);
+check("describeApis 含函数与副作用", dapis.indexOf("loadMindState") >= 0 && dapis.indexOf("只读") >= 0 && dapis.indexOf("写盘") >= 0, dapis);
 
 console.log(`\n通过 ${pass} / 失败 ${fail}`);
 process.exit(fail ? 1 : 0);

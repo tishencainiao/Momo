@@ -139,7 +139,7 @@ const { STYLE_DIRECTIVE, GROUP_DIRECTIVE, SITUATION_QQ, SITUATION_DESKTOP, situa
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.81.0";
+const BASE_VERSION = "1.86.0";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -2005,7 +2005,7 @@ function todayMMDD() { const n = new Date(); return `${String(n.getMonth() + 1).
 const GOALS_FILE = path.join(DATA_DIR, "goals.json");
 const DEEP_STATE_FILE = path.join(DATA_DIR, "deep-state.json");
 /* loadGoals/saveGoals 已迁移到插件 goals */
-function goalsCtx() { try { const f = host && host.apis.get("goalsCtx"); return f ? f() : ""; } catch (e) { return ""; } }
+function goalsCtx() { try { const f = host && host.apis.get("goals"); return f ? f.goalsCtx() : ""; } catch (e) { return ""; } }
 /* goalPlanDaily 已迁移到插件 goals */
 
 /* ---------------- 多智能体会诊 ---------------- */
@@ -3058,6 +3058,26 @@ function startPetApi() {
           if (_balCache.body) send(_balCache.status, _balCache.body);
           else send(502, JSON.stringify({ is_available: false, balance_infos: [] }));
         });
+      return;
+    }
+    /* 插件管理端点（身体面板/体检用，仅本机 127.0.0.1） */
+    const _json = (s, b) => { try { res.writeHead(s, { "Content-Type": "application/json; charset=utf-8" }); res.end(JSON.stringify(b)); } catch (e) {} };
+    if (req.method === "GET" && _path === "/v1/plugins") {
+      try {
+        const list = (host && host.ctx && host.ctx.registry && host.ctx.registry.list) ? host.ctx.registry.list() : [];
+        _json(200, { ok: true, plugins: list });
+      } catch (e) { _json(500, { ok: false, error: String(e.message).slice(0, 200) }); }
+      return;
+    }
+    const _pm = _path.match(/^\/v1\/plugins\/([^/]+)\/(enable|disable)$/);
+    if (req.method === "POST" && _pm) {
+      const name = decodeURIComponent(_pm[1]);
+      const enabled = _pm[2] === "enable";
+      try {
+        const fn = host && host.ctx && host.ctx.registry && host.ctx.registry.setPluginEnabled;
+        const ok = fn ? fn(name, enabled) : false;
+        _json(ok ? 200 : 404, { ok: !!ok, name, enabled });
+      } catch (e) { _json(500, { ok: false, error: String(e.message).slice(0, 200) }); }
       return;
     }
     if (req.method !== "POST" || !_path.startsWith("/v1/chat/completions")) {

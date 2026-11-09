@@ -577,6 +577,9 @@ function parseStickerMarkers(text) {
 
 module.exports = {
   name: "stickers",
+  displayName: "表情包",
+  description: "表情包语义库 + 收藏",
+  permissions: ["DATA_DIR", "STICKER_DB", "canAfford", "completeOnce", "config", "getLastSentSticker", "getSetting", "isBudgetExhausted", "isMaster", "log", "mimeOf", "onebotSend", "recordAndSend", "sendPrivate", "settings"],
   version: "2.0.0",
   settings: [
     { key: "stickers.promote_used", label: "用几次后收为常用", type: "number", default: 3, min: 1, max: 20, desc: "待整理的表情包用过这么多次就升为收藏" },
@@ -589,6 +592,8 @@ module.exports = {
     _ctx = ctx;
     try { initStore(); } catch (e) { _ctx.log("warn", "表情包库初始化失败: " + String(e.message).slice(0, 120)); }
   },
+  apiSpec: {"stickers":{"stickerPrompt":{"input":"","output":"","sideEffect":""},"parseStickerMarkers":{"input":"","output":"","sideEffect":""},"pickStickerByEmotion":{"input":"","output":"","sideEffect":""},"pickStickerSmart":{"input":"","output":"","sideEffect":""},"candidatesByEmotion":{"input":"","output":"","sideEffect":""},"pickForText":{"input":"","output":"","sideEffect":""},"maybeCollect":{"input":"","output":"","sideEffect":""},"pickStickerByIds":{"input":"","output":"","sideEffect":""},"generateStickerImage":{"input":"","output":"","sideEffect":""},"listStickers":{"input":"","output":"","sideEffect":"只读"},"listAll":{"input":"","output":"","sideEffect":"只读"},"semanticLine":{"input":"","output":"","sideEffect":""},"semanticHaystack":{"input":"","output":"","sideEffect":""},"findByHash":{"input":"","output":"","sideEffect":"只读"},"meaningText":{"input":"","output":"","sideEffect":""},"setLastMeaning":{"input":"","output":"","sideEffect":"写盘"},"teachSticker":{"input":"","output":"","sideEffect":""},"resolveStickerTarget":{"input":"","output":"","sideEffect":""},"recordSent":{"input":"","output":"","sideEffect":"写盘"},"recentFnames":{"input":"","output":"","sideEffect":""},"canProactive":{"input":"","output":"","sideEffect":""},"canExplicit":{"input":"","output":"","sideEffect":""},"getLastCollected":{"input":"","output":"","sideEffect":"只读"},"maintain":{"input":"","output":"","sideEffect":""},"stickerStats":{"input":"","output":"","sideEffect":""},"store":{"input":"","output":"","sideEffect":""}}},
+
   api: {
     stickers: {
       stickerPrompt, parseStickerMarkers, pickStickerByEmotion, pickStickerSmart, candidatesByEmotion,

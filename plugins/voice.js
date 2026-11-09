@@ -193,6 +193,9 @@ function voiceOnlyReply() {
 
 module.exports = {
   name: "voice",
+  displayName: "语音",
+  description: "TTS 发音 + 语音转文字（QQ 原生转写→SAPI 兜底）",
+  permissions: ["DATA_DIR", "config", "getSetting", "log", "onebotSend", "qzoneHttp", "sendPrivate"],
   version: "1.2.0",
   init(ctx) { _ctx = ctx; },
   settings: [
@@ -201,6 +204,8 @@ module.exports = {
     { key: "qq.voice_warm", label: "语音预热", type: "boolean", default: true, desc: "收到语音请求时后台先拉起 TTS 服务，减少等待" },
     { key: "qq.voice_only", label: "发语音时不配文字", type: "boolean", default: true, desc: "开着：语音回复只发语音；关掉：文字+语音两条都发" },
   ],
+  apiSpec: {"voice":{"wantsVoice":{"input":"","output":"","sideEffect":""},"sendVoice":{"input":"","output":"","sideEffect":""},"warmVoice":{"input":"","output":"","sideEffect":""},"transcribeRecords":{"input":"","output":"","sideEffect":""},"voiceRateOk":{"input":"","output":"","sideEffect":""},"prepareVoice":{"input":"","output":"","sideEffect":""},"takePendingVoice":{"input":"","output":"","sideEffect":""},"clearPendingVoice":{"input":"","output":"","sideEffect":"写盘"},"hasPendingVoice":{"input":"","output":"","sideEffect":"只读"},"voiceOnlyReply":{"input":"","output":"","sideEffect":""},"synthesizeToFile":{"input":"","output":"","sideEffect":""}}},
+
   api: { voice: { wantsVoice, sendVoice, warmVoice, transcribeRecords, voiceRateOk, prepareVoice, takePendingVoice, clearPendingVoice, hasPendingVoice, voiceOnlyReply, synthesizeToFile } },
   tools: [{
     def: {

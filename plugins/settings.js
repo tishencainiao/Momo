@@ -65,8 +65,13 @@ function settingsSet(key, value, by) {
 
 module.exports = {
   name: "settings",
+  displayName: "可配置参数",
+  description: "让 Momo 自己查看/修改各功能暴露的可调参数",
+  permissions: ["isMaster", "log", "recordAction", "registry", "setSetting"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },
+  apiSpec: {"settingsApi":{"settingsView":{"input":"","output":"","sideEffect":"写盘"},"settingsSet":{"input":"","output":"","sideEffect":"写盘"},"allSettings":{"input":"","output":"","sideEffect":""}}},
+
   api: { settingsApi: { settingsView, settingsSet, allSettings } },
   tools: [
     {

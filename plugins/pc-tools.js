@@ -207,8 +207,13 @@ function pcToolHandler(toolName) {
 
 module.exports = {
   name: "pc-tools",
+  displayName: "电脑工具",
+  description: "截图/找文件/开软件/系统信息（仅主人）",
+  permissions: ["DATA_DIR", "completeOnce", "config", "isMaster", "log", "onebotSend", "sendPrivate"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },
+  apiSpec: {"pcTools":{"extractFileQuery":{"input":"","output":"","sideEffect":""},"findFiles":{"input":"","output":"","sideEffect":"只读"},"runTasks":{"input":"","output":"","sideEffect":""}}},
+
   api: { pcTools: { extractFileQuery, findFiles, runTasks } },
   tools: [
     {

@@ -332,6 +332,9 @@ function puzzleCtx() {
 
 module.exports = {
   name: "puzzle",
+  displayName: "玩谜题",
+  description: "数独，带存档、跨天、代码判定",
+  permissions: ["DATA_DIR", "SELF_DIR", "addBoredom", "addMood", "completeOnce", "formatGap", "getApi", "getSetting", "log"],
   version: "1.0.0",
   requires: ["fun-core", "hobby"],
   init(ctx) { _ctx = ctx; },
@@ -340,5 +343,7 @@ module.exports = {
     { key: "puzzle.moves_per_day", label: "每次最多填对几格", type: "number", default: 3, min: 1, max: 10, desc: "一天一次，填对这么多格就收工" },
     { key: "puzzle.new_per_day", label: "每天最多玩几次", type: "number", default: 1, min: 1, max: 3, desc: "建议 1 次" },
   ],
+  apiSpec: {"puzzle":{"playPuzzle":{"input":"","output":"","sideEffect":""},"puzzleCtx":{"input":"","output":"","sideEffect":""},"loadState":{"input":"","output":"","sideEffect":"只读"},"saveState":{"input":"","output":"","sideEffect":"写盘"},"newPuzzle":{"input":"","output":"","sideEffect":""},"applyMove":{"input":"","output":"","sideEffect":""},"hint":{"input":"","output":"","sideEffect":""},"progressOf":{"input":"","output":"","sideEffect":""},"boardText":{"input":"","output":"","sideEffect":""},"solveCount":{"input":"","output":"","sideEffect":""},"candidates":{"input":"","output":"","sideEffect":""},"dimsOf":{"input":"","output":"","sideEffect":""}}},
+
   api: { puzzle: { playPuzzle, puzzleCtx, loadState, saveState, newPuzzle, applyMove, hint, progressOf, boardText, solveCount, candidates, dimsOf } },
 };

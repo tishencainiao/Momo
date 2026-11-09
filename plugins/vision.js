@@ -143,6 +143,12 @@ async function describeImageFile(filePath, prompt) {
 
 module.exports = {
   name: "vision",
+  displayName: "视觉",
+  version: "1.0.0",
+  description: "图片识别/下载/MIME 嗅探（M7 下沉）",
+  permissions: ["UA", "apiKey", "config", "describeImageFile", "estimateTokens", "log", "maybeCollect", "recordSpend", "settings", "sleep"],
   init(ctx) { _ctx = ctx; },
+  apiSpec: {"vision":{"visionModel":{"input":"无","output":"模型名","sideEffect":"只读"},"mimeOf":{"input":"bytes","output":"mime","sideEffect":"只读"},"httpGetBytes":{"input":"url","output":"buffer","sideEffect":"联网"},"imageBytes":{"input":"path","output":"buffer","sideEffect":"读文件"},"describeImage":{"input":"url, prompt","output":"描述","sideEffect":"联网+花钱"},"describeImageFile":{"input":"path, prompt","output":"描述","sideEffect":"花钱"}}},
+
   api: { vision: { visionModel, mimeOf, httpGetBytes, imageBytes, describeImage, describeImageFile } },
 };

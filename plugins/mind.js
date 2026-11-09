@@ -101,6 +101,12 @@ function scoreIntent(i) {
 
 module.exports = {
   name: "mind",
+  displayName: "心智数据层",
+  version: "1.0.0",
+  description: "念头/未想明白的事/待办意图的存取（纯本地，M8 下沉）",
+  permissions: ["DATA_DIR", "textSimilar"],
   init(ctx) { _ctx = ctx; },
+  apiSpec: {"mind":{"loadMindState":{"input":"无","output":"心智状态 {thoughts,last_think,...}","sideEffect":"只读"},"saveMindState":{"input":"state","output":"boolean","sideEffect":"写 data/mind.json"},"pushThought":{"input":"state, text","output":"state(原地改)","sideEffect":"改内存对象不落盘"},"thoughtList":{"input":"state","output":"[thought]","sideEffect":"只读"},"thoughtTexts":{"input":"state","output":"string","sideEffect":"只读"},"loadOpenLoops":{"input":"无","output":"[loop]","sideEffect":"只读"},"pushOpenLoop":{"input":"text","output":"无","sideEffect":"写 open-loops"},"openLoopsText":{"input":"无","output":"string","sideEffect":"只读"},"mindHistoryText":{"input":"无","output":"string","sideEffect":"只读"},"loadPending":{"input":"无","output":"[pending]","sideEffect":"只读"},"savePending":{"input":"arr","output":"无","sideEffect":"写盘"},"addPendingNudge":{"input":"text","output":"无","sideEffect":"写盘"},"pendingNudgesText":{"input":"无","output":"string","sideEffect":"只读"},"consumePendingNudge":{"input":"idx","output":"无","sideEffect":"写盘"},"scoreIntent":{"input":"text","output":"0~1 分数","sideEffect":"无"}}},
+
   api: { mind: { loadMindState, saveMindState, pushThought, thoughtList, thoughtTexts, loadOpenLoops, pushOpenLoop, openLoopsText, mindHistoryText, loadPending, savePending, addPendingNudge, pendingNudgesText, consumePendingNudge, scoreIntent } },
 };

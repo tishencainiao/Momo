@@ -85,12 +85,17 @@ async function weatherText() {
 
 module.exports = {
   name: "weather",
+  displayName: "天气",
+  description: "城市天气 + 自然关心主人",
+  permissions: ["DATA_DIR", "getSetting", "isMaster", "log", "recordAction", "setSetting"],
   version: "1.1.0",
   init(ctx) { _ctx = ctx; },
   /* 可调参数：宿主会收集并在 settings_view 里列出，Momo 能自己改 */
   settings: [
     { key: "weather.city", label: "天气城市", type: "string", default: "", desc: "留空=按IP自动定位；填城市名如「大庆」" },
   ],
+  apiSpec: {"weather":{"fetchWeather":{"input":"","output":"","sideEffect":"只读"},"weatherCtx":{"input":"","output":"","sideEffect":""},"weatherText":{"input":"","output":"","sideEffect":""},"loadCity":{"input":"","output":"","sideEffect":"只读"},"saveCity":{"input":"","output":"","sideEffect":"写盘"}}},
+
   api: { weather: { fetchWeather, weatherCtx, weatherText, loadCity, saveCity } },
   tools: [
     {

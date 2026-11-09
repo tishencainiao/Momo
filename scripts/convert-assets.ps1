@@ -8,7 +8,7 @@
 
   说明：
     - 素材来源是第三方桌宠 dsh-pet（PC2005-cloud/dsh-pet 及其桌面移植版），
-      授权见 docs/body-attribution.md：可开源使用、禁止商用。
+      授权见 docs/attribution.md：可开源使用、禁止商用。
     - 本脚本只做复制/转码，不改动旧桌宠目录（只读）。
 #>
 param(

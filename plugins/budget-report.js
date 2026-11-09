@@ -58,8 +58,13 @@ function weeklyReport() {
 
 module.exports = {
   name: "budget-report",
+  displayName: "账本",
+  description: "生活费记账 + /花费 命令 + 账本 api（供报告/身体读）",
+  permissions: ["DATA_DIR", "config", "isMaster", "sendPrivate"],
   version: "1.1.0",
   init(ctx) { _ctx = ctx; },
+  apiSpec: {"budgetReport":{"dailyBill":{"input":"无","output":"string","sideEffect":"只读"},"weeklyReport":{"input":"无","output":"string","sideEffect":"只读"},"loadBudget":{"input":"无","output":"budget 对象","sideEffect":"只读"}}},
+
   api: { budgetReport: { dailyBill, weeklyReport, loadBudget } },
   tools: [{
     def: { type: "function", function: { name: "budget_view", description: "查看今天/本周的生活费花销明细。当主人问「今天花多少了」「生活费花哪了」「这周花了多少钱」时调用。", parameters: { type: "object", properties: { range: { type: "string", description: "today=今天 / week=本周（默认 today）" } } } } },

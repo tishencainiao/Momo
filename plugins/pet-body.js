@@ -393,6 +393,9 @@ function toolDef(name, description, props, required) {
 
 module.exports = {
   name: "pet-body",
+  displayName: "身体联动",
+  description: "让大脑指挥桌面上的身体（HTTP 127.0.0.1:4010）",
+  permissions: ["addBoredom", "addMood", "budgetLevel", "describeImageFile", "getApi", "getBoredom", "getEmotion", "getMood", "getSetting", "isMaster", "log", "recordAction", "sendPrivate", "setSetting"],
   version: "1.0.0",
   init(ctx) {
     _ctx = ctx;
@@ -886,6 +889,8 @@ module.exports = {
       } catch (e) {}
     },
   },
+  apiSpec: {"body":{"announce":{"input":"","output":"","sideEffect":""},"balanceLevel":{"input":"","output":"","sideEffect":""},"senseText":{"input":"","output":"","sideEffect":""},"status":{"input":"","output":"","sideEffect":""}}},
+
   api: {
     body: {
       announce,

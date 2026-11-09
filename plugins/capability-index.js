@@ -192,11 +192,47 @@ function capabilityView(userId, keyword) {
   return `【能力详情${k ? "（" + k + "）" : ""}】\n` + out.slice(0, 24).join("\n");
 }
 
+/* 从各插件 apiSpec 自动派生「内部能力自描述」（⑨：让大脑/面板/体检知道每个插件能干嘛）
+ * 返回人类可读文本：一行一个插件，列出它的 api 命名空间 → 函数(入参/出/副作用) */
+function describeApis() {
+  let specs = [];
+  try { specs = (_ctx && _ctx.registry && _ctx.registry.apiSpecs) ? _ctx.registry.apiSpecs() : []; } catch (e) {}
+  const lines = [];
+  for (const p of specs) {
+    const nsTexts = [];
+    for (const ns of Object.keys(p.apiSpec || {})) {
+      const fns = p.apiSpec[ns] || {};
+      const fnTexts = Object.keys(fns).map((fn) => {
+        const s = fns[fn] || {};
+        const bits = [];
+        if (s.input) bits.push("入" + s.input);
+        if (s.output) bits.push("出" + s.output);
+        if (s.sideEffect) bits.push(s.sideEffect);
+        return fn + (bits.length ? "(" + bits.join("，") + ")" : "");
+      });
+      if (fnTexts.length) nsTexts.push(ns + "：" + fnTexts.join("、"));
+    }
+    if (nsTexts.length) lines.push((p.displayName || p.name) + "：" + nsTexts.join("；"));
+  }
+  return lines.length ? lines.join("\n") : "（暂无插件 api 自描述）";
+}
+
 module.exports = {
   name: "capability-index",
+  displayName: "能力索引",
+  description: "扫描工具/命令、按身份过滤、生成能力摘要与负清单",
+  permissions: ["DATA_DIR", "config", "log", "registry"],
   version: "1.0.0",
+  attribution: {
+    source: "DeepSeek Harness ToolCatalogIndex",
+    license: "思路借鉴（未复用代码）",
+    note: "「索引常驻 + 按需装载」组织思路，实现自写",
+    importedAt: "2026-11-09",
+  },
   init(ctx) { _ctx = ctx; },
-  api: { capability: { capabilityCtx, capabilityView, scan, tierOf, allLimits, limitsText, limitTriggers, noteOverclaim, loadProposals, saveProposals, loadHits } },
+  apiSpec: {"capability":{"capabilityCtx":{"input":"","output":"","sideEffect":""},"capabilityView":{"input":"","output":"","sideEffect":""},"scan":{"input":"","output":"","sideEffect":"只读"},"tierOf":{"input":"","output":"","sideEffect":"只读"},"allLimits":{"input":"","output":"","sideEffect":""},"limitsText":{"input":"","output":"","sideEffect":""},"limitTriggers":{"input":"","output":"","sideEffect":""},"noteOverclaim":{"input":"","output":"","sideEffect":"写盘"},"loadProposals":{"input":"","output":"","sideEffect":"只读"},"saveProposals":{"input":"","output":"","sideEffect":"写盘"},"loadHits":{"input":"","output":"","sideEffect":"只读"},"describeApis":{"input":"无","output":"自描述文本","sideEffect":"只读"}}},
+
+  api: { capability: { capabilityCtx, capabilityView, scan, tierOf, allLimits, limitsText, limitTriggers, noteOverclaim, loadProposals, saveProposals, loadHits, describeApis } },
   tools: [{
     def: {
       type: "function",

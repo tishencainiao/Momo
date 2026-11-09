@@ -191,7 +191,7 @@ python body\main.py
 - 101 段，7 类：`idle 1 / click 5 / drag 1 / events 1（balance 6 段）/ move 3 / random 89 / turn 1`，共 25,529 帧，24fps，每段约 241 帧（10s）。
 - 帧序列已由上游解码好（webp，**640×360 画布**；角色在画布中约占 220×270，四周是透明留白，方便放道具/特效），运行时**不需要 ffmpeg**。
 - 想更清晰：`scripts\convert-assets.ps1 -HiRes` 用 ffmpeg 从 `videos/*.webm`（640×360 VP9 alpha）重抠 320×180 帧到 `frameseq-hi/`，再把 `frameseq_dir` 改成 `frameseq-hi`。
-- 素材授权与署名见 [body-attribution.md](body-attribution.md)。
+- 素材授权与署名见 [attribution.md](attribution.md)。
 
 > **DPI 踩坑（2026-11-06 实测）**：这台机器屏幕是 1920×1080、Windows 缩放 125%，Qt 的逻辑坐标是 1536×864（devicePixelRatio=1.25）。用 DPI 未感知的进程（如部分 PowerShell 会话）截图，拿到的是被系统虚拟化过的画面，看起来像是「身体被裁掉/位置偏移」——**其实是截图的锅**。要核对显示效果，用 `QScreen.grabWindow(0)` 在 Qt 进程里截，得到的是真实 1920×1080 画面。
 

@@ -108,11 +108,22 @@ function dailyReflect() {
 
 module.exports = {
   name: "meta-cog",
+  displayName: "元认知",
+  description: "逐条统计 + 提醒注入 + 每日复盘",
+  permissions: ["DATA_DIR", "config", "dayStr", "getApi", "getSetting", "log"],
   version: "1.1.0",
+  attribution: {
+    source: "Agentic Metacognition (arXiv:2509.19783)",
+    license: "论文（无源码，仅参考思路）",
+    note: "「次级监控层」思路，只用规则不加 LLM 开销",
+    importedAt: "2026-11-09",
+  },
   init(ctx) { _ctx = ctx; },
   settings: [
     { key: "metacog.enabled", label: "自我觉察提醒", type: "boolean", default: true, desc: "发现自己说套话/复读/太长时，下一轮自己改" },
   ],
+  apiSpec: {"metaCog":{"metaCtx":{"input":"","output":"","sideEffect":""},"observe":{"input":"","output":"","sideEffect":""},"analyze":{"input":"","output":"","sideEffect":""},"dailyReflect":{"input":"","output":"","sideEffect":""},"loadState":{"input":"","output":"","sideEffect":"只读"}}},
+
   api: { metaCog: { metaCtx, observe, analyze, dailyReflect, loadState } },
   /* 本插件只做逐条统计 + 提醒注入 + 每日复盘（自我体检已删除，报告整合进 report.js） */
   hooks: {

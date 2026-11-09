@@ -143,6 +143,9 @@ function can(uid, capability, opts) {
 
 module.exports = {
   name: "roles",
+  displayName: "角色与权限",
+  description: "管理员/用户/访客三级身份",
+  permissions: ["DATA_DIR", "config", "getFavor", "getSetting", "loadAppellations"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },
   settings: [
@@ -154,5 +157,7 @@ module.exports = {
     { key: "perm.visitor.daily_cap", label: "访客每日上限", type: "number", default: 50, min: 1, max: 500, desc: "每天最多回访客几条" },
     { key: "perm.visitor.memory_cap", label: "访客记忆条数上限", type: "number", default: 200, min: 0, max: 2000, desc: "访客的本人记忆最多存多少条，防刷存储" },
   ],
+  apiSpec: {"roles":{"resolveRole":{"input":"","output":"","sideEffect":""},"can":{"input":"","output":"","sideEffect":""},"person":{"input":"","output":"","sideEffect":""},"rateCfg":{"input":"","output":"","sideEffect":""},"visitorsEnabled":{"input":"","output":"","sideEffect":""},"adminIds":{"input":"","output":"","sideEffect":""},"userIds":{"input":"","output":"","sideEffect":""},"rateOk":{"input":"","output":"","sideEffect":""},"resetRate":{"input":"","output":"","sideEffect":""}}},
+
   api: { roles: { resolveRole, can, person, ROLE, MATRIX, rateCfg, visitorsEnabled, adminIds, userIds, rateOk, resetRate } },
 };

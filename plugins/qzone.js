@@ -301,6 +301,9 @@ async function postsListText(n) {
 
 module.exports = {
   name: "qzone",
+  displayName: "QQ 空间",
+  description: "发说说 / 看动态 / 评论",
+  permissions: ["DATA_DIR", "completeOnce", "config", "dayStr", "getApi", "getSetting", "isMaster", "log", "qzoneHttp", "recordAction", "sendPrivate", "settings", "todayText"],
   version: "1.2.0",
   init(ctx) { _ctx = ctx; },
   settings: [
@@ -311,6 +314,8 @@ module.exports = {
     { key: "qzone.post_hour_end", label: "每天保底最晚几点发", type: "number", default: 22, min: 0, max: 23 },
     { key: "qzone.delete_self_window_min", label: "她自己能删多久内的说说", type: "number", default: 60, min: 0, max: 1440, desc: "超过这个分钟数，删除要主人点头（0=都必须点头）" },
   ],
+  apiSpec: {"qzone":{"dailyQzoneCount":{"input":"","output":"","sideEffect":""},"publishQzone":{"input":"","output":"","sideEffect":""},"detectQzonePost":{"input":"","output":"","sideEffect":""},"viewSpaces":{"input":"","output":"","sideEffect":"只读"},"generateQzoneComment":{"input":"","output":"","sideEffect":""},"commentQzone":{"input":"","output":"","sideEffect":""},"checkUserSpace":{"input":"","output":"","sideEffect":"只读"},"setQzoneComment":{"input":"","output":"","sideEffect":"写盘"},"loadQzInfo":{"input":"","output":"","sideEffect":"只读"},"pickQzoneImage":{"input":"","output":"","sideEffect":""},"checkQzoneFeedback":{"input":"","output":"","sideEffect":"只读"},"deleteQzone":{"input":"","output":"","sideEffect":"写盘"},"tryDeleteOwn":{"input":"","output":"","sideEffect":""},"confirmDeletePending":{"input":"","output":"","sideEffect":""},"recentPosts":{"input":"","output":"","sideEffect":""},"postsListText":{"input":"","output":"","sideEffect":""},"findLocalPost":{"input":"","output":"","sideEffect":"只读"}}},
+
   api: { qzone: { dailyQzoneCount, publishQzone, detectQzonePost, viewSpaces, generateQzoneComment, commentQzone, checkUserSpace, setQzoneComment, loadQzInfo, pickQzoneImage, checkQzoneFeedback, deleteQzone, tryDeleteOwn, confirmDeletePending, recentPosts, postsListText, findLocalPost } },
   tools: [{
     def: {

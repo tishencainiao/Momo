@@ -115,8 +115,13 @@ function actionLogText(limit) {
 
 module.exports = {
   name: "life-log",
+  displayName: "生活日志",
+  description: "从真实活动数据汇总「我最近做过什么」",
+  permissions: ["DATA_DIR", "SELF_DIR", "dayStr", "formatGap", "resolveCall"],
   version: "1.1.0",
   init(ctx) { _ctx = ctx; },
+  apiSpec: {"lifeLog":{"lifeCtx":{"input":"","output":"","sideEffect":""},"actionLogText":{"input":"","output":"","sideEffect":""}}},
+
   api: { lifeLog: { lifeCtx, actionLogText } },
   requires: [],
   tools: [{

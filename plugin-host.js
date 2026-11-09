@@ -29,6 +29,48 @@ function createHost(core) {
     return out;
   }
 
+  /* 插件启用/禁用状态（运行时持久化到 data/plugins.json）
+   * 禁用的插件：启动时跳过、热重载时跳过、面板不可见 */
+  const PLUGINS_STATE_FILE = path.join(core.DATA_DIR, "plugins.json");
+  let disabledSet = new Set();
+  function loadDisabled() { try { const d = JSON.parse(fs.readFileSync(PLUGINS_STATE_FILE, "utf8")); if (d && Array.isArray(d.disabled)) disabledSet = new Set(d.disabled); } catch (e) {} }
+  function saveDisabled() { try { fs.mkdirSync(path.dirname(PLUGINS_STATE_FILE), { recursive: true }); fs.writeFileSync(PLUGINS_STATE_FILE, JSON.stringify({ disabled: Array.from(disabledSet) }, null, 2)); return true; } catch (e) { return false; } }
+  function findPluginFile(name) {
+    const dir = path.join(__dirname, "plugins");
+    if (!fs.existsSync(dir)) return null;
+    for (const f of fs.readdirSync(dir).filter((x) => x.endsWith(".js") && !x.startsWith("_"))) {
+      try { const m = require(path.join(dir, f)); if (m && m.name === name) return f; } catch (e) {}
+    }
+    return null;
+  }
+  /* 列出全部插件（含被禁用的）：已加载的 enabled=true，被禁用的 enabled=false */
+  function listAllPlugins() {
+    const dir = path.join(__dirname, "plugins");
+    const out = [];
+    const seen = new Set();
+    for (const p of plugins) { seen.add(p.name); out.push({ name: p.name, version: p.version || "1.0.0", enabled: true, displayName: p.displayName || p.name, description: p.description || "", file: p._file }); }
+    if (fs.existsSync(dir)) {
+      for (const f of fs.readdirSync(dir).filter((x) => x.endsWith(".js") && !x.startsWith("_"))) {
+        try {
+          const m = require(path.join(dir, f));
+          if (m && m.name && !seen.has(m.name)) {
+            seen.add(m.name);
+            out.push({ name: m.name, version: m.version || "1.0.0", enabled: false, displayName: m.displayName || m.name, description: m.description || "", file: f });
+          }
+        } catch (e) {}
+      }
+    }
+    return out.sort((a, b) => a.name.localeCompare(b.name));
+  }
+  /* 启用/禁用插件：更新禁用集 → 落盘 → 触发热重载（禁用=卸载，启用=重新加载） */
+  function setPluginEnabled(name, enabled) {
+    if (enabled) disabledSet.delete(name); else disabledSet.add(name);
+    saveDisabled();
+    const file = findPluginFile(name);
+    if (file) { try { reloadPlugin(file); } catch (e) { core.log("warn", `插件 ${name} ${enabled ? "启用" : "禁用"}后重载失败: ${e.message.slice(0, 120)}`); } }
+    return true;
+  }
+
   const ctx = {
     log: (l, m) => core.log(l, m),
     get config() { return core.cfg; },
@@ -111,11 +153,14 @@ function createHost(core) {
     addWish: (t, s) => core.addWish(t, s),
     get DATA_DIR() { return core.DATA_DIR; },
     registry: {
-      list: () => plugins.map((p) => ({ name: p.name, version: p.version || "1.0.0", enabled: p.enabled !== false, file: p._file })),
+      list: () => listAllPlugins(),
       tools: () => Array.from(toolRegistry.keys()),
       commands: () => Array.from(commandRegistry.keys()),
       settings: () => listSettings(),
       apis: () => Array.from(apis.keys()),
+      apiSpecs: () => plugins.filter((p) => p && p.apiSpec).map((p) => ({ name: p.name, displayName: p.displayName, description: p.description, apiSpec: p.apiSpec })),
+      pluginState: () => ({ disabled: Array.from(disabledSet) }),
+      setPluginEnabled: (name, enabled) => setPluginEnabled(name, enabled),
     },
   };
 
@@ -197,12 +242,14 @@ function createHost(core) {
   }
 
   function loadPlugins() {
+    loadDisabled();
     const dir = path.join(__dirname, "plugins");
     if (!fs.existsSync(dir)) return;
     const files = fs.readdirSync(dir).filter((x) => x.endsWith(".js") && !x.startsWith("_")).sort();
     for (const f of files) {
       try {
         const mod = require(path.join(dir, f));
+        if (disabledSet.has(mod.name)) { core.log("info", `插件已禁用（跳过）: ${mod.name}`); continue; }
         if (registerPlugin(mod, f)) core.log("info", `插件已加载: ${mod.name} v${mod.version || "1.0.0"}`);
       } catch (e) { core.log("warn", `插件加载失败 ${f}: ${e.message.slice(0, 160)}`); }
     }
@@ -221,6 +268,7 @@ function createHost(core) {
     try { delete require.cache[require.resolve(full)]; } catch (e) {}
     try {
       const mod = require(full);
+      if (disabledSet.has(mod.name)) { core.log("info", `插件已禁用（不加载）: ${mod.name}`); return; }
       if (registerPlugin(mod, file)) core.log("info", `插件已热重载: ${mod.name} v${mod.version || "1.0.0"}（当前 ${plugins.length} 个插件 / ${toolRegistry.size} 个工具 / ${commandRegistry.size} 个命令）`);
     } catch (e) { core.log("error", `热重载失败 ${file}: ${e.message.slice(0, 200)}`); }
   }
@@ -242,7 +290,7 @@ function createHost(core) {
 
   function allToolDefs() { return core.AGENT_TOOLS.concat(plugins.flatMap((p) => (p.tools || []).map((t) => t.def))); }
 
-  return { plugins, toolRegistry, commandRegistry, apis, hookLists, contextProviders, loadPlugins, runHook, allToolDefs, ctx, reloadPlugin, watchPlugins, checkRequires, pluginRecords };
+  return { plugins, toolRegistry, commandRegistry, apis, hookLists, contextProviders, loadPlugins, runHook, allToolDefs, ctx, reloadPlugin, watchPlugins, checkRequires, pluginRecords, setPluginEnabled, pluginState: () => ({ disabled: Array.from(disabledSet) }) };
 }
 
 module.exports = { createHost };
