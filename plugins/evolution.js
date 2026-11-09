@@ -75,7 +75,7 @@ function selfStatusText(userId) {
   const b = _ctx.loadBudget();
   const bc = _ctx.budgetCfg();
   const st = _ctx.loadMindState();
-  const thoughts = (st.thoughts || []).slice(-3).join("；");
+  const thoughts = (st.thoughts || []).slice(-3).map((x) => (typeof x === "string" ? x : (x && x.text) || "")).filter(Boolean).join("；");
   const pct = Math.round((b.spent_cny || 0) / bc.daily_cny * 100);
   return `情绪：${e.name}（强度 ${Math.round(e.intensity * 100)}/100）；心情：${Math.round(_ctx.getMood())}/100；无聊度：${Math.round(_ctx.getBoredom())}/100；对对方好感度：${Math.round(_ctx.getFavor(userId))}/100；今日生活费：¥${(b.spent_cny || 0).toFixed(3)}/${bc.daily_cny}（${pct}%）；最近念头：${thoughts || "（无）"}`;
 }

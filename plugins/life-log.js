@@ -34,7 +34,7 @@ function lifeCtx() {
   if (topics.length) out.push("最近上网搜过：" + topics.join("、"));
   // 4. 最近自己冒出的念头
   const mind = readJson(path.join(_ctx.DATA_DIR, "mind.json"), {});
-  const thoughts = (mind && Array.isArray(mind.thoughts) ? mind.thoughts : []).slice(-3).map((t) => String(t).slice(0, 30));
+  const thoughts = (mind && Array.isArray(mind.thoughts) ? mind.thoughts : []).slice(-3).map((t) => String(typeof t === "string" ? t : (t && t.text) || "").slice(0, 30)).filter(Boolean);
   if (thoughts.length) out.push("最近的念头：" + thoughts.join("；"));
   // 5. 今天发过几条说说
   const qs = readJson(path.join(_ctx.DATA_DIR, "qzone-state.json"), {});
