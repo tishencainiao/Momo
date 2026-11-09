@@ -3,8 +3,8 @@ const path = require("path");
 const os = require("os");
 const plugin = require("E:/Learn/Momo/plugins/capability-index.js");
 
-const ALL_TOOLS = ["take_screenshot", "find_files", "open_app", "system_info", "budget_view", "memory_view", "teach", "send_sticker", "add_todo", "list_todo", "set_reminder", "birthday_view", "set_goal", "goals_view", "set_appellation", "set_other_appellation", "mute_user", "unmute_user", "dsh_notify", "health_check", "check_balance", "self_modify", "self_status", "self_log", "self_memory", "self_info", "self_history", "add_wish"];
-const ALL_CMDS = ["/叫我", "/称呼", "/生日", "/花费", "/dsh通知", "/命令", "/进化", "/冻结进化", "/解冻进化", "/进化提案", "/目标", "/体检", "/记忆", "/提醒", "/做表情包", "/教", "/教的清单", "/忘掉", "/待办"];
+const ALL_TOOLS = ["take_screenshot", "find_files", "open_app", "system_info", "budget_view", "memory_view", "teach", "send_sticker", "add_todo", "list_todo", "set_reminder", "birthday_view", "set_goal", "goals_view", "set_appellation", "set_other_appellation", "mute_user", "unmute_user", "dsh_notify", "check_balance", "self_modify", "self_status", "self_log", "self_memory", "self_info", "self_history", "add_wish", "momo_report"];
+const ALL_CMDS = ["/叫我", "/称呼", "/生日", "/花费", "/dsh通知", "/命令", "/进化", "/冻结进化", "/解冻进化", "/进化提案", "/目标", "/记忆", "/提醒", "/做表情包", "/教", "/教的清单", "/忘掉", "/待办", "/报告"];
 
 plugin.init({
   config: { qq: { master_user: 100000001, allowed_users: [100000001, 100000002] } },

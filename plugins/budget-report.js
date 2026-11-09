@@ -1,12 +1,12 @@
-/* 插件：账单（每日账单 + 周报 + /花费 命令）
- * 数据源：data/budget.json（今日）+ data/budget-history.jsonl（每日归档，供周报）
- * 时间：每日 22:00 发账单、每周日 22:30 发周报（可在 config.budget_report 覆盖） */
+/* 插件：账本（生活费记账 + /花费 命令）
+ * 数据源：data/budget.json（今日）+ data/budget-history.jsonl（每日归档）
+ * 不再自己发消息：每日账单/周账单已并入 report.js 的整合报告，这里只提供账本数据
+ * 供 report.js、pet-body.js（余额动画）与 budget_view 工具读取 */
 const fs = require("fs");
 const path = require("path");
 let _ctx = null;
 const budgetFile = () => path.join(_ctx.DATA_DIR, "budget.json");
 const historyFile = () => path.join(_ctx.DATA_DIR, "budget-history.jsonl");
-const stateFile = () => path.join(_ctx.DATA_DIR, "budget-report-state.json");
 
 const KIND_LABEL = { chat: "聊天", reason: "思考", search: "搜索", vision: "看图" };
 
@@ -17,12 +17,6 @@ function loadHistory() {
       .map((l) => { try { return JSON.parse(l); } catch (e) { return null; } }).filter(Boolean);
   } catch (e) { return []; }
 }
-function loadState() { try { return JSON.parse(fs.readFileSync(stateFile(), "utf8")); } catch (e) { return {}; } }
-function saveState(s) { try { fs.writeFileSync(stateFile(), JSON.stringify(s)); } catch (e) {} }
-function cfgBR() { return (_ctx.config && _ctx.config.budget_report) || {}; }
-
-function hmOf(now) { const d = new Date(now); return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; }
-function dowOf(now) { return new Date(now).getDay(); }   // 0=周日
 
 function breakdownLine(b) {
   const sb = b.spend_by || {};
@@ -62,10 +56,9 @@ function weeklyReport() {
   ].join("\n");
 }
 
-let lastMin = "";
 module.exports = {
   name: "budget-report",
-  version: "1.0.0",
+  version: "1.1.0",
   init(ctx) { _ctx = ctx; },
   api: { budgetReport: { dailyBill, weeklyReport, loadBudget } },
   tools: [{
@@ -91,30 +84,4 @@ module.exports = {
       },
     },
   ],
-  hooks: {
-    timer(payload) {
-      const now = (payload && payload.now) || Date.now();
-      const hm = hmOf(now);
-      if (hm === lastMin) return;
-      lastMin = hm;
-      const br = cfgBR();
-      const st = loadState();
-      const today = new Date(now).toDateString();
-      const master = Number((_ctx.config.qq && _ctx.config.qq.master_user) || 0);
-      if (!master) return;
-      // 每日账单已并入「晚间播报」插件（evening-report.js），这里不再单独发
-      // 每周账单（周日 18:00 单独发）
-      const weeklyDay = Number(br.weekly_day ?? 0);
-      const weeklyTime = br.weekly_time || "18:00";
-      const weekKey = `${today}-${weeklyDay}`;
-      if (hm === weeklyTime && dowOf(now) === weeklyDay && st.weeklyKey !== weekKey) {
-        const r = weeklyReport();
-        if (r) {
-          st.weeklyKey = weekKey; saveState(st);
-          _ctx.recordAndSend(master, r).catch(() => {});
-          _ctx.log("info", "周报已发送");
-        }
-      }
-    },
-  },
 };

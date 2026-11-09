@@ -114,7 +114,7 @@ module.exports = {
     { key: "metacog.enabled", label: "自我觉察提醒", type: "boolean", default: true, desc: "发现自己说套话/复读/太长时，下一轮自己改" },
   ],
   api: { metaCog: { metaCtx, observe, analyze, dailyReflect, loadState } },
-  /* 自我体检已合并到 plugins/health.js 的 health_check（本插件只做逐条统计 + 提醒注入 + 每日复盘） */
+  /* 本插件只做逐条统计 + 提醒注入 + 每日复盘（自我体检已删除，报告整合进 report.js） */
   hooks: {
     reply(payload) {
       try {

@@ -14,18 +14,18 @@ const TOOL_LABELS = {
   set_goal: "定目标", goals_view: "看目标",
   set_appellation: "给自己起称呼", set_other_appellation: "给别人起称呼",
   mute_user: "屏蔽人", unmute_user: "解除屏蔽", dsh_notify: "设DSH通知",
-  health_check: "自我体检", check_balance: "查账户余额",
+  check_balance: "查账户余额",
   self_modify: "给自己写代码", self_status: "查自己状态", self_log: "看运行日志",
   self_memory: "查对某人的记忆", self_info: "看自己身份", self_history: "查聊天记录",
-  add_wish: "记愿望", capability_view: "查能力详情",
+  add_wish: "记愿望", capability_view: "查能力详情", momo_report: "给我写报告",
 };
 const CMD_LABELS = {
   "/叫我": "让人怎么称呼我", "/称呼": "查/设称呼", "/生日": "查生日", "/花费": "查账本",
   "/dsh通知": "设DSH通知", "/命令": "列出所有命令", "/进化": "触发一次自我进化",
   "/冻结进化": "冻结进化", "/解冻进化": "解冻进化", "/进化提案": "看进化提案",
-  "/目标": "看长期目标", "/体检": "自我体检", "/记忆": "看/改/删记忆",
+  "/目标": "看长期目标", "/记忆": "看/改/删记忆",
   "/提醒": "设提醒", "/做表情包": "生成新表情包", "/教": "教我东西",
-  "/教的清单": "看教过我什么", "/忘掉": "删掉某条教学", "/待办": "看待办",
+  "/教的清单": "看教过我什么", "/忘掉": "删掉某条教学", "/待办": "看待办", "/报告": "给我写报告",
 };
 
 /* 主人专属（其他人看不到） */
@@ -33,11 +33,11 @@ const MASTER_ONLY_TOOLS = new Set([
   "take_screenshot", "find_files", "open_app", "system_info",
   "self_modify", "dsh_notify", "set_other_appellation",
   "mute_user", "unmute_user", "set_goal", "goals_view",
-  "budget_view", "health_check", "self_log",
+  "budget_view", "self_log", "momo_report",
 ]);
 const MASTER_ONLY_CMDS = new Set([
-  "/花费", "/体检", "/进化", "/冻结进化", "/解冻进化", "/进化提案",
-  "/命令", "/dsh通知", "/教的清单", "/忘掉", "/目标",
+  "/花费", "/进化", "/冻结进化", "/解冻进化", "/进化提案",
+  "/命令", "/dsh通知", "/教的清单", "/忘掉", "/目标", "/报告",
 ]);
 /* 陌生人可用的最小集合 */
 const GUEST_TOOLS = new Set([

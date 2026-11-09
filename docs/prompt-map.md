@@ -182,7 +182,7 @@ settings.persona
 ## 6. 工具（工具描述也算提示词）
 
 - 插件 40 个 → 工具全部注册进 `host.allToolDefs()`
-- **预算耗尽**时只保留 8 个免费工具（`CHEAP_TOOLS`）：`send_sticker` `budget_view` `memory_view` `list_todo` `health_check` `birthday_view` `goals_view` `check_balance`
+- **预算耗尽**时只保留 7 个免费工具（`CHEAP_TOOLS`）：`send_sticker` `budget_view` `memory_view` `list_todo` `birthday_view` `goals_view` `check_balance`
 - **桌宠场景**会过滤掉 QQ 专用工具（`PET_EXCLUDE_TOOLS`）
 - 工具调用循环最多 6 步，每步都把 `assistant(tool_calls)` + `tool(result)` 追加进 messages——所以**调用越多，上下文越长、越贵**
 

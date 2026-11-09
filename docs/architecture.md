@@ -136,17 +136,17 @@ E:\Learn\Momo\
 
 - 身体 v0.4–v0.8：感官回流（键鼠空闲/前台窗口/锁屏/截图/投喂）、物理走路+甩抛、陪伴外挂（报时/天气/节日/待办播报/抽签/余额动画）、设置页+全局快捷键+免打扰、日志轮转+打包 exe+守护脚本
 - 隐私加固（v1.71.1–v1.71.3）：身体感官只给主人 + 只桌面渠道注入 + 落盘脱敏（清掉 body-events 历史窗口标题 191 条）
-- 报告中心（v1.72.0）：日报/周报/月报（`plugins/report.js`），她会自己写一段话
+- 报告中心（v1.72.0→v1.81.0）：原日报/周报/月报 + 晚间播报 + 账单 + 今日小结整合成一份「给主人的报告」（`plugins/report.js`），每天 23:00 她自己写一段发 QQ，发完写进成长记忆
 - 提示词地图（`docs/prompt-map.md`，v1.72.0）：一轮请求的提示词分层与动态块清单
 - 主动性调参（v1.72.0）：沉默 60 分钟主动搭话、身体自娱概率 ×2、每日生活费上限 3 元
 
-## 6. 插件清单（40 个）
+## 6. 插件清单（41 个）
 
 `appellations` `birthdays` `browse` `budget-report` `buzz` `capability-index` `dsh-link` `emotion`
-`evening-report` `evolution` `followup` `fun-core` `goals` `group-chat` `group-info` `group-memes`
-`health` `hobby` `interact` `life-log` `memory` `memory-digest` `meta-cog` `mute` `pc-tools` `pet-body`
-`proactive` `puzzle` `qzone` `read-article` `reminders` `report` `roles` `settings` `stickers`
-`teach` `todos` `user-profile` `voice` `weather`
+`evolution` `followup` `fun-core` `goals` `group-chat` `group-info` `group-memes` `hobby`
+`interact` `life-log` `memory` `memory-digest` `meta-cog` `mind` `mute` `pc-tools` `pet-body`
+`proactive` `puzzle` `qzone` `read-article` `reminders` `report` `roles` `search` `settings`
+`stickers` `teach` `todos` `user-profile` `vision` `voice` `weather`
 
 ## 7. 配置（config.json 主要项）
 
@@ -169,7 +169,7 @@ E:\Learn\Momo\
 `current-status.json` 对方状态 · `mind.json` 念头 · `mind-pulse.json` 心跳节奏 ·
 `reminders/birthdays/goals/wishes.json` 日程与愿望 · `mute/appellations.json` 屏蔽与称呼 ·
 `budget*.json` 预算 · `taught.json` 教学 · `user-profile.json` 用户画像 ·
-`meta-cog.json` 自我体检 · `actions.jsonl` 动作日志 · `qzone-state.json` 说说记录 ·
+`meta-cog.json` 元认知统计 · `actions.jsonl` 动作日志 · `qzone-state.json` 说说记录 ·
 `headpat.json` 摸头 · `sticker`-相关在 `stickers/`
 
 ## 9. 运维

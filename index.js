@@ -139,7 +139,7 @@ const { STYLE_DIRECTIVE, GROUP_DIRECTIVE, SITUATION_QQ, SITUATION_DESKTOP, situa
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.80.1";
+const BASE_VERSION = "1.81.0";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -1111,7 +1111,7 @@ try {
   const _usedTools = [];   // 本轮真正执行成功的工具名（输出后审计要用：说了什么 vs 真做了什么）
   const budgetOut = isBudgetExhausted();
   // 预算耗尽时：只封禁花钱/高风险工具，保留本地只读工具（查账单/记忆/待办/体检等不花钱）
-  const CHEAP_TOOLS = new Set(["send_sticker", "budget_view", "memory_view", "list_todo", "health_check", "birthday_view", "goals_view", "check_balance"]);
+  const CHEAP_TOOLS = new Set(["send_sticker", "budget_view", "memory_view", "list_todo", "birthday_view", "goals_view", "check_balance"]);
   let _toolDefs = host ? (budgetOut ? host.allToolDefs().filter((t) => CHEAP_TOOLS.has(t.function.name)) : host.allToolDefs()) : (budgetOut ? AGENT_TOOLS.filter((t) => t.function.name === "send_sticker") : AGENT_TOOLS);
   /* 桌宠场景：过滤掉只对 QQ 有意义的工具（发消息/拍一拍/群相关） */
   if (_extraInfo && _extraInfo.petMode) _toolDefs = _toolDefs.filter((t) => !PET_EXCLUDE_TOOLS.has(t.function.name));
@@ -1993,36 +1993,12 @@ function saveMsgTime(userId, ts) { const s = loadMsgTimes(); s[String(userId)] =
 
 /* ---------------- 定时提醒 + 每日复盘 + 生日 ---------------- */
 const REMINDER_FILE = path.join(DATA_DIR, "reminders.json");
-const RECAP_STATE_FILE = path.join(DATA_DIR, "recap-state.json");
 const BIRTHDAY_FILE = path.join(DATA_DIR, "birthdays.json");
 function loadJson(f, def) { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch (e) { return def; } }
 function saveJson(f, v) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(f, JSON.stringify(v)); } catch (e) {} }
 /* 提醒/生日数据已随插件迁移 */
 function todayMMDD() { const n = new Date(); return `${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`; }
 /* parseReminder/parseBirthday/checkReminders/checkBirthdays 已迁移到插件 */
-async function dailyRecap() {
-  const recapHm = (cfg.qq && cfg.qq.daily_recap_time) || "22:30";
-  if (nowHM() !== recapHm) return;
-  const st = loadJson(RECAP_STATE_FILE, {});
-  const dateStr = dayStr(0);
-  if (st.date === dateStr) return;
-  st.date = dateStr;
-  saveJson(RECAP_STATE_FILE, st);
-  const masterUin = Number((cfg.qq && cfg.qq.master_user) || 0);
-  if (!masterUin || !apiKey) return;
-  try {
-    let journal = [];
-    try { journal = JSON.parse(fs.readFileSync(path.join(SELF_DIR, "journal.json"), "utf8")); } catch (e) {}
-    const now0 = Date.now();
-    const todayEntries = (journal || []).filter((e) => now0 - (e.ts || 0) < 24 * 3600e3).slice(-20);
-    const parts = todayEntries.map((e) => `${e.type || ""}: ${String(e.text || e.title || e.rule_id || "").slice(0, 40)}`).join("\n");
-    const settings = resolveChatSettings();
-    const prompt = `你是 Momo（大肥鱼桌宠）。今天（${todayText()}）你的成长记录：\n${parts || "（今天没什么特别的）"}\n请以 Momo 口吻给主人发一条 2~4 句的「今日小结」：今天自己做了什么、学到/记住了什么、心情怎么样。自然可爱，不要括号动作。`;
-    const raw = await completeOnce([{ role: "user", content: prompt }], settings, 300, 0.8);
-    const s = String(raw || "").trim();
-    if (s) { await recordAndSend(masterUin, `主人～今天的小结：\n${s}`); log("info", "每日复盘已发送"); }
-  } catch (e) { log("warn", "每日复盘失败: " + e.message.slice(0, 120)); }
-}
 
 /* ---------------- 群友区分 ---------------- */
 /* ---------------- 目标系统 ---------------- */
