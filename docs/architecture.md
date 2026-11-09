@@ -1,6 +1,6 @@
 # Momo 架构说明
 
-> 版本：v1.73.0 · 更新：2026-11-08
+> 版本：v1.89.2 · 更新：2026-11-09
 > 路径：`E:\Learn\Momo\`
 > 这份文档必须和代码同步。改了架构就改这里，别让它比代码旧。
 
@@ -19,7 +19,7 @@
 
 ```
 QQ ──WS──> SnowLuma ──WS(3001)──> 桥接 index.js
-                                   ├─ 插件平台（43 个插件 / 71 个工具 / 26 个命令，以 check.js/运行日志为准）
+                                   ├─ 插件平台（42 个插件 / 71 个工具 / 26 个命令，以 check.js/运行日志为准）
                                    ├─ Agent 循环（最多 6 步 工具调用）
                                    ├─ 本地状态（data/ JSON + stickers.db）
                                    └─ DeepSeek API
@@ -42,12 +42,12 @@ E:\Learn\Momo\
 ├── plugin-host.js           # 插件宿主：加载器 / ctx / 钩子 / 工具与命令注册表
 ├── sticker-store.js         # 表情包语义库（node:sqlite，非插件）
 ├── config.json              # 配置
-├── plugins/                 # 40 个功能插件
+├── plugins/                 # 42 个功能插件
 ├── body/                    # 自建身体（Python/PySide6，v0.1 起；见 body-architecture.md）
 ├── self/                    # 自我进化层（identity / reflections / skills / journal / pref）
 ├── data/                    # 运行时数据（不进版本库）
 ├── stickers/                # 表情包文件 + stickers.db 语义库
-├── test/                    # 55 个测试文件，纯 node 断言
+├── test/                    # 58 个测试文件，纯 node 断言
 ├── docs/                    # 文档（本文件、development.md、changelog/、decisions/）
 ├── archive/                 # 历史补丁脚本与旧文档
 ├── supervise.ps1            # 守护进程（崩溃自动重启）
@@ -140,7 +140,7 @@ E:\Learn\Momo\
 - 提示词地图（`docs/prompt-map.md`，v1.72.0）：一轮请求的提示词分层与动态块清单
 - 主动性调参（v1.72.0）：沉默 60 分钟主动搭话、身体自娱概率 ×2、每日生活费上限 3 元
 
-## 6. 插件清单（41 个）
+## 6. 插件清单（42 个）
 
 `appellations` `birthdays` `browse` `budget-report` `buzz` `capability-index` `dsh-link` `emotion`
 `evolution` `followup` `fun-core` `goals` `group-chat` `group-info` `group-memes` `hobby`
@@ -178,7 +178,7 @@ E:\Learn\Momo\
 - 重启：`taskkill /PID <node> /F` → supervisor 自动拉起（约 15 秒）
 - 自检：`node check.js`（语法 + 配置 + 插件结构）
 - 测试：`node test/<名字>.js`，全部跑一遍约 10 秒
-- 健康：日志出现 `插件平台就绪：43 个插件（工具 71 / 命令 26）` + `Bot 上线`
+- 健康：日志出现 `插件平台就绪：42 个插件（工具 71 / 命令 26）` + `Bot 上线`
 
 ## 10. 已知限制
 

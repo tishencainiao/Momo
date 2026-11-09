@@ -534,5 +534,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File E:\Learn\Momo\release.ps1 -B
 4. **文档变更随版本提交**：docs/ 随版本提交并登记 CHANGELOG 索引表；纯文档小修可以不升版，但 CHANGELOG 索引表补一行或并入下个版本。
 5. **公开同步**：docs/ 经 sync-to-public.ps1 进公开镜像（唯一排除 remote-backup-gitee.md），发布前核对脱敏清单（真实 QQ/用户名/路径不外泄）。
 6. **HANDOVER 例行**：Momo 每次升版后，由总控刷新工作区 HANDOVER.md（时点版本、口径、下一步、已知坑）。
-7. **发布前检查三件**：版本头 vs BASE_VERSION、数字口径、行号引用——已由 `scripts/doc-check.js` 自动完成（release.ps1 阶段 6 调用；发现偏差列清单、不阻塞发布）。
+7. **自动对账三件**：版本头 vs BASE_VERSION、数字口径、行号引用——由 `scripts/doc-check.js` 自动完成，挂在三个关口：pre-commit 钩子（有偏差 exit 1 拦提交）、sync-to-public.ps1（发布前）、release.ps1 阶段 6。
+8. **改动即更新**：增删/改名插件 → 同步 docs/architecture.md 插件清单 + docs/prompt-map.md 插件数；改功能行为 → 同步对应功能文档（如 report-center.md）；改提示词常量（prompts.js）→ 同步 docs/prompt-map.md §4 全文。
 

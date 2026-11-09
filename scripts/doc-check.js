@@ -55,7 +55,8 @@ if (runtime && runtime.plugins !== pluginCount) {
 // 3) 版本头检查：带「适用版本」头的文档必须与 BASE_VERSION 一致
 const headerDocs = [
   { file: 'docs/architecture.md', re: /版本：v?([\d.]+)/ },
-  { file: 'docs/prompt-map.md', re: /# Momo 的提示词地图（v([\d.]+)）/ }
+  { file: 'docs/prompt-map.md', re: /# Momo 的提示词地图（v([\d.]+)）/ },
+  { file: 'docs/report-center.md', re: /版本：v?([\d.]+)/ }
 ];
 for (const h of headerDocs) {
   const t = readText(path.join(root, h.file));
@@ -67,9 +68,11 @@ for (const h of headerDocs) {
 }
 
 // 4) 数字口径：文档里写死的插件/工具/命令/测试数必须与实测一致
-const numDocs = ['README.md', 'docs/architecture.md', 'docs/development.md'];
+const numDocs = ['README.md', 'docs/architecture.md', 'docs/development.md', 'docs/prompt-map.md'];
 const numberChecks = [
   { re: /(\d+)\s*个(?:功能)?插件/g, want: pluginCount, label: '插件数' },
+  { re: /插件\s*(\d+)\s*个/g, want: pluginCount, label: '插件数' },
+  { re: /插件清单\s*[（(]\s*(\d+)\s*个\s*[）)]/g, want: pluginCount, label: '插件清单数' },
   { re: /(\d+)\s*个工具/g, want: runtime ? runtime.tools : null, label: '工具数' },
   { re: /(\d+)\s*个命令/g, want: runtime ? runtime.cmds : null, label: '命令数' },
   { re: /(\d+)\s*个测试文件/g, want: testCount, label: '测试数' }
