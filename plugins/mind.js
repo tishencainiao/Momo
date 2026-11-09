@@ -5,6 +5,16 @@
 const fs = require("fs");
 const path = require("path");
 let _ctx = null;
+function nearDup(a, b) {
+  if (_ctx && _ctx.textSimilar && _ctx.textSimilar(a, b)) return true;
+  const s1 = String(a || ""), s2 = String(b || "");
+  if (!s1 || !s2) return false;
+  const gram = (s) => { const g = new Set(); for (let i = 0; i < s.length - 1; i++) g.add(s.slice(i, i + 2)); return g; };
+  const ga = gram(s1), gb = gram(s2);
+  if (!ga.size || !gb.size) return false;
+  let c = 0; for (const x of ga) if (gb.has(x)) c++;
+  return c / Math.min(ga.size, gb.size) > 0.5;
+}
 
 const mindFile = () => path.join(_ctx.DATA_DIR, "mind.json");
 const pendingFile = () => path.join(_ctx.DATA_DIR, "pending-nudges.json");
@@ -36,7 +46,7 @@ function pushOpenLoop(st, text) {
   const t = String(text || "").trim().slice(0, 80);
   if (!t) return;
   st.open_loops = loadOpenLoops(st);
-  if (st.open_loops.some((x) => _ctx.textSimilar(x.text, t))) return;
+  if (st.open_loops.some((x) => nearDup(x.text, t))) return;
   st.open_loops.push({ ts: Date.now(), text: t });
   if (st.open_loops.length > OPEN_LOOP_MAX) st.open_loops = st.open_loops.slice(-OPEN_LOOP_MAX);
 }

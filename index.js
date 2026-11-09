@@ -139,7 +139,7 @@ const { STYLE_DIRECTIVE, GROUP_DIRECTIVE, SITUATION_QQ, SITUATION_DESKTOP, situa
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.86.2";
+const BASE_VERSION = "1.86.3";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -1588,6 +1588,16 @@ function textSimilar(a, b) {
   const m = Math.min(set1.size, set2.size);
   return m > 0 && common / m > 0.75;
 }
+function nearDup(a, b) {
+  if (textSimilar(a, b)) return true;
+  const s1 = String(a || ""), s2 = String(b || "");
+  if (!s1 || !s2) return false;
+  const gram = (s) => { const g = new Set(); for (let i = 0; i < s.length - 1; i++) g.add(s.slice(i, i + 2)); return g; };
+  const ga = gram(s1), gb = gram(s2);
+  if (!ga.size || !gb.size) return false;
+  let c = 0; for (const x of ga) if (gb.has(x)) c++;
+  return c / Math.min(ga.size, gb.size) > 0.5;
+}
 function proactiveDup(a, b) {
   if (textSimilar(a, b)) return true;
   const ka = new Set(simpleKeywords(a));
@@ -1660,7 +1670,7 @@ async function perceiveMind(settings, st, boredomV, masterStatusLine) {
   /* 想法流（A）：把上一条念头原文喂进去，让她接着往下想，而不是每次从零开始 */
   const lastThought = String((host.apis.get("mind").thoughtList(st).slice(-1)[0] || {}).text || "").trim();
   const flowLine = lastThought
-    ? `你上一条念头是：「${lastThought}」。**接着这条往下想**，像人一样把想法续上（可以更具体、可以怀疑、可以跑偏），不要每次重新开一个话题。`
+    ? `你上一条念头是：「${lastThought}」。可以顺着它往下想，但如果最近几条已经在同一个话题上打转、没有新东西了，就主动换个新想法，别一条路走到黑。`
     : `你还没有明确的念头，起一个。`;
   const prompt = `你是 Momo（大肥鱼桌宠）。现在 ${todayText()}。你的情绪：${moodLabel()}（无聊度 ${Math.round(boredomV)}/100）。${budgetLevelText()}${flowLine}
 你最近在想：${recentThoughts}。${masterStatusLine}${host.apis.get("mind").openLoopsText(st) ? "\n" + host.apis.get("mind").openLoopsText(st) : ""}
@@ -1758,8 +1768,8 @@ async function mindLoop() {
   /* ===== 第一层：感知（flash，便宜，只更新念头和"想做事的程度"）===== */
   const percept = await perceiveMind(settings, st, boredomV, masterStatusLine);
   if (percept.thought) {
-    const lastT = String((host.apis.get("mind").thoughtList(st).slice(-1)[0] || {}).text || "");
-    if (!(lastT && textSimilar(lastT, percept.thought))) host.apis.get("mind").pushThought(st, percept.thought);
+    const recentT = host.apis.get("mind").thoughtList(st).slice(-3).map((x) => String((x && x.text) || ""));
+    if (!recentT.some((t) => nearDup(t, percept.thought))) host.apis.get("mind").pushThought(st, percept.thought);
     applyThoughtMood(percept);   // 念头回流到情绪：真的会让她心情变好/变差
     if (percept.openLoop) host.apis.get("mind").pushOpenLoop(st, percept.openLoop);   // 记下「还没想明白的事」
   }

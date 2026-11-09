@@ -17,7 +17,7 @@ function check(name, cond, extra) {
 
 // ---------- 源码级（想法流/情绪回流仍在 index.js；未解决的事在 mind.js） ----------
 const mindSrc = fs.readFileSync(path.join(ROOT, "plugins", "mind.js"), "utf8");
-check("想法流：提示词引导接着上一条", src.includes("接着这条往下想"));
+check("想法流：提示词引导顺着想且卡壳就换话题", src.includes("主动换个新想法"));
 check("想法流：喂入上一条念头原文", src.includes("你上一条念头是：「"));
 check("情绪回流：输出 mood_delta", src.includes("mood_delta"));
 check("情绪回流：有 applyThoughtMood", src.includes("function applyThoughtMood"));
