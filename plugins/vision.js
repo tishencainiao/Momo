@@ -91,7 +91,7 @@ async function describeImage(image, settings) {
   }
   if (!resp.ok) { let d = ""; try { d = (await resp.text()).slice(0, 200); } catch (e) {} throw new Error(`视觉 HTTP ${resp.status}: ${d}`); }
   const data = await resp.json();
-  const desc = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
+  let desc = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
   const u = data.usage || null;
   _ctx.recordSpend("vision", u ? (u.prompt_cache_miss_tokens || (u.prompt_tokens || 0)) : _ctx.estimateTokens(JSON.stringify(body)), u ? (u.completion_tokens || 0) : _ctx.estimateTokens(desc), u ? (u.prompt_cache_hit_tokens || 0) : 0);
   if (desc) {
