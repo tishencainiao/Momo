@@ -139,7 +139,7 @@ const { STYLE_DIRECTIVE, GROUP_DIRECTIVE, SITUATION_QQ, SITUATION_DESKTOP, situa
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.86.3";
+const BASE_VERSION = "1.89.0";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -498,19 +498,39 @@ function simpleKeywords(text) {
   for (const [k, words] of Object.entries(SYNONYM_MAP)) if (t.indexOf(k) >= 0) for (const w of words) out.add(w);
   return Array.from(out).slice(0, 30);
 }
+function lev(a, b) {
+  if (a === b) return 0;
+  const m = a.length, n = b.length;
+  if (!m) return n; if (!n) return m;
+  let prev = new Array(n + 1), cur = new Array(n + 1);
+  for (let j = 0; j <= n; j++) prev[j] = j;
+  for (let i = 1; i <= m; i++) {
+    cur[0] = i;
+    for (let j = 1; j <= n; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    [prev, cur] = [cur, prev];
+  }
+  return prev[n];
+}
 function retrieveMemories(memories, userText, limit) {
   const qk = new Set(simpleKeywords(userText));
   const scored = (memories || []).map((m) => {
     const mk = new Set(simpleKeywords(String(m.content || "")));
-    let overlap = 0;
-    for (const k of qk) if (mk.has(k)) overlap++;
+    let overlap = 0, fuzzy = 0;
+    for (const k of qk) {
+      if (mk.has(k)) { overlap++; continue; }
+      // 错别字容忍：编辑距离 ≤1（二字）/≤2（三字）算半匹配
+      const thresh = k.length <= 2 ? 1 : 2;
+      for (const w of mk) { const d = lev(k, w); if (d > 0 && d <= thresh) { fuzzy++; break; } }
+    }
     let tsMs = 0;
     if (m.time) { try { tsMs = new Date(m.time).getTime(); } catch (e) {} }
     else if (m.created) tsMs = Number(m.created) * 1000;
     else if (m.created_at) { try { tsMs = new Date(m.created_at).getTime(); } catch (e) {} }
     const recency = tsMs ? Math.max(0, 1 - (Date.now() - tsMs) / (30 * 86400e3)) : 0.5;
     const hits = m.hits ? Math.min(Number(m.hits), 10) / 10 : 0.5;
-    const score = overlap * 2 + hits * 0.5 + recency * 0.5;
+    const score = overlap * 2 + fuzzy * 1 + hits * 0.5 + recency * 0.5;
     return { m, score };
   });
   scored.sort((a, b) => b.score - a.score);
@@ -789,7 +809,7 @@ function userPersona(userId, settings) {
     _mdText || "",
     recentDetail ? `【最近的具体细节（原文）】\n${recentDetail}` : "",
     growth ? `【我自己的成长记忆】\n${growth}` : "",
-    lessons ? `【我自己复盘出的经验（请体现在行为里）】\n${lessons}` : ""
+    lessons ? `【我自己复盘出的经验（请体现在行为里；注意：里面提到的「主人」是主人本人，不是你自己，别把主人的偏好/习惯说成你自己的）】\n${lessons}` : ""
   ].filter(Boolean).join("\n");
 }
 
@@ -1284,7 +1304,7 @@ function dateText() {
   return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")} 星期${w[n.getDay()]}`;
 }
 function timeDirective() {
-  return `【当前时间】现在是北京时间 ${dateText()}（${periodOfDay()}）。所有涉及时间、日期、时段的表述都以这个为准，绝对不要自己编造或猜测时间；不确定具体几点时就说「这会儿」，不要编一个钟点。`;
+  return `【当前时间】现在是北京时间 ${todayText()}（${periodOfDay()}）。所有涉及时间、日期、时段的表述都以这个为准，绝对不要自己编造或猜测时间；时间仅作背景参考，除非对话自然需要（比如久别重逢、深夜、饭点），否则不要主动报时间。`;
 }
 function periodOfDay() {
   const h = new Date().getHours();
@@ -1409,10 +1429,29 @@ const ACTIVITY_FILE = path.join(DATA_DIR, "current-activity.json");
 function loadActivityState() { try { return JSON.parse(fs.readFileSync(ACTIVITY_FILE, "utf8")); } catch (e) { return { text: "发呆", since: Date.now() }; } }
 function saveActivityState(a) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(ACTIVITY_FILE, JSON.stringify(a)); } catch (e) {} }
 function setActivity(text) { saveActivityState({ text: String(text).slice(0, 30), since: Date.now() }); }
+/* 真实动作 → 人话（供 activityCtx 兜底；只反映 actions.jsonl 里真实发生过的，不演没做过的事） */
+const ACTION_LABEL = {
+  qzone_post: "刚发了一条空间说说", qzone_delete: "刚删了条空间说说", qzone_feedback: "刚回了一条空间互动",
+  report_day: "刚写完今天的报告", report_week: "刚写完这周报告", report_month: "刚写完月报",
+  body_look: "刚看了看主人的屏幕", memory_edit: "刚整理了一下记忆", memory_forget: "刚删了条旧记忆",
+  digest: "刚做完记忆消化", proactive: "刚主动跟主人聊了两句",
+  sticker_sent: "刚发了张表情", emoji_like: "刚给别人的动态点了赞", forward_msg: "刚转发了条消息",
+  plugin_doctor: "刚做了次插件体检", set_self_profile: "刚更新了自己的资料", set_weather_city: "刚记下了天气城市",
+  view_space: "刚看了看空间动态", share_fun: "刚给主人找了张趣图", browse: "刚刷了会儿视频",
+  read_article: "刚读了篇文章", play_puzzle: "刚玩了局数独", read_buzz: "刚刷了会儿热搜",
+};
 function activityCtx() {
   const a = loadActivityState();
   if (Date.now() - (a.since || Date.now()) > 2 * 3600e3 && a.text !== "发呆") { a.text = "发呆"; a.since = Date.now(); saveActivityState(a); }
-  return `【你此刻在做什么】${a.text}（已持续 ${formatGap(Date.now() - (a.since || Date.now()))}）。`;
+  let text = a.text;
+  // 兜底：标记还是「发呆」时，若最近 10 分钟里确有真实动作，如实说刚做了什么（宁缺毋滥）
+  if (text === "发呆") {
+    const recent = loadActions(1)[0];
+    if (recent && recent.action && ACTION_LABEL[recent.action] && Date.now() - (recent.ts || 0) < 10 * 60e3) {
+      text = ACTION_LABEL[recent.action];
+    }
+  }
+  return `【你此刻在做什么】${text}（已持续 ${formatGap(Date.now() - (a.since || Date.now()))}）。`;
 }
 async function extractCurrentStatus(userId, userText, settings) {
   if (!apiKey) return;
@@ -1644,13 +1683,14 @@ function heartbeat() {
     else setBoredom(Math.max(0, getBoredom() - 15));
     const _a = loadActivityState();
     if (idleMin > 10 && _a.text.includes("聊天")) setActivity("发呆");
+    mindPulseTick();  // 每 60 秒记录一次空闲心跳（原独立定时器合并进主时钟，省一个定时器）
   }
 }
 /* shallowThink 已迁移到插件 proactive */
 
 /* ================= 心流三层：感知 → 判断 → 执行 ================= */
-const MIND_TICK_MS = 10 * 60000;        // 感知层节奏
-const MIND_DELIBERATE_GAP = 30 * 60000; // 判断层最短间隔（省调用）
+const MIND_TICK_MS = mindCfg("tick_min", 10) * 60000;        // 感知层节奏（settings 可调，默认 10 分钟）
+const MIND_DELIBERATE_GAP = () => mindCfg("deliberate_gap_min", 30) * 60000; // 判断层最短间隔（settings 可调，默认 30 分钟）
 const MIND_URGE_THRESHOLD = 60;         // 想做事的程度超过这个就立刻判断
 const SCORE_PUSH = 0.62;                // 分数够高才真的做
 const SCORE_QUEUE = 0.40;               // 分数中等先攒着（静默准备池）
@@ -1779,7 +1819,7 @@ async function mindLoop() {
 
   /* ===== 第二层：判断（够想做 or 隔得够久才做，省调用）===== */
   const sinceDelib = now - (st.last_deliberate || 0);
-  if (percept.urge < MIND_URGE_THRESHOLD && sinceDelib < MIND_DELIBERATE_GAP) return;
+  if (percept.urge < MIND_URGE_THRESHOLD && sinceDelib < MIND_DELIBERATE_GAP()) return;
 
   const lastChatAgo = (masterUin && lastProactiveAt.get(masterUin)) ? Math.round((now - lastProactiveAt.get(masterUin)) / 60000) : 9999;
   const mem = masterUin ? topMemories(loadMemories(masterUin), 5).map((m) => m.content).join("；") : "";
@@ -1826,6 +1866,7 @@ async function runMindAction(action, content, settings, masterUin, now) {
         try {
           const _pz = await publishQzone(content);
           log("info", `心智-发空间: ${content.slice(0, 40)}${_pz && _pz.images ? `（配图 ${_pz.images} 张）` : ""}`);
+          recordAction({ action: "qzone_post", ok: true }); setActivity("发呆");
         } catch (e) {
           // 发失败要让她自己知道，否则下次会说「我发过说说」
           log("warn", "心智-发空间失败: " + e.message.slice(0, 100));
@@ -1837,6 +1878,7 @@ async function runMindAction(action, content, settings, masterUin, now) {
     } else if (action === "view_space") {
       const n = await viewSpaces(settings);
       if (n) log("info", `心智-看空间: 发现 ${n} 条新动态`);
+      recordAction({ action: "view_space", ok: true }); setActivity("发呆");
     } else if (action === "share_fun") {
       if (masterUin && now - (lastProactiveAt.get(masterUin) || 0) >= proactiveIntervalMs(masterUin)) {
         const img = await fetchFunImage();
@@ -1849,6 +1891,7 @@ async function runMindAction(action, content, settings, masterUin, now) {
         lastActiveAt.set(masterUin, now);
         saveProactiveState();
         log("info", `心智-分享趣图: ${cap.slice(0, 30)}`);
+        recordAction({ action: "share_fun", ok: true }); setActivity("发呆");
       }
     } else if (action === "reflect") {
       log("info", "心智-选择反思");
@@ -1859,7 +1902,7 @@ async function runMindAction(action, content, settings, masterUin, now) {
     } else if (action === "browse") {
       log("info", "心智-选择刷视频");
       const _bApi = host && host.apis.get("browse");
-      if (_bApi) { try { await _bApi.browse(settings); } catch (e) { log("warn", "刷视频失败: " + e.message.slice(0, 120)); } }
+      if (_bApi) { try { await _bApi.browse(settings); recordAction({ action: "browse", ok: true }); setActivity("发呆"); } catch (e) { log("warn", "刷视频失败: " + e.message.slice(0, 120)); } }
     } else if (action === "read_article") {
       log("info", "心智-选择读一篇文章");
       const _rApi = host && host.apis.get("read-article");
@@ -1867,6 +1910,7 @@ async function runMindAction(action, content, settings, masterUin, now) {
         try {
           const r = await _rApi.readArticle(settings);
           if (r && r.title) queueFunShare(`今天读了《${r.title}》${r.thought ? "，" + String(r.thought).slice(0, 60) : ""}`);
+          recordAction({ action: "read_article", ok: true }); setActivity("发呆");
         } catch (e) { log("warn", "读文章失败: " + e.message.slice(0, 120)); }
       }
     } else if (action === "play_puzzle") {
@@ -1879,6 +1923,7 @@ async function runMindAction(action, content, settings, masterUin, now) {
             if (r.status === "solved") queueFunShare(`我把那局六宫格数独解出来了，${r.progress}`);
             else if (r.ok) queueFunShare(`刚玩了会儿数独，${r.progress}`);
           }
+          recordAction({ action: "play_puzzle", ok: true }); setActivity("发呆");
         } catch (e) { log("warn", "玩数独失败: " + e.message.slice(0, 120)); }
       }
     } else if (action === "read_buzz") {
@@ -1888,6 +1933,7 @@ async function runMindAction(action, content, settings, masterUin, now) {
         try {
           const r = await _zApi.readBuzz(settings);
           if (r && r.title) queueFunShare(`热搜上「${r.title}」那个，我有点想跟你说${r.view ? "：" + String(r.view).slice(0, 50) : ""}`);
+          recordAction({ action: "read_buzz", ok: true }); setActivity("发呆");
         } catch (e) { log("warn", "刷热搜失败: " + e.message.slice(0, 120)); }
       }
     }
@@ -3151,11 +3197,9 @@ connect();
 try { startPetApi(); } catch (e) { log("warn", "桌宠联脑接口启动异常: " + String(e.message).slice(0, 100)); }
 /* 主动搭话已迁移到插件 proactive 的 timer 钩子 */
 setInterval(() => { decayMood(); decayEmotion(); }, 5 * 60000);
-/* 空闲认知心跳：不花 token，只记节奏；状态变化时才唤醒思考 */
+/* 空闲认知心跳：已合并进 heartbeat 主时钟（每 60 tick 记一次），此处只做启动热身 */
 try {
-  const pulseMs = Math.max(15000, mindCfg("pulse_sec", 60) * 1000);
-  setInterval(mindPulseTick, pulseMs);
-  log("info", `空闲心跳已启动：每 ${Math.round(pulseMs / 1000)} 秒一次（唤醒间隔 ≥${mindCfg("min_wake_gap_min", 10)} 分钟，每小时 ≤${mindCfg("max_per_hour", 3)} 次）`);
+  log("info", `空闲心跳已并入主时钟（唤醒间隔 ≥${mindCfg("min_wake_gap_min", 10)} 分钟，每小时 ≤${mindCfg("max_per_hour", 3)} 次）`);
   setTimeout(mindPulseTick, 8000);
 } catch (e) { log("warn", "空闲心跳启动失败: " + String(e.message).slice(0, 100)); }
 /* 空间保底自查已迁移到插件 qzone 定时钩子 */

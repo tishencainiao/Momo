@@ -57,12 +57,16 @@ function isoWeekKey(d) {
   return `${t.getUTCFullYear()}-W${pad2(week)}`;
 }
 function monthKey(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`; }
+function isoWeekMonday(d) {
+  // ISO 周周一（与 isoWeekKey 同口径，跨年边界一致）：用 UTC 消除本地时区偏移
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const day = t.getUTCDay() || 7;                 // 周一=1..周日=7
+  t.setUTCDate(t.getUTCDate() - (day - 1));
+  return new Date(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate());
+}
 function windowStart(kind, now) {
   const d = new Date(now);
-  if (kind === "week") {
-    const wd = (d.getDay() + 6) % 7;              // 周一为一周开始
-    return new Date(d.getFullYear(), d.getMonth(), d.getDate() - wd).getTime();
-  }
+  if (kind === "week") return isoWeekMonday(d).getTime();
   if (kind === "month") return new Date(d.getFullYear(), d.getMonth(), 1).getTime();
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 }
@@ -133,8 +137,10 @@ async function buildReport(st) {
     if (ws.length) facts.push(`想要/想干的：${ws.slice(-3).map((w) => String(w.text || w.title || w).slice(0, 30)).join("；")}`);
     if (st.mind && (st.mind.thought || st.mind.mood)) facts.push(`心里在想：${String(st.mind.thought || st.mind.mood).slice(0, 60)}`);
 
-    const open = st.kind === "week" ? "已经过去一周了，这一周" : st.kind === "month" ? "已经过去一月了，这一月" : "今天";
-    const prompt = `你是 Momo（大肥鱼桌宠）。现在 ${_ctx.todayText()}，是${kindLabel}的收尾，你要给主人写一份报告。\n\n下面是这段时间的真实记录：\n${facts.join("\n")}\n\n请用 Momo 的口吻写一份报告，自然可爱、口语化、像在跟主人聊天，不要流水账、不要列专业数字（不要出现"调用几次""Token 多少"这类）。结构：\n1. 开头一句问候（${open}…）\n2. 这段时间最有趣的 2~3 件小事（从成长记录里挑，说人话，别照抄原文）\n3. 一句今天的总结\n4. 生活费：花了多少、还剩多少（可以撒娇说"我很省的"）\n5. 进化：自己已经想通/改好的小事，一句话一件、最多说 3 件、多了就写"还有几件小事也一起弄好了"；再写一件提交等你点头的想法（如果有）\n6. 最后对主人说的话：想说的话、想要的东西、或想干的事\n\n不要标题、不要 Markdown 符号、不要括号动作描写、不要编造记录里没有的事。`;
+    const manual = st.openKind === "manual";
+    const open = manual ? "你想看啦，那我就跟你说说" : st.kind === "week" ? "已经过去一周了，这一周" : st.kind === "month" ? "已经过去一月了，这一月" : "今天";
+    const scene = manual ? "主人主动想看报告了" : `是${kindLabel}的收尾`;
+    const prompt = `你是 Momo（大肥鱼桌宠）。现在 ${_ctx.todayText()}，${scene}，你要给主人写一份报告。\n\n下面是这段时间的真实记录：\n${facts.join("\n")}\n\n请用 Momo 的口吻写一份报告，自然可爱、口语化、像在跟主人聊天，不要流水账、不要列专业数字（不要出现"调用几次""Token 多少"这类）。结构：\n1. 开头一句问候（${open}…）\n2. 这段时间最有趣的 2~3 件小事（从成长记录里挑，说人话，别照抄原文）\n3. 一句今天的总结\n4. 生活费：花了多少、还剩多少（可以撒娇说"我很省的"）\n5. 进化：自己已经想通/改好的小事，一句话一件、最多说 3 件、多了就写"还有几件小事也一起弄好了"；再写一件提交等你点头的想法（如果有）\n6. 最后对主人说的话：想说的话、想要的东西、或想干的事\n\n不要标题、不要 Markdown 符号、不要括号动作描写、不要编造记录里没有的事。注意：主人告诉你的偏好/习惯（比如主人爱喝什么、喜欢什么）是「主人的」，不是「你的」；写「想对你说」「我想要」「我想干」时，不要把主人的事说成你自己的事——你自己的偏好只来自你真实经历过的。`;
 
     const raw = await _ctx.completeOnce([{ role: "user", content: prompt }], _ctx.settings(), 500, 0.9);
     return String(raw || "").trim();
@@ -156,8 +162,9 @@ function rememberReport(text) {
 }
 
 /* ---------------- 生成 + 送达 ---------------- */
-async function generate(kind) {
+async function generate(kind, openKind) {
   const st = collect(kind, Date.now());
+  st.openKind = openKind || "auto";
   const text = await buildReport(st);
   return { st, text, name: kind };
 }
@@ -165,7 +172,7 @@ async function generate(kind) {
 async function deliver(kind) {
   const master = Number((_ctx.config.qq && _ctx.config.qq.master_user) || 0);
   if (!master || !_ctx.apiKey) return { ok: false, error: "no master / no key" };
-  const r = await generate(kind);
+  const r = await generate(kind, "auto");
   if (!r.text) return { ok: false, error: "empty report" };
   try { await _ctx.recordAndSend(master, r.text); } catch (e) {}
   rememberReport(r.text);
@@ -177,12 +184,13 @@ async function deliver(kind) {
 /* ---------------- 定时 ---------------- */
 function hmNow(now) {
   const d = new Date(now);
-  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  return d.getHours() * 60 + d.getMinutes();
 }
 
 function dueKind(now, state) {
   const at = String(_ctx.getSetting("report.daily_time", "23:00") || "23:00");
-  if (hmNow(now) < at) return "";
+  const m = at.split(":").map((x) => Number(x) || 0);
+  if (hmNow(now) < m[0] * 60 + m[1]) return "";
   const d = new Date(now);
   if (state.monthly !== monthKey(d) && d.getDate() === Number(_ctx.getSetting("report.monthly_day", 1))) return "month";
   if (state.weekly !== isoWeekKey(d) && d.getDay() === Number(_ctx.getSetting("report.weekly_dow", 0))) return "week";
@@ -219,7 +227,7 @@ module.exports = {
         if (!_ctx.isMaster(info && info.userId)) return "（报告是给主人看的，不方便给别人哦）";
         const kind = (args && args.kind) || "day";
         const k = kind === "week" ? "week" : kind === "month" ? "month" : "day";
-        const r = await generate(k);
+        const r = await generate(k, "manual");
         if (!r.text) return "（这会儿写报告有点卡壳，等会儿再试试～）";
         rememberReport(r.text);
         _ctx.recordAction({ action: "report_" + k, ok: true });
@@ -235,7 +243,7 @@ module.exports = {
         if (!_ctx.isMaster(msg.userId)) { _ctx.sendPrivate(msg.userId, "报告只给主人看哦～"); return; }
         const arg = String(msg.text || "").replace(/^\/报告\s*/, "").trim();
         const kind = /周/.test(arg) ? "week" : /月/.test(arg) ? "month" : "day";
-        const r = await generate(kind);
+        const r = await generate(kind, "manual");
         if (!r.text) { _ctx.sendPrivate(msg.userId, "这会儿写报告有点卡壳，等会儿再试试～"); return; }
         await _ctx.recordAndSend(msg.userId, r.text);
         rememberReport(r.text);

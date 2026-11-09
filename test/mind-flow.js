@@ -24,7 +24,7 @@ function extractConstLine(s, name) {
   const end = s.indexOf("\n", start);
   return s.slice(start, end).replace(/;?\s*$/, ";");
 }
-const sandbox = { fs, path };
+const sandbox = { fs, path, mindCfg: (k, d) => d };
 vm.createContext(sandbox);
 const consts = [
   extractConstLine(src, "MIND_TICK_MS"),
@@ -45,6 +45,7 @@ const M = mind.api.mind;
 
 // 1. 常量
 check("感知节奏 10 分钟", S.MIND_TICK_MS === 10 * 60000, String(S.MIND_TICK_MS));
+check("判断层间隔默认 30 分钟", S.MIND_DELIBERATE_GAP() === 30 * 60000, String(S.MIND_DELIBERATE_GAP()));
 check("想做事阈值 60", S.MIND_URGE_THRESHOLD === 60);
 check("push 阈值 0.62", S.SCORE_PUSH === 0.62);
 check("queue 阈值 0.40", S.SCORE_QUEUE === 0.40);

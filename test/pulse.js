@@ -26,9 +26,9 @@ function extractFunc(s, name) {
 // ---------- 源码级 ----------
 check("有心跳文件常量", src.includes("mind-pulse.json"));
 check("心跳注入到聊天上下文", src.includes("pulseCtx()"));
-check("心跳有定时器", src.includes("setInterval(mindPulseTick"));
+check("心跳并入主时钟（heartbeat 每 60 tick 记一次）", src.includes("mindPulseTick();"));
 check("唤醒有每小时上限", src.includes("maxPerHour"));
-check("参数可配置（云服务器可调）", src.includes('mindCfg("pulse_sec"') && src.includes('mindCfg("max_per_hour"'));
+check("参数可配置（云服务器可调）", src.includes('mindCfg("min_wake_gap_min"') && src.includes('mindCfg("max_per_hour"'));
 
 // ---------- 行为级 ----------
 let woke = 0;

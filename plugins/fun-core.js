@@ -51,8 +51,8 @@ function lastOfType(type) {
   return list.length ? list[list.length - 1] : null;
 }
 
-function dailyTotalMax() { return Number(_ctx.getSetting("entertainment.daily_self_max", 2)) || 2; }
-function dailyCnyCap() { return Number(_ctx.getSetting("entertainment.daily_cny", 0.3)) || 0.3; }
+function dailyTotalMax() { return Number(_ctx.getSetting("entertainment.daily_self_max", 4)) || 4; }
+function dailyCnyCap() { return Number(_ctx.getSetting("entertainment.daily_cny", 1.0)) || 1.0; }
 
 function funSpentToday() {
   try {
@@ -88,8 +88,8 @@ module.exports = {
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },
   settings: [
-    { key: "entertainment.daily_self_max", label: "每天自娱总次数上限", type: "number", default: 2, min: 0, max: 6, desc: "所有娱乐活动加起来，超过就不玩了" },
-    { key: "entertainment.daily_cny", label: "每天娱乐预算上限（元）", type: "number", default: 0.3, min: 0, max: 2, desc: "独立于生活费的小钱包" },
+    { key: "entertainment.daily_self_max", label: "每天自娱总次数上限", type: "number", default: 4, min: 0, max: 6, desc: "所有娱乐活动加起来，超过就不玩了" },
+    { key: "entertainment.daily_cny", label: "每天娱乐预算上限（元）", type: "number", default: 1.0, min: 0, max: 2, desc: "独立于生活费的小钱包" },
   ],
   apiSpec: {"fun-core":{"loadActivities":{"input":"","output":"","sideEffect":"只读"},"appendActivity":{"input":"","output":"","sideEffect":""},"todayList":{"input":"","output":"","sideEffect":""},"todayCount":{"input":"","output":"","sideEffect":""},"todayTotal":{"input":"","output":"","sideEffect":""},"lastOfType":{"input":"","output":"","sideEffect":""},"canPlay":{"input":"","output":"","sideEffect":""},"funSpentToday":{"input":"","output":"","sideEffect":""},"addFunSpent":{"input":"","output":"","sideEffect":"写盘"},"dailyTotalMax":{"input":"","output":"","sideEffect":""},"dailyCnyCap":{"input":"","output":"","sideEffect":""}}},
 

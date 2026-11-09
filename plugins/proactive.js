@@ -106,6 +106,7 @@ function proactiveLoop() {
         P.lastProactiveAt.set(u, Date.now());
         P.lastActiveAt.set(u, Date.now());
         P.saveProactiveState();
+        try { _ctx.recordAction({ action: "proactive", ok: true }); _ctx.setActivity("发呆"); } catch (e) {}
         _ctx.log("info", `主动搭话[${kind}] → ${u}（${text.length} 字）：${String(text).slice(0, 80).replace(/\n/g, " ")}`);
       } catch (e) { _ctx.log("warn", "主动搭话失败: " + e.message.slice(0, 160)); }
     })();
@@ -119,7 +120,7 @@ module.exports = {
   name: "proactive",
   displayName: "主动行为",
   description: "何时能打扰 + 说什么话（状态/定时在内核 proactive 束）",
-  permissions: ["apiKey", "config", "getActivity", "getApi", "isUserQuiet", "loadSession", "log", "markProbed", "nowHM", "proactive"],
+  permissions: ["apiKey", "config", "getActivity", "getApi", "isUserQuiet", "loadSession", "log", "markProbed", "nowHM", "proactive", "recordAction", "setActivity"],
   version: "1.0.0",
   // dailyPlan 已停用（改用 life-log 的真实活动），这里只依赖 followup；
   // 日程候选在代码里本就有 null 判断，缺了不影响其他候选

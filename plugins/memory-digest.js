@@ -105,6 +105,7 @@ function info() {
 }
 
 function runDigest(args) {
+  try { _ctx.setActivity("在整理记忆"); } catch (e) {}
   return new Promise((resolve) => {
     const py = (_ctx.config.runtime && _ctx.config.runtime.python_path) || "python";
     const script = path.join(__dirname, "..", "digest.py");
@@ -113,14 +114,17 @@ function runDigest(args) {
     try {
       p = spawn(py, [script].concat(args || []), { cwd: path.join(__dirname, ".."), windowsHide: true });
     } catch (e) {
+      try { _ctx.setActivity("发呆"); } catch (e2) {}
       return resolve({ ok: false, msg: "启动 digest.py 失败：" + e.message });
     }
     p.stdout.on("data", (d) => { out += d.toString(); });
     p.stderr.on("data", (d) => { err += d.toString(); });
     p.on("close", (code) => {
+      if (code === 0) { try { _ctx.recordAction({ action: "digest", ok: true }); } catch (e) {} }
+      try { _ctx.setActivity("发呆"); } catch (e) {}
       resolve({ ok: code === 0, code, out: out.trim(), err: err.trim().slice(0, 400) });
     });
-    p.on("error", (e) => resolve({ ok: false, msg: e.message }));
+    p.on("error", (e) => { try { _ctx.setActivity("发呆"); } catch (e2) {} resolve({ ok: false, msg: e.message }); });
   });
 }
 
@@ -128,7 +132,7 @@ module.exports = {
   name: "memory-digest",
   displayName: "记忆消化",
   description: "读消化后的「认识」，替换流水账注入（mem.digest）",
-  permissions: ["DATA_DIR", "config", "getApi", "getSetting", "isMaster", "log"],
+  permissions: ["DATA_DIR", "config", "getApi", "getSetting", "isMaster", "log", "recordAction", "setActivity"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; try { startTimer(); } catch (e) {} },
   settings: [
