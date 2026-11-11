@@ -84,6 +84,8 @@ check("拦「我这就放给你听」", looks("我这就放给你听") === true)
 check("拦「我能放歌」", looks("我能放歌") === true);
 check("不拦性格类记忆", looks("我嘴硬但其实很在意对方") === false);
 check("不拦日常闲聊", looks("我今天吃了两碗饭") === false);
+check("拦「我推荐的炸蛋配肉肠没出错」", looks("我推荐的炸蛋配肉肠没出错。") === true);
+check("不拦「对方点了他爱吃的」", looks("对方点了他爱吃的") === false);
 
 /* ---------- 4. 记忆提炼过滤 ---------- */
 const mem = require("E:/Learn/Momo/plugins/memory.js");
