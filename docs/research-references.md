@@ -1,6 +1,6 @@
 # 前沿论文参考（Research References）
 
-> 保存定位讨论中用的论文与「Momo 可以抄什么」。改记忆 / 进化系统前先看这里。
+> 状态：参考（论文清单，只读）。保存定位讨论中用的论文与「Momo 可以抄什么」。改记忆 / 进化系统前先看这里。
 
 ## 1. Generative Agents: Interactive Simulacra of Human Behavior
 

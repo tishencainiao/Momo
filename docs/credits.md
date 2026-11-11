@@ -1,6 +1,6 @@
 # 借鉴与出处（Credits & Third-party Notices）
 
-> 本文件登记 Momo 使用或借鉴的第三方项目；原则见 [development.md](development.md) 第十节「代码复用原则」。
+> 本文件登记 Momo 使用或借鉴的第三方项目（**致谢口径**，给人看）；原则见 [development.md](development.md) 第十节「代码复用原则」。身体+插件的**归因登记**（技术口径，给合规看）见 [attribution.md](attribution.md)，两文件分工：这里写「我们感谢谁」，attribution.md 写「谁授权了什么」。
 > 更新：2026-11-07（v1.72.0）
 
 ## 一、直接使用的第三方软件 / 模型

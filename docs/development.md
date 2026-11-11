@@ -384,7 +384,7 @@ _ctx.recordAction({ action: "settings_set", by: info.userId, detail: `${k} = ${v
 │  自我内省5工具 + 愿望 + 反思/探索/评分调参       │
 │  + 技能规则 + 提案分级 + registry 元认知        │
 ├───────────────────────────────────────────────┤
-│ 功能层 plugins/*.js（13 个文件 / 14 个功能）    │
+│ 功能层 plugins/*.js（42 个插件，以 check.js 为准）│
 │  reminders birthdays goals appellations mute   │
 │  pc-tools stickers voice qzone memory emotion  │
 │  proactive                                    │
@@ -395,47 +395,12 @@ _ctx.recordAction({ action: "settings_set", by: info.userId, detail: `${k} = ${v
 ```
 
 ## 插件怎么写（模板）
-```js
-/* plugins/hello.js */
-let _ctx = null;
-module.exports = {
-  name: "hello",                    // 必填
-  version: "1.0.0",
-  enabled: true,                    // false = 禁用
-  init(ctx) { _ctx = ctx; },        // 启动时调用一次
 
-  // agent 工具（LLM 可调用的 Function Calling）
-  tools: [{
-    def: { type: "function", function: { name: "hello_tool", description: "…", parameters: { type: "object", properties: {} } } },
-    handler(args, info) { return "你好！"; },   // info = { userId, call }
-  }],
-
-  // slash 命令
-  commands: [{ key: "/hello", regex: /^\/hello/, async handler(msg) { _ctx.sendPrivate(msg.userId, "你好～"); } }],
-
-  // 钩子
-  hooks: {
-    startup(ctx) {},                        // 启动一次
-    timer(payload) { const now = payload.now; },   // 每秒（自行节流）
-    private_message(ctx, { userId, raw }) { return false; },  // return true = 拦截核心处理
-    reply(payload) { /* payload = { userId, text, reply, channel } */ },
-  },
-
-  // 给内核/其他插件提供能力（内核经 host.apis.get("hello") 调用）
-  api: { hello: { greet: () => "hi" } },
-};
-```
+> 模板、Manifest 字段、apiSpec、避坑、体检规则、归因 → 一律见 [plugin-guide.md](plugin-guide.md)（插件平台**唯一规范入口**，`plugin-doctor.js` 按它校验）。这里不再重复，避免两处维护。
 
 ## ctx 提供什么
-| 分类 | 内容 |
-|---|---|
-| 发送 | sendPrivate / sendGroup / recordAndSend（先记会话再发）/ onebotSend / sendStickerImage / petEvent |
-| 记忆 | loadMemories / saveMemories / loadShortMemories / saveShortMemories / loadSession / saveSession / parseMemoryJson |
-| 状态 | getEmotion / getMood / getBoredom / getFavor / loadBudget / budgetCfg / loadMindState / moodLabel |
-| 进化 | loadEvolution / reloadEvolution / SELF_DIR / registry（插件清单=元认知） |
-| 工具 | completeOnce / reasonComplete / textSimilar / todayText / periodOfDay / nowHM / formatGap / dayStr / todayMMDD / mimeOf |
-| 服务 | qzoneHttp / bochaSearch / formatResults / pickStickerByIds / resolveTargetId / loadAppellations / loadMute / addMute / removeMute / loadWishes?（经 evolution api） |
-| 其他 | log / config / apiKey / settings / isMaster / resolveCall / userPersona / isBudgetExhausted / DATA_DIR / BASE_VERSION / proactive（束） |
+
+> ctx 能力清单以 `plugin-host.js` 的 `createHost` 返回值为准（改插件能力时改那里），不再手抄一张表、避免过期。常用分类速查：发送 / 记忆 / 状态 / 进化 / 工具 / 服务 / 其他（见 plugin-host.js）。
 
 ## 内核保留什么（基础层）
 - 消息路由（handlePrivateMessage/handleGroupMessage + 防抖）
@@ -536,4 +501,5 @@ powershell -NoProfile -ExecutionPolicy Bypass -File E:\Learn\Momo\release.ps1 -B
 6. **HANDOVER 例行**：Momo 每次升版后，由总控刷新工作区 HANDOVER.md（时点版本、口径、下一步、已知坑）。
 7. **自动对账三件**：版本头 vs BASE_VERSION、数字口径、行号引用——由 `scripts/doc-check.js` 自动完成，挂在三个关口：pre-commit 钩子（有偏差 exit 1 拦提交）、sync-to-public.ps1（发布前）、release.ps1 阶段 6。
 8. **改动即更新**：增删/改名插件 → 同步 docs/architecture.md 插件清单 + docs/prompt-map.md 插件数；改功能行为 → 同步对应功能文档（如 report-center.md）；改提示词常量（prompts.js）→ 同步 docs/prompt-map.md §4 全文。
+9. **文档地图**：新增/删除 `docs/` 下的 `.md` 必须同步登记 `docs/index.md` 的对应分区（参考/指南/解释/历史/归因），并标注「给谁看（🤖/👤/🤖👤）+ 状态（现状态/目标态/历史）」。索引完整性由 `doc-check.js` 校验，漏登记=红（拦提交）。
 

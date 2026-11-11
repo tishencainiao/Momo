@@ -103,6 +103,20 @@ for (const f of docFiles) {
   }
 }
 
+// 6) 索引完整性：docs/index.md 必须覆盖所有 docs/*.md（顶层），漏登记=红（拦提交）
+const indexText = readText(path.join(root, 'docs', 'index.md'));
+if (!indexText) {
+  fail('docs/index.md 不存在（文档地图）');
+} else {
+  const indexExcludes = ['remote-backup-gitee.md']; // 私有笔记，不进公开索引
+  const topMd = fs.readdirSync(path.join(root, 'docs')).filter(f => f.endsWith('.md') && f !== 'index.md' && !indexExcludes.includes(f));
+  let missing = 0;
+  for (const f of topMd) {
+    if (!indexText.includes(f)) { fail('docs/index.md 未收录 ' + f + '（新增文档必须登记进文档地图）'); missing++; }
+  }
+  if (missing === 0) ok('索引完整性：docs/index.md 覆盖 ' + topMd.length + ' 份顶层文档');
+}
+
 console.log('');
 if (problems.length === 0) {
   console.log('[doc-check] 通过：无偏差');

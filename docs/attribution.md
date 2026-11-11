@@ -1,6 +1,6 @@
 # 借鉴与署名（身体 + 插件）
 
-> 本文件统一记录 `body/`（身体）与 `plugins/`（插件）里哪些东西是**借鉴/复用**别人的，分别为谁、按什么授权。
+> 本文件统一记录 `body/`（身体）与 `plugins/`（插件）里哪些东西是**借鉴/复用**别人的，分别为谁、按什么授权（**归因登记**，给合规看）。第三方软件/模型的**致谢**（给人看）见 [credits.md](credits.md)，两文件分工：这里写「谁授权了什么」，credits.md 写「我们感谢谁」。
 > 规则：**凡是借鉴，必须在这里留一行**；不能只在代码注释里提一句。
 > 插件侧：借鉴项还需在各自 `module.exports` 里写 `attribution` 字段（`{source, license, note, importedAt}`），体检（plugin-doctor）校验 `source` + `license` 齐全。
 
