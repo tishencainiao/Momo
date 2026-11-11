@@ -485,10 +485,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File E:\Learn\Momo\release.ps1 -B
 |---|---|---|
 | 0 | 前置检查：node 定位（DSH runtime 优先，要求 ≥22）、git、当前版本、脏文件警告 | — |
 | 1 | 自检：node --check index.js → node check.js → test/*.js 全量（退出码+输出双判定）→ python body/main.py --selftest | node / python |
-| 2 | 版本 + CHANGELOG 门禁：版本合法性、BASE_VERSION 回写（-Bump）、CHANGELOG 必须已有 vX.Y.Z 条目 | — |
-| 3 | 本地提交：git add -A → commit → tag vX.Y.Z（撞号会停） | git |
+| 2 | 版本 + CHANGELOG 门禁：版本合法性、BASE_VERSION 回写（-Bump）、CHANGELOG 必须已有 vX.Y.Z 条目；docs 版本头需先升到新号（否则阶段 6 对账报警） | — |
+| 3 | 本地提交：git add（排除 self/ stickers/ watchdog.log 运行时数据）→ commit → tag vX.Y.Z（撞号会停） | git |
 | 4 | 公开镜像：调 sync-to-public.ps1（复制干净文件集 → 脱敏 → 镜像内 commit+tag） | sync-to-public.ps1 |
-| 5 | 双平台推送：gitee/github 分支+tag、github master:main 强推；网络失败重试≤5次，凭据类错误立即失败 | git push |
+| 5 | 双平台推送：核对远端 hash 只补推不一致的（幂等，扛 443 抖动）；单个 push 重试≤5次，凭据类错误立即失败 | git push |
 | 6 | docs 收口：调 `scripts/doc-check.js` 自动对账（版本头/数字口径/行号引用），提示刷新 docs/HANDOVER | node |
 | 7 | 发布清单：版本 / commit / tag / 镜像 / push 四路 / 剩余事项 | — |
 

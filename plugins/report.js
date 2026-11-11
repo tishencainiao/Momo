@@ -132,7 +132,7 @@ async function buildReport(st) {
     facts.push(`自己已经想通/改好的小事：${st.adopted.join("；") || "（还没有）"}`);
     facts.push(`提交了、等你点头的想法：${st.proposals.join("；") || "（还没有）"}`);
     facts.push(`生活费：花了 ¥${spent.toFixed(3)}，日预算 ¥${st.daily.toFixed(3)}，还剩 ¥${remain.toFixed(3)}`);
-    facts.push(`身体：被摸 ${clicks} 次、自己找事做 ${selfPlay} 次、走动 ${walks} 次${hp != null ? `、累计被摸头 ${hp} 次` : ""}`);
+    facts.push(`桌宠窗口：被点 ${clicks} 次、自己找事做 ${selfPlay} 次、走动 ${walks} 次${hp != null ? `、累计被摸头 ${hp} 次` : ""}`);
     if (gs.length) facts.push(`目标：${gs.map((g) => String(g).slice(0, 30)).join("；")}`);
     if (ws.length) facts.push(`想要/想干的：${ws.slice(-3).map((w) => String(w.text || w.title || w).slice(0, 30)).join("；")}`);
     if (st.mind && (st.mind.thought || st.mind.mood)) facts.push(`心里在想：${String(st.mind.thought || st.mind.mood).slice(0, 60)}`);
