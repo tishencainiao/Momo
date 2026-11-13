@@ -139,7 +139,7 @@ const { STYLE_DIRECTIVE, GROUP_DIRECTIVE, SITUATION_QQ, SITUATION_DESKTOP, situa
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.90.3";
+const BASE_VERSION = "1.91.1";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -257,6 +257,14 @@ function budgetLevel() {
   else if (ratio > 0.3) level = "normal";
   else if (ratio > 0.1) level = "tight";
   return { ratio, level, spent, daily };
+}
+/* 模型档位（P2-c 预算降级阶梯）：按剩余预算选推理强度。full=pro+high推理 / low=pro+low推理 / flash=快模型思考 / minimal=快模型短答 */
+function budgetTier() {
+  const { ratio } = budgetLevel();
+  if (ratio >= 0.5) return "full";
+  if (ratio >= 0.2) return "low";
+  if (ratio >= 0.1) return "flash";
+  return "minimal";
 }
 /* 每个动作的花费档：free 免费 / low 约¥0.001 / mid 约¥0.005 / high 更贵 */
 const ACTION_COST = {
@@ -889,7 +897,7 @@ async function reasonComplete(messages, settings, maxTokens, opts) {
 
 async function streamComplete(messages, settings) {
   const endpoint = settings.base_url.replace(/\/+$/, "") + "/v1/chat/completions";
-  const body = JSON.stringify({ model: settings.model, messages, stream: true, temperature: settings.temperature, max_tokens: settings.max_tokens, frequency_penalty: 0.3, presence_penalty: 0.3, stream_options: { include_usage: true } });
+  const body = JSON.stringify({ model: settings.model, messages, stream: true, temperature: settings.temperature, max_tokens: settings.max_tokens, stream_options: { include_usage: true } });
   let lastErr = null;
   for (let attempt = 1; attempt <= 3; attempt++) {
     const controller = new AbortController();
@@ -988,11 +996,23 @@ const AGENT_TOOLS = [
 /* 自我内省/愿望工具已迁移为插件 evolution */
 ];
 /* 自我内省文本构建已迁移到插件 evolution */
-async function agentToolCall(messages, settings, tools, think) {
+async function agentToolCall(messages, settings, tools, think, tier) {
   const endpoint = settings.base_url.replace(/\/+$/, "") + "/v1/chat/completions";
-  // 闲聊关思考（省钱快），复杂判断开思考（想清楚再答）
-  const thinkFlag = think ? { type: "enabled" } : { type: "disabled" };
-  const body = JSON.stringify({ model: settings.model, messages, tools, stream: false, max_tokens: settings.max_tokens, temperature: settings.temperature, frequency_penalty: 0.3, presence_penalty: 0.3, thinking: thinkFlag });
+  // 思考开关：闲聊关（省钱快），复杂判断开（想清楚再答）；预算降级最后一档强制关
+  const _tier = tier || "full";
+  const _thinkOn = think && _tier !== "minimal";
+  const thinkFlag = _thinkOn ? { type: "enabled" } : { type: "disabled" };
+  // P1-a：复杂消息路由到推理模型（pro），闲聊仍走快模型；P2-c：预算档位决定思考深度
+  const _usePro = _thinkOn && (_tier === "full" || _tier === "low");
+  const _body = {
+    model: _usePro ? (settings.reasoner_model || "deepseek-v4-pro") : settings.model,
+    messages, tools, stream: false,
+    max_tokens: _tier === "minimal" ? 200 : (_usePro ? 4096 : settings.max_tokens),
+    thinking: thinkFlag,
+  };
+  if (_usePro) _body.reasoning_effort = (_tier === "full") ? "high" : "low";
+  else if (!_thinkOn) _body.temperature = settings.temperature;
+  const body = JSON.stringify(_body);
   let lastErr = null;
   for (let attempt = 1; attempt <= 3; attempt++) {
     const controller = new AbortController();
@@ -1123,6 +1143,11 @@ try {
   } catch (e) {}
   if (userId != null) _dyn.push(favorPrompt(userId));
   if (taskCtx) _dyn.push(taskCtx);
+  /* P1-a/P2-b：复杂消息走推理模型时，加隐藏式内心戏 + 回答前逻辑自检（只对开思考的消息注入） */
+  if (_think) {
+    _dyn.push("【回答前】内心先按「理解问题→检索相关记忆→组织语言」三步想清楚，再把结论用口语说出来；思考过程不要说给主人听。");
+    _dyn.push("【回答前自查】有没有答非所问、张冠李戴、把猜测说成事实？有就先修正再回答。");
+  }
 
   if (_dyn.length) messages.push({ role: "system", content: "【实时上下文】\n" + _dyn.join("\n") });
   messages.push({ role: "user", content: userText });
@@ -1130,6 +1155,7 @@ try {
   const stickers = [];
   const _usedTools = [];   // 本轮真正执行成功的工具名（输出后审计要用：说了什么 vs 真做了什么）
   const budgetOut = isBudgetExhausted();
+  const _tier = budgetTier();   // P2-c：预算越紧推理越省（full/low/flash/minimal）
   // 预算耗尽时：只封禁花钱/高风险工具，保留本地只读工具（查账单/记忆/待办/体检等不花钱）
   const CHEAP_TOOLS = new Set(["send_sticker", "budget_view", "memory_view", "list_todo", "birthday_view", "goals_view", "check_balance"]);
   let _toolDefs = host ? (budgetOut ? host.allToolDefs().filter((t) => CHEAP_TOOLS.has(t.function.name)) : host.allToolDefs()) : (budgetOut ? AGENT_TOOLS.filter((t) => t.function.name === "send_sticker") : AGENT_TOOLS);
@@ -1138,7 +1164,7 @@ try {
   const tools = _toolDefs;
   for (let step = 0; step < 6; step++) {
     const _stepT0 = Date.now();
-    const data = await agentToolCall(messages, settings, tools, _think);
+    const data = await agentToolCall(messages, settings, tools, _think, _tier);
     const msg = (data.choices && data.choices[0] && data.choices[0].message) || {};
     if (_extraInfo && _extraInfo.petMode) log("info", `联脑步骤${step + 1}: ${Date.now() - _stepT0}ms，工具${msg.tool_calls ? msg.tool_calls.length : 0}个，消息${messages.length}条`);
     if (msg.tool_calls && msg.tool_calls.length) {
@@ -2087,7 +2113,10 @@ async function multiAgentReply(userText, settings, persona, call, memories, shor
     if (taskCtx) msgs.push({ role: "system", content: taskCtx });
     msgs.push({ role: "user", content: String(userText).slice(0, 400) });
     try {
-      const v = await completeOnce(msgs, settings, 200, 0.8);
+      // P1-c：「理性务实」视角用推理模型（pro），「感性温柔」仍用快模型
+      const v = (p === "理性务实")
+        ? await reasonComplete(msgs, settings, 300, { noThink: true })
+        : await completeOnce(msgs, settings, 200, 0.8);
       const t = String(v || "").trim();
       if (t) views.push({ p, t: t.slice(0, 150) });
     } catch (e) {}

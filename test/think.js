@@ -42,5 +42,25 @@ check(think("x".repeat(80), false) === true, "长文本（≥60字）→ 思考"
 check(think("看图", true) === true, "带图片 → 思考");
 check(think("嗯", true) === true, "哪怕带图短句也思考");
 
+/* P2-c：budgetTier 四档（从源码提取真实函数，stub loadBudget/budgetCfg） */
+const tierSrc = extractFunc(src, "budgetTier");
+const levelSrc = extractFunc(src, "budgetLevel");
+if (tierSrc && levelSrc) {
+  function tierAt(spent, daily) {
+    const c = {};
+    vm.createContext(c);
+    vm.runInContext(`loadBudget = () => ({ spent_cny: ${spent} }); budgetCfg = () => ({ daily_cny: ${daily} });`, c);
+    vm.runInContext(levelSrc + "\n" + tierSrc, c);
+    return vm.runInContext("budgetTier()", c);
+  }
+  check(tierAt(1, 10) === "full", "budgetTier 余量90% → full");
+  check(tierAt(6, 10) === "low", "budgetTier 余量40% → low");
+  check(tierAt(8.5, 10) === "flash", "budgetTier 余量15% → flash");
+  check(tierAt(9.5, 10) === "minimal", "budgetTier 余量5% → minimal");
+  check(tierAt(10, 10) === "minimal", "budgetTier 花光 → minimal");
+} else {
+  check(false, "没找到 budgetTier/budgetLevel");
+}
+
 console.log(`\n通过 ${passed} / 失败 ${failed}`);
 process.exit(failed ? 1 : 0);
