@@ -1,6 +1,6 @@
 # Momo 架构说明
 
-> 版本：v1.91.1 · 更新：2026-11-13
+> 版本：v1.92.1 · 更新：2026-11-13
 > 路径：`E:\Learn\Momo\`
 > 这份文档必须和代码同步。改了架构就改这里，别让它比代码旧。
 
@@ -19,7 +19,7 @@
 
 ```
 QQ ──WS──> SnowLuma ──WS(3001)──> 桥接 index.js
-                                   ├─ 插件平台（42 个插件 / 71 个工具 / 26 个命令，以 check.js/运行日志为准）
+                                   ├─ 插件平台（42 个插件 / 72 个工具 / 27 个命令，以 check.js/运行日志为准）
                                    ├─ Agent 循环（最多 6 步 工具调用）
                                    ├─ 本地状态（data/ JSON + stickers.db）
                                    └─ DeepSeek API
@@ -47,7 +47,7 @@ E:\Learn\Momo\
 ├── self/                    # 自我进化层（identity / reflections / skills / journal / pref）
 ├── data/                    # 运行时数据（不进版本库）
 ├── stickers/                # 表情包文件 + stickers.db 语义库
-├── test/                    # 58 个测试文件，纯 node 断言
+├── test/                    # 59 个测试文件，纯 node 断言
 ├── docs/                    # 文档（本文件、development.md、changelog/、decisions/）
 ├── archive/                 # 历史补丁脚本与旧文档
 ├── supervise.ps1            # 守护进程（崩溃自动重启）

@@ -139,7 +139,7 @@ const { STYLE_DIRECTIVE, GROUP_DIRECTIVE, SITUATION_QQ, SITUATION_DESKTOP, situa
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.91.1";
+const BASE_VERSION = "1.92.1";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -183,10 +183,14 @@ function evolIdentityText(userId, limit) {
   if (claims.length) parts.push("【我记得自己说过、但没证实过的（可能是我当时随口吹的，别当成事实）】\n" + claims.join("\n"));
   return parts.join("\n");
 }
-/* 自我反思产出的经验（取最近几条注入人格，之前只写盘不生效） */
-function evolReflectionText() {
+/* 自我反思产出的经验（按人过滤后取最近几条注入人格，之前只写盘不生效） */
+function evolReflectionText(userId) {
   const items = (evolve && Array.isArray(evolve.reflections)) ? evolve.reflections : [];
-  return items.slice(-4).map((r) => (typeof r === "string" ? r : (r && r.text) || "")).filter(Boolean).join("\n");
+  /* P1-d：反思按人过滤——from=0（通用/旧数据）或 from=当前用户 才注入；别人的经验不串味 */
+  return items.filter((r) => {
+    const from = (typeof r === "string") ? 0 : (Number(r && r.from) || 0);
+    return from === 0 || from === Number(userId);
+  }).slice(-4).map((r) => (typeof r === "string" ? r : (r && r.text) || "")).filter(Boolean).join("\n");
 }
 
 /* ---------------- 生活费预算（默认 1 元/天；deepseek-flash 官方价：输入未命中 $0.15/M、命中 $0.003/M、输出 $0.6/M，高峰 ×2） ---------------- */
@@ -735,13 +739,13 @@ function isMaster(userId) {
 }
 /* 能力鉴权（阶段 3）：没登记的工具/命令默认只给管理员 */
 const capsTable = require("./caps");
-function canDo(userId, cap) {
-  try { const a = host && host.apis.get("roles"); if (a) return !!a.can(userId, cap); } catch (e) {}
+function canDo(userId, cap, channel) {
+  try { const a = host && host.apis.get("roles"); if (a) return !!a.can(userId, cap, channel ? { channel } : undefined); } catch (e) {}
   return isMaster(userId);
 }
-function toolAllowed(userId, name) {
+function toolAllowed(userId, name, channel) {
   const cap = capsTable.toolCap(name);
-  return cap ? canDo(userId, cap) : isMaster(userId);
+  return cap ? canDo(userId, cap, channel) : isMaster(userId);
 }
 function cmdAllowed(userId, key) {
   const cap = capsTable.cmdCap(key);
@@ -781,6 +785,8 @@ function resolveCall(userId) {
       const p = a.person(userId);
       if (p.role === "admin") return "主人";
       if (p.appellation) return p.appellation;
+      /* P1-b：回退画像昵称（profile.nickname），多朋友不再全叫「朋友」 */
+      if (p.name && String(p.name) !== String(p.uid)) return String(p.name).slice(0, 20);
       return p.role === "user" ? "朋友" : "陌生人";
     }
   } catch (e) {}
@@ -798,11 +804,13 @@ function userPersona(userId, settings) {
   const _isM = isMaster(userId);
   const _allowed = ((cfg.qq && cfg.qq.allowed_users) || []).map(Number);
   const _isFriend = !_isM && _allowed.indexOf(Number(userId)) >= 0;
+  /* P1-c：非主人对话都带上「主人只有一个人」的边界，防止把对主人的口吻/私事带到别人身上 */
+  const _masterBoundary = "现在跟你说话的不是主人。主人只有一个人（QQ 100000001），别把对主人的亲昵、主人的习惯、主人的私事用到别人身上。";
   const identity = _isM
     ? "【对方身份】对方就是你的主人，你最亲的人。"
     : _isFriend
-      ? "【对方身份】对方不是主人，是主人认识的朋友。对他亲切有礼，但保持朋友的分寸，别越界装亲密，也别透露主人的私事。"
-      : "【对方身份】对方是陌生人。客气但不热络，不要透露主人的私事。";
+      ? `【对方身份】对方不是主人，是主人认识的朋友${call && call !== "朋友" ? `（我们叫他：${call}）` : ""}。对他亲切有礼，但保持朋友的分寸，别越界装亲密，也别透露主人的私事。${_masterBoundary}`
+      : `【对方身份】对方是陌生人。客气但不热络，不要透露主人的私事。${_masterBoundary}`;
   const rule = _isM
     ? `【称呼】你称呼对方为「主人」，语气亲昵。`
     : `【称呼】对方不是你的主人，称呼他「${call}」或「你」，语气自然友好。\n【权限认知】找文件、截图、开软件、代发QQ等电脑/QQ操作只有主人能用；对方要求这类事时自然婉拒（如「这个只有我主人能用哦～」），不要答应、也不要假装做过了。`;
@@ -810,7 +818,7 @@ function userPersona(userId, settings) {
   let _mdText = null;
   try { const _md = host && host.apis.get("memoryDigest"); _mdText = _md ? _md.digestText(userId) : null; } catch (e) {}
   const growth = _mdText ? null : evolIdentityText(userId);
-  const lessons = _mdText ? null : evolReflectionText();
+  const lessons = _mdText ? null : evolReflectionText(userId);
   /* 双轨注入：消化摘要（长期认识）+ 最近 8 条原文（近期鲜活细节） */
   const recentDetail = _mdText ? evolIdentityText(userId, 8) : "";
   return [settings.persona, rule, identity,
@@ -1172,7 +1180,7 @@ try {
       messages.push({ role: "assistant", content: msg.content || "", tool_calls: msg.tool_calls });
       for (const tc of msg.tool_calls) {
         let result = "（工具执行失败）";
-        if (!toolAllowed(userId, tc.function.name)) {
+        if (!toolAllowed(userId, tc.function.name, _extraInfo && _extraInfo.groupId ? "group" : undefined)) {
           result = "（这个功能只有主人能用哦～你自然婉拒对方，别答应也别假装做了）";
           messages.push({ role: "tool", tool_call_id: tc.id, content: result });
           continue;
@@ -1299,9 +1307,8 @@ async function proactiveAgentTurn(userId, intentDesc) {
     const shortMemories = pruneShortMemories(userId);
     const call = resolveCall(userId);
     const persona = userPersona(userId, settings);
-    const _pApi = host && host.apis.get("dailyPlan");
-    const _pCtx = _pApi ? _pApi.planCtx() : "";
-    const intro = `（系统提示，这不是${call}说的话，是你自己此刻想主动找${call}说话）意图：${intentDesc}。${_pCtx ? "你现在的生活：" + _pCtx + "。" : ""}直接说，不要任何解释、不要括号动作。`;
+    /* P1-f：dailyPlan 命名空间无任何插件注册（死引用，_pCtx 恒空），删掉 */
+    const intro = `（系统提示，这不是${call}说的话，是你自己此刻想主动找${call}说话）意图：${intentDesc}。直接说，不要任何解释、不要括号动作。`;
     const raw = await agentChatOnce(history, intro, settings, memories, persona, call, userId, "", shortMemories);
     const reply = String((raw && raw.reply) || "").trim();
     if (!reply) return null;
@@ -2818,10 +2825,12 @@ async function maybeProactiveGroupSpeak(groupId, text, settings) {
 const pendingGroup = new Map();
 const GROUP_DEBOUNCE_MS = 3000;
 const GROUP_MAX_WAIT_MS = 8000;
-function enqueueGroupChat(groupId, userId, text, images, msgTime, direct) {
+function enqueueGroupChat(groupId, userId, text, images, msgTime, direct, senderName) {
   const key = "g" + groupId + "_" + userId;
   let p = pendingGroup.get(key);
   if (!p) { p = { texts: [], images: [], firstTs: Date.now(), timer: null, groupId, userId, msgTime, direct: false }; pendingGroup.set(key, p); }
+  /* P1-e：记住发言人名字（防抖合并期间取第一个有名字的） */
+  if (senderName) p.senderName = p.senderName || senderName;
   if (msgTime) p.msgTime = msgTime;
   if (direct) p.direct = true;   // 这批里只要有一条是直接叫她的，就算直接对话
   if (text) p.texts.push(text);
@@ -2842,21 +2851,28 @@ function fireGroupChat(key) {
   const combined = texts.length > 1
     ? texts.map((t, i) => `${i + 1}. ${t}`).join("\n") + "\n（以上是对方连续发的几条消息，请当作同一段话一起回应）"
     : (texts[0] || "");
-  processGroupChat(p.groupId, p.userId, combined, p.images, p.msgTime, p.direct);
+  processGroupChat(p.groupId, p.userId, combined, p.images, p.msgTime, p.direct, p.senderName || "");
 }
-async function processGroupChat(groupId, userId, text, images, msgTime, direct) {
-  if (busyUsers.has(userId)) { enqueueGroupChat(groupId, userId, text, images, msgTime, direct); return; }
+async function processGroupChat(groupId, userId, text, images, msgTime, direct, senderName) {
+  if (busyUsers.has(userId)) { enqueueGroupChat(groupId, userId, text, images, msgTime, direct, senderName); return; }
   busyUsers.add(userId);
   try {
     
     const settings = resolveChatSettings();
     const history = loadSession("g" + groupId + "_" + userId);
+    /* P1-e：群聊历史带发言人——user 消息存 name，注入时加「XX说：」前缀（只改注入副本，落盘仍是原文） */
+    const _sn = String(senderName || "").slice(0, 20);
+    const _histForChat = history.map((m) => {
+      if (m && m.role === "user" && m.name) return Object.assign({}, m, { content: String(m.name).slice(0, 20) + "说：" + m.content });
+      return m;
+    });
     if (images && images.length) {
-      if (!canDo(userId, "vision")) {
+      if (!canDo(userId, "vision", "group")) {
         text = text ? text + "\n【图片内容】（对方发了图片，但看图的权限只有主人有）" : "[对方发了一张图片]";
       } else {
         const descs = [];
         for (const img of images.slice(0, 3)) {
+          /* 群聊收图 */
           let _known = null;
           try {
             const _stk = host && host.apis.get("stickers");
@@ -2894,11 +2910,13 @@ async function processGroupChat(groupId, userId, text, images, msgTime, direct) 
     const gCtx = [GROUP_DIRECTIVE, gInfoCtx, timeCtx, gMemberCtx, gLogCtx, gMemeCtx, _gLifeCtx, _gWeatherCtx, _gTeachCtx, "注意：有些事是对方在私聊里告诉你的，别在群里随便说。"].filter(Boolean).join("\n") || undefined;
     const gSettings = Object.assign({}, settings, { max_tokens: Math.min(settings.max_tokens || 2048, 250) });
     setActivity("在群里陪" + gCall + "聊天");
-    const gRes = await agentChatOnce(history, text, gSettings, gMemories, gPersona, gCall, userId, gCtx, gShort, gKey, { groupId, messageId: GROUP_LAST_MSGID.get(Number(groupId) + "_" + Number(userId)) });
+    const gRes = await agentChatOnce(_histForChat, text, gSettings, gMemories, gPersona, gCall, userId, gCtx, gShort, gKey, { groupId, messageId: GROUP_LAST_MSGID.get(Number(groupId) + "_" + Number(userId)) });
     const rawReply = gRes && gRes.reply;
     const reply = stripStageDirections(rawReply) || rawReply;
     if (reply) {
-      history.push({ role: "user", content: text, ts: Date.now() }, { role: "assistant", content: reply, ts: Date.now() });
+      const _uMsg = { role: "user", content: text, ts: Date.now() };
+      if (_sn) _uMsg.name = _sn;
+      history.push(_uMsg, { role: "assistant", content: reply, ts: Date.now() });
       await maybeRollSummary(gKey, history, settings);
       saveSession("g" + groupId + "_" + userId, trimHistory(history, settings.history_limit, settings.history_chars));
       const qq = cfg.qq || {};
@@ -3027,7 +3045,7 @@ async function handleGroupMessage(event) {
   /* 自动学群梗：「X 的意思是 Y」这类说法 */
   try { host.apis.get("groupInfo").detectGroupMeme(event.group_id, text, userId); } catch (e) {}
   host.apis.get("groupInfo").recordGroupLog(event.group_id, userId, _sn, text);
-  enqueueGroupChat(Number(event.group_id), userId, text, parsed.images, Number(event.time) || 0, !!(atSelf || mentioned));
+  enqueueGroupChat(Number(event.group_id), userId, text, parsed.images, Number(event.time) || 0, !!(atSelf || mentioned), _sn);
   if (event.message_id) GROUP_LAST_MSGID.set(Number(event.group_id) + "_" + userId, String(event.message_id));
 }
 

@@ -7,8 +7,10 @@ function recentQqChat(userId) {
   try {
     const msgs = _ctx.loadSession(userId);
     const cutoff = Date.now() - 4 * 3600e3;
+    /* P1-a：不再把对方一律标「主人」——按 resolveCall（主人/朋友昵称）标注 */
+    const call = (_ctx.resolveCall ? _ctx.resolveCall(userId) : null) || "对方";
     const parts = msgs.slice(-8).filter((m) => m.ts && m.ts >= cutoff).slice(-4)
-      .map((m) => `${m.role === "user" ? "主人" : "我"}：${String(m.content).slice(0, 30)}`);
+      .map((m) => `${m.role === "user" ? call : "我"}：${String(m.content).slice(0, 30)}`);
     return parts.length ? parts.join("；") : "";
   } catch (e) { return ""; }
 }
@@ -87,19 +89,21 @@ function proactiveLoop() {
             kind = "silence";
           }
         }
+        /* P1-a：意图文案按人称呼（主人还是主人；朋友用昵称，不再写死「主人」） */
+        const _call = (_ctx.resolveCall ? _ctx.resolveCall(u) : null) || "主人";
         const _intents = {
-          morning: "给主人发一条早安问候，可爱一点，可顺带提一句今天的日期或一句俏皮话",
-          night: "夜深了，给主人发一条晚安问候，温柔提醒早点休息",
-          schedule: `你刚做完「${planEvent ? planEvent.act : ""}」，自然地跟主人提一句（像随口分享，不要像汇报）`,
-          followup: `你之前问过主人「${followQ || ""}」。如果有真实的话头就自然提一下；如果没有，就正常打个招呼，不要编造新话题或假经历。`,
-          silence: `主人已经约 ${minutes} 分钟没和你说话了，自然搭话（问候、分享一个可爱的小想法、或问一个轻松的小问题）`,
+          morning: `给${_call}发一条早安问候，可爱一点，可顺带提一句今天的日期或一句俏皮话`,
+          night: `夜深了，给${_call}发一条晚安问候，温柔提醒早点休息`,
+          schedule: `你刚做完「${planEvent ? planEvent.act : ""}」，自然地跟${_call}提一句（像随口分享，不要像汇报）`,
+          followup: `你之前问过${_call}「${followQ || ""}」。如果有真实的话头就自然提一下；如果没有，就正常打个招呼，不要编造新话题或假经历。`,
+          silence: `${_call}已经约 ${minutes} 分钟没和你说话了，自然搭话（问候、分享一个可爱的小想法、或问一个轻松的小问题）`,
         };
         // ③ 日程/未完话头候选 → 先让大脑决定「该不该发」，再决定「说什么」
         if ((kind === "schedule" || kind === "followup") && P.shouldSendNow) {
           const _ok = await P.shouldSendNow(u, _intents[kind]);
           if (!_ok) { _ctx.log("info", `主动搭话[${kind}] 大脑决定不发`); return; }
         }
-        const text = await P.proactiveAgentTurn(u, _intents[kind] || "主动和主人说点什么（自然、像平时聊天）");
+        const text = await P.proactiveAgentTurn(u, _intents[kind] || `主动和${_call}说点什么（自然、像平时聊天）`);
         if (!text) return;
         const _fu2 = _ctx.getApi && _ctx.getApi("followup");
         if (_fu2) _fu2.recordOutbound(u, text);

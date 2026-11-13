@@ -30,6 +30,9 @@ const MATRIX = {
 /* 只作用于「本人」的能力：targetUid 不是自己时，只有 admin 能操作 */
 const SELF_SCOPED = new Set(["memory_self", "reminder_self"]);
 
+/* P2-b：群内收紧——USER 在群里只放行这几个能力，其余默认拒（admin 不受限） */
+const GROUP_USER_ALLOW = new Set(["chat", "vision", "sticker"]);
+
 function setting(key, def) {
   try { const v = _ctx.getSetting(key, def); return v === undefined ? def : v; } catch (e) { return def; }
 }
@@ -135,6 +138,9 @@ function can(uid, capability, opts) {
   if (role === ROLE.USER && cap === "group_proactive" && setting("perm.user.group_proactive", false) === true) allow = true;
   if (role === ROLE.VISITOR && cap !== "chat") allow = false;
   if (role === ROLE.VISITOR && cap === "chat" && !visitorsEnabled()) allow = false;
+  /* P2-b 群内收紧：USER 在群里只放行 chat/vision/sticker */
+  const channel = opts && opts.channel;
+  if (channel === "group" && role === ROLE.USER && !GROUP_USER_ALLOW.has(cap)) allow = false;
   /* 参数级：本人自助类，动别人需要 admin */
   const target = opts && opts.targetUid != null ? Number(opts.targetUid) : Number(uid);
   if (allow && SELF_SCOPED.has(cap) && target !== Number(uid) && role !== ROLE.ADMIN) allow = false;

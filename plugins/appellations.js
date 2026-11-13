@@ -1,12 +1,33 @@
-/* 插件：称呼（工具 set_appellation + 命令 /叫我 /称呼） */
+/* 插件：称呼（工具 set_appellation + 命令 /叫我 /称呼 /朋友） */
 let _ctx = null;
 function rec(e) { try { if (_ctx.recordAction) _ctx.recordAction(e); } catch (err) {} }
+
+/* P2-a：朋友清单（主人专属）——称呼/好感度/画像摘要，多朋友也可运维 */
+function friendListText() {
+  try {
+    const roles = _ctx.getApi("roles");
+    if (!roles || !roles.userIds || !roles.adminIds) return "（暂时查不到朋友清单）";
+    const admins = new Set((roles.adminIds() || []).map(Number));
+    const ids = (roles.userIds() || []).map(Number).filter((n) => n > 0 && !admins.has(n));
+    if (!ids.length) return "（你还没有添加朋友，只有你自己）";
+    const up = _ctx.getApi("userProfile");
+    const lines = ids.map((id, i) => {
+      const call = String(_ctx.resolveCall(id) || "朋友").slice(0, 20);
+      let favor = "";
+      try { const f = _ctx.getFavor(id); favor = f === undefined ? "" : `，好感 ${Math.round(f)}`; } catch (e) {}
+      let brief = "";
+      try { if (up && up.profileText) { const t = String(up.profileText(id) || "").replace(/\n+/g, " ").trim(); brief = t && t !== "（还没记下什么关于他的稳定信息）" ? `\n   画像：${t.slice(0, 60)}${t.length > 60 ? "…" : ""}` : ""; } } catch (e) {}
+      return `${i + 1}. ${call}（QQ ${id}${favor}）${brief}`;
+    });
+    return `你的朋友共 ${ids.length} 个：\n${lines.join("\n")}`;
+  } catch (e) { return "（朋友清单查询失败）"; }
+}
 
 module.exports = {
   name: "appellations",
   displayName: "称呼",
   description: "给自己和别人起称呼（/叫我、/称呼 命令）",
-  permissions: ["isMaster", "loadAppellations", "log", "recordAction", "resolveCall", "resolveTargetId", "saveAppellations", "sendPrivate"],
+  permissions: ["isMaster", "loadAppellations", "log", "recordAction", "resolveCall", "resolveTargetId", "saveAppellations", "sendPrivate", "getApi", "getFavor"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },
   tools: [{
@@ -50,6 +71,19 @@ module.exports = {
       rec({ action: "set_other_appellation", by: info.userId, target: tgt, detail: nm, ok: true });
       return `已把 ${tgt} 的称呼设为「${nm}」`;
     },
+  }, {
+    def: {
+      type: "function",
+      function: {
+        name: "friend_list",
+        description: "查看主人的朋友清单（称呼、好感度、画像摘要）。主人问「我有几个朋友」「朋友都有谁」「小🐟的画像」时调用。只有主人能看。",
+        parameters: { type: "object", properties: {}, required: [] },
+      },
+    },
+    handler(args, info) {
+      if (!_ctx.isMaster(info.userId)) return "（只有主人能看朋友清单）";
+      return friendListText();
+    },
   }],
   commands: [
     {
@@ -81,6 +115,15 @@ module.exports = {
         const apps = _ctx.loadAppellations(); apps[tgt] = nm; _ctx.saveAppellations(apps);
         _ctx.log("info", `设置称呼 target=${tgt}: ${nm}`);
         _ctx.sendPrivate(msg.userId, `已把 ${tgt} 的称呼设为「${nm}」。`);
+      },
+    },
+    {
+      key: "/朋友",
+      regex: /^\/朋友/,
+      handler(msg) {
+        if (!_ctx.isMaster(msg.userId)) { _ctx.sendPrivate(msg.userId, "这个只有主人能看哦～"); return; }
+        _ctx.sendPrivate(msg.userId, friendListText());
+        rec({ action: "friend_list", by: msg.userId, ok: true });
       },
     },
   ],
