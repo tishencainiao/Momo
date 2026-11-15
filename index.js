@@ -139,7 +139,7 @@ const { STYLE_DIRECTIVE, GROUP_DIRECTIVE, SITUATION_QQ, SITUATION_DESKTOP, situa
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.92.1";
+const BASE_VERSION = "1.93.0";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -193,7 +193,7 @@ function evolReflectionText(userId) {
   }).slice(-4).map((r) => (typeof r === "string" ? r : (r && r.text) || "")).filter(Boolean).join("\n");
 }
 
-/* ---------------- 生活费预算（默认 1 元/天；deepseek-flash 官方价：输入未命中 $0.15/M、命中 $0.003/M、输出 $0.6/M，高峰 ×2） ---------------- */
+/* ---------------- 生活费预算（默认 1 元/天；deepseek-flash 官方价：输入未命中 $0.15/M、命中 $0.003/M、输出 $0.6/M，高峰 ×2；v4-pro：$0.66/$0.022/$1.98，P1 真实账本） ---------------- */
 const BUDGET_FILE = path.join(DATA_DIR, "budget.json");
 const USD_CNY = 7.2;
 function budgetCfg() {
@@ -203,6 +203,9 @@ function budgetCfg() {
     input_miss_cny_per_m: (Number(b.input_miss_cny_per_m) || 0) > 0 ? Number(b.input_miss_cny_per_m) : 0.15 * USD_CNY,
     input_hit_cny_per_m: (Number(b.input_hit_cny_per_m) || 0) > 0 ? Number(b.input_hit_cny_per_m) : 0.003 * USD_CNY,
     output_cny_per_m: (Number(b.output_cny_per_m) || 0) > 0 ? Number(b.output_cny_per_m) : 0.6 * USD_CNY,
+    pro_input_miss_cny_per_m: (Number(b.pro_input_miss_cny_per_m) || 0) > 0 ? Number(b.pro_input_miss_cny_per_m) : 0.66 * USD_CNY,
+    pro_input_hit_cny_per_m: (Number(b.pro_input_hit_cny_per_m) || 0) > 0 ? Number(b.pro_input_hit_cny_per_m) : 0.022 * USD_CNY,
+    pro_output_cny_per_m: (Number(b.pro_output_cny_per_m) || 0) > 0 ? Number(b.pro_output_cny_per_m) : 1.98 * USD_CNY,
     peak_x2: b.peak_x2 !== false,
     search_cny: Number(b.search_cny) || 0.005,
   };
@@ -216,7 +219,7 @@ function isPeakHour() {
 }
 function loadBudget() {
   const today = new Date().toDateString();
-  const fresh = { date: today, spent_cny: 0, tokens_in: 0, tokens_out: 0, calls: {}, spend_by: {}, exhausted_notified: false };
+  const fresh = { date: today, spent_cny: 0, tokens_in: 0, tokens_hit: 0, tokens_out: 0, calls: {}, spend_by: {}, exhausted_notified: false };
   try {
     const b = JSON.parse(fs.readFileSync(BUDGET_FILE, "utf8"));
     if (b.date !== today) {
@@ -233,15 +236,16 @@ function loadBudget() {
   } catch (e) { return fresh; }
 }
 function saveBudget(b) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(BUDGET_FILE, JSON.stringify(b)); } catch (e) {} }
-function recordSpend(kind, inTok, outTok, hitTok, flatCny) {
+function recordSpend(kind, inTok, outTok, hitTok, flatCny, isPro) {
   const bc = budgetCfg();
   const mult = (bc.peak_x2 && isPeakHour()) ? 2 : 1;
   const b = loadBudget();
   b.tokens_in = (b.tokens_in || 0) + (inTok || 0);
+  b.tokens_hit = (b.tokens_hit || 0) + (hitTok || 0);
   b.tokens_out = (b.tokens_out || 0) + (outTok || 0);
   b.calls = b.calls || {};
   b.calls[kind] = (b.calls[kind] || 0) + 1;
-  const cost = ((inTok || 0) / 1e6) * bc.input_miss_cny_per_m * mult + ((hitTok || 0) / 1e6) * bc.input_hit_cny_per_m * mult + ((outTok || 0) / 1e6) * bc.output_cny_per_m * mult + (flatCny || 0);
+  const cost = ((inTok || 0) / 1e6) * (isPro ? bc.pro_input_miss_cny_per_m : bc.input_miss_cny_per_m) * mult + ((hitTok || 0) / 1e6) * (isPro ? bc.pro_input_hit_cny_per_m : bc.input_hit_cny_per_m) * mult + ((outTok || 0) / 1e6) * (isPro ? bc.pro_output_cny_per_m : bc.output_cny_per_m) * mult + (flatCny || 0);
   b.spent_cny = (b.spent_cny || 0) + cost;
   b.spend_by = b.spend_by || {};
   b.spend_by[kind] = (b.spend_by[kind] || 0) + cost;
@@ -309,10 +313,28 @@ function usageLine() {
   const bc = budgetCfg();
   const calls = b.calls || {};
   const detail = Object.entries(calls).map(([k, v]) => `${k} ${v} 次`).join("、") || "无";
-  const total = (b.tokens_in || 0) + (b.tokens_out || 0);
-  return `📊 今日 token 用量：输入 ${b.tokens_in || 0} / 输出 ${b.tokens_out || 0}（合计 ${total}）\n生活费：¥${(b.spent_cny || 0).toFixed(3)}/${bc.daily_cny}（${Math.round((b.spent_cny || 0) / bc.daily_cny * 100)}%）\n调用：${detail}`;
+  const missIn = b.tokens_in || 0;
+  const hitIn = b.tokens_hit || 0;
+  const hr = (hitIn + missIn) > 0 ? Math.round(hitIn / (hitIn + missIn) * 100) : 0;
+  const total = missIn + hitIn + (b.tokens_out || 0);
+  return `📊 今日 token 用量：输入 ${missIn}（缓存命中 ${hitIn}，命中率 ${hr}%）/ 输出 ${b.tokens_out || 0}（合计 ${total}）\n生活费：¥${(b.spent_cny || 0).toFixed(3)}/${bc.daily_cny}（${Math.round((b.spent_cny || 0) / bc.daily_cny * 100)}%）\n调用：${detail}`;
 }
 function estimateTokens(text) { return Math.ceil(String(text || "").length * 0.6); }
+/* P1：从 usage 精确拆「未命中/命中/输出」。字段齐就直接读；缺命中字段才用 prompt_tokens 扣减；全缺才整包估算。
+   旧写法 `miss || prompt_tokens` 会把「全命中（miss=0）」误记成整包未命中，账面命中率恒 0。 */
+function usageParts(u, messages, text) {
+  if (u) {
+    const hasMiss = typeof u.prompt_cache_miss_tokens === "number";
+    const hasHit = typeof u.prompt_cache_hit_tokens === "number";
+    const miss = hasMiss ? u.prompt_cache_miss_tokens
+      : hasHit ? Math.max(0, (u.prompt_tokens || 0) - u.prompt_cache_hit_tokens)
+      : (u.prompt_tokens || 0);
+    const hit = hasHit ? u.prompt_cache_hit_tokens : 0;
+    const out = typeof u.completion_tokens === "number" ? u.completion_tokens : estimateTokens(text);
+    return { miss, hit, out };
+  }
+  return { miss: estimateTokens(JSON.stringify(messages)), hit: 0, out: estimateTokens(text) };
+}
 
 function resolveApiKey(quiet) {
   if (apiKey) return true;
@@ -869,8 +891,8 @@ async function completeOnce(messages, settings, maxTokens, temperature, opts) {
       if (!resp.ok) { let d = ""; try { d = (await resp.text()).slice(0, 200); } catch (e) {} throw new Error(`DeepSeek HTTP ${resp.status}: ${d}`); }
       const data = await resp.json();
       const text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
-      const u = data.usage || null;
-      recordSpend("chat", u ? (u.prompt_cache_miss_tokens || (u.prompt_tokens || 0)) : estimateTokens(JSON.stringify(messages)), u ? (u.completion_tokens || 0) : estimateTokens(text), u ? (u.prompt_cache_hit_tokens || 0) : 0);
+      const _p = usageParts(data.usage || null, messages, text);
+      recordSpend("chat", _p.miss, _p.out, _p.hit);
       return text;
     } catch (e) { lastErr = e; if (attempt < 3) { await sleep(1500 * attempt); continue; } }
     finally { clearTimeout(timer); }
@@ -894,8 +916,8 @@ async function reasonComplete(messages, settings, maxTokens, opts) {
       const msg = (data.choices && data.choices[0] && data.choices[0].message) || {};
       const text = String(msg.content || "");
       if (!text) log("warn", "reasonComplete 返回空 content（推理模型可能把 token 全耗在思考上了，请增大 max_tokens 或改用 completeOnce）");
-      const u = data.usage || null;
-      recordSpend("reason", u ? (u.prompt_cache_miss_tokens || (u.prompt_tokens || 0)) : estimateTokens(JSON.stringify(messages)), u ? (u.completion_tokens || 0) : estimateTokens(text), u ? (u.prompt_cache_hit_tokens || 0) : 0);
+      const _p = usageParts(data.usage || null, messages, text);
+      recordSpend("reason", _p.miss, _p.out, _p.hit, 0, true);
       return text;
     } catch (e) { lastErr = e; if (attempt < 3) { await sleep(2000 * attempt); continue; } }
     finally { clearTimeout(timer); }
@@ -929,7 +951,8 @@ async function streamComplete(messages, settings) {
           try { const o = JSON.parse(data); if (o.usage) usage = o.usage; const d = o.choices && o.choices[0] && (o.choices[0].delta || {}); if (d.content) full += d.content; } catch (e) {}
         }
       }
-      recordSpend("chat", usage ? (usage.prompt_cache_miss_tokens || (usage.prompt_tokens || 0)) : estimateTokens(JSON.stringify(messages)), usage ? (usage.completion_tokens || 0) : estimateTokens(full), usage ? (usage.prompt_cache_hit_tokens || 0) : 0);
+      const _p = usageParts(usage, messages, full);
+      recordSpend("chat", _p.miss, _p.out, _p.hit);
       return full.trim();
     } catch (e) {
       lastErr = e;
@@ -1029,9 +1052,9 @@ async function agentToolCall(messages, settings, tools, think, tier) {
       const resp = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + apiKey }, body, signal: controller.signal });
       if (!resp.ok) { let d = ""; try { d = (await resp.text()).slice(0, 300); } catch (e) {} throw new Error(`DeepSeek HTTP ${resp.status}: ${d}`); }
       const data = await resp.json();
-      const u = data.usage || null;
       const text = String((data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "");
-      recordSpend("chat", u ? (u.prompt_cache_miss_tokens || (u.prompt_tokens || 0)) : estimateTokens(JSON.stringify(messages)), u ? (u.completion_tokens || 0) : estimateTokens(text), u ? (u.prompt_cache_hit_tokens || 0) : 0);
+      const _p = usageParts(data.usage || null, messages, text);
+      recordSpend("chat", _p.miss, _p.out, _p.hit, 0, _usePro);
       return data;
     } catch (e) { lastErr = e; if (attempt < 3) { await sleep(1500 * attempt); continue; } }
     finally { clearTimeout(timer); }
@@ -1053,7 +1076,7 @@ async function agentChatOnce(history, userText, settings, memories, persona, cal
   const _extraInfo = extraInfo || null;
   /* 摘要键：私聊=userId，群聊=会话键（避免把私聊摘要带进群） */
   const _sumKey = (summaryKey === undefined) ? userId : summaryKey;
-  /* ===== 稳定前缀（几乎不变，缓存命中靠它）===== */
+  /* ===== 稳定前缀（几乎不变，缓存命中靠它；P2：stickerPrompt/summaryCtx 移出前缀到动态尾部）===== */
   const messages = [{ role: "system", content: persona || settings.persona }];
   messages.push({ role: "system", content: STYLE_DIRECTIVE });
   messages.push({ role: "system", content: situationDirective(_extraInfo && _extraInfo.petMode ? "desktop" : "qq") });
@@ -1062,16 +1085,23 @@ async function agentChatOnce(history, userText, settings, memories, persona, cal
   const _capApi = host && host.apis.get("capability");
   const _capCtx = _capApi ? _capApi.capabilityCtx(userId) : "";
   if (_capCtx) messages.push({ role: "system", content: _capCtx });
-  const sp = stickerPrompt();
-  if (sp) messages.push({ role: "system", content: sp });
-  const _sum = _sumKey != null ? summaryCtx(_sumKey) : "";
-  if (_sum) messages.push({ role: "system", content: _sum });
 
-  /* ===== 历史（追加式，缓存友好）===== */
-  messages.push(...trimHistory(history, settings.history_limit, settings.history_chars));
+  /* ===== 历史（P2 摘要锚定：老对话压进缓变摘要，请求只带「摘要 + 最近 10 条」，滑窗变小缓存命中大增）===== */
+  const _lim = Math.max(10, Number(settings.history_limit) || 40);
+  const _hist = trimHistory(history, _lim, settings.history_chars);
+  const _sumTxt = _sumKey != null ? summaryCtx(_sumKey) : "";
+  if (_hist.length >= _lim && _sumTxt) {
+    messages.push({ role: "system", content: _sumTxt });
+    messages.push(..._hist.slice(-10));
+  } else {
+    messages.push(..._hist);
+  }
 
   /* ===== 动态块（全部放最后，避免打断前缀缓存）===== */
   const _dyn = [];
+  /* P2：表情包提示词移到动态尾部（它随表情库变化，放前缀会击穿缓存） */
+  const sp = stickerPrompt();
+  if (sp) _dyn.push(sp);
   /* 静默准备池：她之前攒着想说的话，挑合适的自然带出来 */
   const _pending = host.apis.get("mind").pendingNudgesText(3);
 /* 未解决的事：她之前没想明白的，聊天时可以自然而然想起来 */

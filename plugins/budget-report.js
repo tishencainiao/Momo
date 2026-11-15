@@ -29,12 +29,15 @@ function dailyBill(b) {
   const daily = Number((_ctx.config.budget && _ctx.config.budget.daily_cny) || 1);
   const pct = Math.round((b.spent_cny || 0) / daily * 100);
   const calls = Object.entries(b.calls || {}).map(([k, v]) => `${KIND_LABEL[k] || k} ${v}次`).join("、") || "无";
+  const hitIn = b.tokens_hit || 0;
+  const missIn = b.tokens_in || 0;
+  const hr = (hitIn + missIn) > 0 ? Math.round(hitIn / (hitIn + missIn) * 100) : 0;
   return [
     `📊 今日账单`,
     `生活费：¥${(b.spent_cny || 0).toFixed(3)} / ¥${daily}（${pct}%）`,
     `花费明细：${breakdownLine(b)}`,
     `调用：${calls}`,
-    `Token：入 ${b.tokens_in || 0} / 出 ${b.tokens_out || 0}`,
+    `Token：入 ${missIn}（缓存命中 ${hitIn}，命中率 ${hr}%）/ 出 ${b.tokens_out || 0}`,
   ].join("\n");
 }
 
