@@ -384,7 +384,7 @@ _ctx.recordAction({ action: "settings_set", by: info.userId, detail: `${k} = ${v
 │  自我内省5工具 + 愿望 + 反思/探索/评分调参       │
 │  + 技能规则 + 提案分级 + registry 元认知        │
 ├───────────────────────────────────────────────┤
-│ 功能层 plugins/*.js（46 个插件，以 check.js 为准）│
+│ 功能层 plugins/*.js（47 个插件，以 check.js 为准）│
 │  reminders birthdays goals appellations mute   │
 │  pc-tools stickers voice qzone memory emotion  │
 │  proactive                                    │

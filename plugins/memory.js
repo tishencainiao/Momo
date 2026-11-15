@@ -154,9 +154,9 @@ module.exports = {
   permissions: ["DATA_DIR", "apiKey", "completeOnce", "config", "loadMemories", "loadShortMemories", "log", "parseMemoryJson", "reasonComplete", "recordAction", "resolveCall", "saveMemories", "saveShortMemories", "sendPrivate", "settings"],
   version: "1.1.0",
   init(ctx) { _ctx = ctx; },
-  apiSpec: {"memory":{"dropAgentDeeds":{"input":"","output":"","sideEffect":""},"mergeMemories":{"input":"","output":"","sideEffect":""},"pruneMemories":{"input":"","output":"","sideEffect":""},"extractMemoriesBatch":{"input":"","output":"","sideEffect":""},"consolidateUserMemories":{"input":"","output":"","sideEffect":""}}},
+  apiSpec: {"memoryOps":{"dropAgentDeeds":{"input":"","output":"","sideEffect":""},"mergeMemories":{"input":"","output":"","sideEffect":""},"pruneMemories":{"input":"","output":"","sideEffect":""},"extractMemoriesBatch":{"input":"","output":"","sideEffect":""},"consolidateUserMemories":{"input":"","output":"","sideEffect":""}}},
 
-  api: { memory: { dropAgentDeeds, mergeMemories, pruneMemories, extractMemoriesBatch, consolidateUserMemories } },
+  api: { memoryOps: { dropAgentDeeds, mergeMemories, pruneMemories, extractMemoriesBatch, consolidateUserMemories } },
   tools: [
     {
       def: { type: "function", function: { name: "memory_view", description: "查看记住的关于某人的长期记忆。当对方说「你记得我什么」「看看你记得我啥」「我的记忆」时调用。", parameters: { type: "object", properties: {} } } },

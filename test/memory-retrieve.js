@@ -7,7 +7,7 @@ const path = require("path");
 const vm = require("vm");
 
 const ROOT = path.join(__dirname, "..");
-const src = fs.readFileSync(path.join(ROOT, "index.js"), "utf8");
+const src = fs.readFileSync(path.join(ROOT, "plugins", "memory-service.js"), "utf8"); // S5：真相在 memory-service
 
 let pass = 0, fail = 0;
 function check(name, cond, extra) {
@@ -44,7 +44,7 @@ if (levSrc) {
   check("lev 空串=长度", lev("", "咖啡") === 2, String(lev("", "咖啡")));
   check("lev 完全不同=长度", lev("咖啡", "牛奶") === 2, String(lev("咖啡", "牛奶")));
 } else {
-  check("能从 index.js 抽取 lev 函数", false, "extractFunc 返回 null");
+  check("能从 memory-service.js 抽取 lev 函数", false, "extractFunc 返回 null");
 }
 
 console.log(`\n${pass} 通过 / ${fail} 失败`);

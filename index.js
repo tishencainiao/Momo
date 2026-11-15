@@ -39,7 +39,7 @@ function loadActions(n) {
   } catch (e) { return []; }
 }
 const SESS_DIR = path.join(DATA_DIR, "sessions");
-const MEM_DIR = path.join(DATA_DIR, "memory");
+
 const LOCK_FILE = path.join(__dirname, "bridge.lock");
 
 // 单实例保护
@@ -139,7 +139,7 @@ const { STYLE_DIRECTIVE, GROUP_DIRECTIVE, SITUATION_QQ, SITUATION_DESKTOP, situa
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.97.1";
+const BASE_VERSION = "1.98.0";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -326,60 +326,17 @@ function trimHistory(messages, lim, chars) {
 }
 
 /* ---------------- 长期记忆库（按 QQ 号隔离；主人记忆已于 2026-11-08 迁入本库，不再与旧桌宠互通） ---------------- */
-function memPath(userId) { return path.join(MEM_DIR, String(userId) + ".json"); }
-function loadMemories(userId) {
-  try { const d = JSON.parse(fs.readFileSync(memPath(userId), "utf8")); if (Array.isArray(d.items)) return d.items.filter((i) => i && i.content); } catch (e) {}
-  return [];
-}
-/* 按「重要度/提及次数」降序取前 n 条（稳定排序，同分保持新近在前） */
-function topMemories(items, n) {
-  if (!items || !items.length) return [];
-  const ranked = items.slice().sort((a, b) => (b.importance || b.hits || 1) - (a.importance || a.hits || 1));
-  return ranked.slice(0, n);
-}
-function saveMemories(userId, items) {
-  try {
-    fs.mkdirSync(MEM_DIR, { recursive: true });
-    /* 访客记忆封顶（阶段 4）：只保留最近 N 条，防陌生人刷存储 */
-    let outItems = items || [];
-    /* 记忆条目带 from（阶段 4）：标明属于谁，方便以后消化/审计 */
-    outItems = outItems.map((it) => Object.assign({}, it, { from: Number(it.from) || Number(userId) || 0 }));
-    try {
-      const _ra = host && host.apis.get("roles");
-      if (_ra && _ra.resolveRole(userId) === "visitor") {
-        const cap = Math.max(0, Number(_ra.rateCfg().memoryCap) || 200);
-        if (outItems.length > cap) outItems = outItems.slice(outItems.length - cap);
-      }
-    } catch (e) {}
-    fs.writeFileSync(memPath(userId), JSON.stringify({ updated: Date.now(), items: outItems }));
-  } catch (e) {}
-}
-function memoryPrompt(items, call) {
-  const c = call || "主人";
-  // 主人亲自教的排到后面，确保不被 20 条上限挤掉
-  const ordered = items.slice().sort((a, b) => (a.source === "taught" ? 1 : 0) - (b.source === "taught" ? 1 : 0));
-  const lines = ordered.slice(-20).map((m) => {
-    let tsMs = 0;
-    if (m.time) { try { tsMs = new Date(m.time).getTime(); } catch (e) {} }
-    else if (m.created) tsMs = Number(m.created) * 1000;
-    else if (m.created_at) { try { tsMs = new Date(m.created_at).getTime(); } catch (e) {} }
-    const ago = tsMs ? `（${formatGap(Date.now() - tsMs)}前）` : "";
-    const tag = m.source === "taught" ? "【主人亲自教的】" : "";
-    return "- " + tag + String(m.content).slice(0, 200) + ago;
-  });
-  const hasTaught = ordered.some((m) => m.source === "taught");
-  return `【你关于${c}的长期记忆】\n` + lines.join("\n")
-    + `\n\n` + (hasTaught ? `【主人亲自教的】标记的那几条是主人明确教你的，优先级最高，不要反驳、不要改写成别的意思。` : "")
-    + `其余记忆请自然使用（${c}提到相关话题时主动想起），不要生硬地逐条复述。`;
-}
-function memoryIndexPrompt(items, call) {
-  const c = call || "主人";
-  const MAX_IDX = 60;
-  const shown = items.slice(-MAX_IDX);
-  const lines = shown.map((m, i) => `${i + 1}. ${String(m.content).slice(0, 16)}`);
-  const more = items.length > MAX_IDX ? `（还有 ${items.length - MAX_IDX} 条更早的）` : "";
-  return `【你记得关于${c}的全部事（摘要索引，共 ${items.length} 条）】\n${lines.join("  ")}${more}`;
-}
+/* 记忆存取/检索/注入配方（S5：唯一真相已迁 plugins/memory-service.js，此处薄转发，绞杀者模式） */
+function _memApi() { try { return (host && host.apis && host.apis.get("memory")) || null; } catch (e) { return null; } }
+function memPath(userId) { const t = _memApi(); return t ? t.memPath(userId) : null; }
+function loadMemories(userId) { const t = _memApi(); return t ? t.loadMemories(userId) : []; }
+function topMemories(items, n) { const t = _memApi(); return t ? t.topMemories(items, n) : (items || []).slice(0, n); }
+function saveMemories(userId, items) { const t = _memApi(); if (t) t.saveMemories(userId, items); }
+function memoryPrompt(items, call) { const t = _memApi(); return t ? t.memoryPrompt(items, call) : ""; }
+function memoryIndexPrompt(items, call) { const t = _memApi(); return t ? t.memoryIndexPrompt(items, call) : ""; }
+function shortMemoryPrompt(items, call) { const t = _memApi(); return t ? t.shortMemoryPrompt(items, call) : ""; }
+function parseMemoryJson(raw) { const t = _memApi(); return t ? t.parseMemoryJson(raw) : []; }
+
 function coreContextMessages(userId, opts) {
   const o = opts || {};
   // 注意：时间这类高频变化的内容放最后，避免打断 prompt 前缀缓存
@@ -406,63 +363,10 @@ function shortMemoryPrompt(items, call) {
   const lines = items.slice(-10).map((m) => "- " + (m.channel === "group" ? "(群里) " : "") + String(m.content).slice(0, 120));
   return `【你最近了解到的关于${c}的事（短期记忆）】\n` + lines.join("\n");
 }
-/* 常见生活主题的同义词扩展，提高记忆检索命中率 */
-const SYNONYM_MAP = {
-  "游戏": ["游戏", "打游戏", "开黑", "王者", "原神", "玩"],
-  "睡觉": ["睡", "睡觉", "晚安", "困", "休息", "熬夜"],
-  "吃饭": ["吃", "饭", "外卖", "饿", "干饭"],
-  "工作": ["工作", "上班", "加班", "忙"],
-  "学习": ["学习", "上课", "作业", "复习", "考试", "写代码"],
-  "心情": ["开心", "难过", "烦", "累", "emo", "委屈"],
-};
-function simpleKeywords(text) {
-  const t = String(text || "").toLowerCase();
-  const out = new Set();
-  const cn = t.replace(/[^\u4e00-\u9fa5]/g, "");
-  for (let i = 0; i + 1 < cn.length; i++) out.add(cn.slice(i, i + 2));   // 二字
-  for (let i = 0; i + 2 < cn.length; i++) out.add(cn.slice(i, i + 3));   // 三字
-  for (const w of t.match(/[a-z0-9]{2,}/g) || []) out.add(w);
-  for (const [k, words] of Object.entries(SYNONYM_MAP)) if (t.indexOf(k) >= 0) for (const w of words) out.add(w);
-  return Array.from(out).slice(0, 30);
-}
-function lev(a, b) {
-  if (a === b) return 0;
-  const m = a.length, n = b.length;
-  if (!m) return n; if (!n) return m;
-  let prev = new Array(n + 1), cur = new Array(n + 1);
-  for (let j = 0; j <= n; j++) prev[j] = j;
-  for (let i = 1; i <= m; i++) {
-    cur[0] = i;
-    for (let j = 1; j <= n; j++) {
-      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
-    }
-    [prev, cur] = [cur, prev];
-  }
-  return prev[n];
-}
-function retrieveMemories(memories, userText, limit) {
-  const qk = new Set(simpleKeywords(userText));
-  const scored = (memories || []).map((m) => {
-    const mk = new Set(simpleKeywords(String(m.content || "")));
-    let overlap = 0, fuzzy = 0;
-    for (const k of qk) {
-      if (mk.has(k)) { overlap++; continue; }
-      // 错别字容忍：编辑距离 ≤1（二字）/≤2（三字）算半匹配
-      const thresh = k.length <= 2 ? 1 : 2;
-      for (const w of mk) { const d = lev(k, w); if (d > 0 && d <= thresh) { fuzzy++; break; } }
-    }
-    let tsMs = 0;
-    if (m.time) { try { tsMs = new Date(m.time).getTime(); } catch (e) {} }
-    else if (m.created) tsMs = Number(m.created) * 1000;
-    else if (m.created_at) { try { tsMs = new Date(m.created_at).getTime(); } catch (e) {} }
-    const recency = tsMs ? Math.max(0, 1 - (Date.now() - tsMs) / (30 * 86400e3)) : 0.5;
-    const hits = m.hits ? Math.min(Number(m.hits), 10) / 10 : 0.5;
-    const score = overlap * 2 + fuzzy * 1 + hits * 0.5 + recency * 0.5;
-    return { m, score };
-  });
-  scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, limit || 8).map((s) => s.m);
-}
+function simpleKeywords(text) { const t = _memApi(); if (t) return t.simpleKeywords(text); const s = String(text || "").toLowerCase().replace(/[^\u4e00-\u9fa5a-z0-9]/g, ""); const out = new Set(); for (let i = 0; i + 1 < s.length; i++) out.add(s.slice(i, i + 2)); return Array.from(out).slice(0, 30); }
+function lev(a, b) { const t = _memApi(); if (t) return t.lev(a, b); return a === b ? 0 : Math.max(a.length, b.length); }
+function retrieveMemories(memories, userText, limit) { const t = _memApi(); return t ? t.retrieveMemories(memories, userText, limit) : (memories || []).slice(0, limit || 8); }
+
 /* memoryExtractPrompt 已迁移到插件 memory */
 function parseMemoryJson(raw) {
   try {
@@ -1900,25 +1804,10 @@ async function catchUpMissedMessages() {
 }
 
 /* ---------------- 短期记忆 + 记忆固化 + 消息时间戳 ---------------- */
-const SHORT_MEM_DIR = path.join(DATA_DIR, "short-memory");
-const SHORT_MEM_TTL_SEC = 7 * 86400;
-const MSG_TIMES_FILE = path.join(DATA_DIR, "msg-times.json");
-function shortMemFile(userId) { return path.join(SHORT_MEM_DIR, String(userId) + ".json"); }
-function loadShortMemories(userId) {
-  try { const d = JSON.parse(fs.readFileSync(shortMemFile(userId), "utf8")); if (Array.isArray(d.items)) return d.items.filter((i) => i && i.content); } catch (e) {}
-  return [];
-}
-function saveShortMemories(userId, items) {
-  try { fs.mkdirSync(SHORT_MEM_DIR, { recursive: true }); fs.writeFileSync(shortMemFile(userId), JSON.stringify({ updated: Date.now(), items })); }
-  catch (e) { log("warn", "短期记忆保存失败: " + e.message.slice(0, 160)); }
-}
-function pruneShortMemories(userId) {
-  const items = loadShortMemories(userId);
-  const nowSec = Date.now() / 1000;
-  const fresh = items.filter((m) => nowSec - (Number(m.created) || nowSec) < SHORT_MEM_TTL_SEC);
-  if (fresh.length !== items.length) saveShortMemories(userId, fresh);
-  return fresh;
-}
+function loadShortMemories(userId) { const t = _memApi(); return t ? t.loadShortMemories(userId) : []; }
+function saveShortMemories(userId, items) { const t = _memApi(); if (t) t.saveShortMemories(userId, items); }
+function pruneShortMemories(userId) { const t = _memApi(); return t ? t.pruneShortMemories(userId) : []; }
+
 function loadMsgTimes() { try { return JSON.parse(fs.readFileSync(MSG_TIMES_FILE, "utf8")); } catch (e) { return {}; } }
 function saveMsgTime(userId, ts) { const s = loadMsgTimes(); s[String(userId)] = ts; try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(MSG_TIMES_FILE, JSON.stringify(s)); } catch (e) {} }
 /* 记忆固化已迁移到插件 memory（timer 钩子） */

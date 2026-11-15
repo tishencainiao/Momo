@@ -5,6 +5,7 @@ const path = require("path");
 
 const ROOT = path.join(__dirname, "..");
 const src = fs.readFileSync(path.join(ROOT, "index.js"), "utf8");
+const memSrc = fs.readFileSync(path.join(ROOT, "plugins", "memory-service.js"), "utf8"); // S5：记忆真相在 memory-service
 const promptsSrc = fs.readFileSync(path.join(ROOT, "prompts.js"), "utf8");
 
 let pass = 0, fail = 0;
@@ -49,7 +50,7 @@ check("刚启动时提醒别假装记得", src.includes("别假装记得"));
 check("SELF_AWARENESS 被推入 messages", src.includes("content: SELF_AWARENESS"));
 
 // 6. 记忆带时间（A 的基础）
-check("长期记忆带『多久以前』", src.includes("formatGap(Date.now() - tsMs)"));
+check("长期记忆带『多久以前』", memSrc.includes("_ctx.formatGap(Date.now() - tsMs)"));
 
 console.log(`\n通过 ${pass} / 失败 ${fail}`);
 process.exit(fail ? 1 : 0);
