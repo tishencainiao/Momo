@@ -133,9 +133,7 @@ function todayKey(d = new Date()) {
   return mm + "-" + dd;
 }
 
-function hourNow() {
-  return new Date().getHours();
-}
+function hourNow() { const T = (_ctx.getApi && _ctx.getApi("time")) || null; return T ? T.hourNow() : -1; }
 
 /* 给别的插件用的「让身体播报」入口（提醒、晚report 之类都可以调） */
 async function announce(text, opts) {
@@ -396,6 +394,7 @@ module.exports = {
   displayName: "身体联动",
   description: "让大脑指挥桌面上的身体（HTTP 127.0.0.1:4010）",
   userScoped: true,
+  requires: ["time"],
   permissions: ["addBoredom", "addMood", "budgetLevel", "describeImageFile", "getApi", "getBoredom", "getEmotion", "getMood", "getSetting", "isMaster", "log", "recordAction", "sendPrivate", "setSetting"],
   version: "1.0.0",
   init(ctx) {

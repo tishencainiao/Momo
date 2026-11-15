@@ -96,7 +96,8 @@ async function selfQzonePost(settings) {
 async function qzoneDailyPost() {
   const st = loadQzoneState();
   if (st.last_self === _ctx.dayStr(0)) return;
-  const h = new Date().getHours();
+  const _t = (_ctx.getApi && _ctx.getApi("time")) || null;
+  const h = _t ? _t.hourNow() : -1;
   const hs = cfgNum("qzone.post_hour_start", 8);
   const he = cfgNum("qzone.post_hour_end", 22);
   if (h < hs || h > he) return;                        // 不在发布时段
@@ -304,6 +305,7 @@ module.exports = {
   displayName: "QQ 空间",
   description: "发说说 / 看动态 / 评论",
   userScoped: true,
+  requires: ["time"],
   permissions: ["DATA_DIR", "completeOnce", "config", "dayStr", "getApi", "getSetting", "isMaster", "log", "qzoneHttp", "recordAction", "sendPrivate", "settings", "todayText"],
   version: "1.2.0",
   init(ctx) { _ctx = ctx; },

@@ -62,7 +62,7 @@ try {
   for (const p of report.plugins) {
     if (p.level === "red") for (const it of p.issues) if (it.level === "red") fail("体检红 " + p.name + ": " + it.msg);
   }
-  if (report.summary.yellow > 0) console.log("  ⚠ 有 " + report.summary.yellow + " 个插件缺元数据（不阻断，见 /插件体检）");
+  if (report.summary.yellow > 0) console.log("  ⚠ 有 " + report.summary.yellow + " 个插件有黄牌提醒（不阻断，见 /插件体检）");
   ok(report.summary.total + " 个插件体检（绿 " + report.summary.green + " / 黄 " + report.summary.yellow + " / 红 " + report.summary.red + "）");
 } catch (e) { fail("插件体检失败: " + e.message); }
 

@@ -145,3 +145,31 @@ Momo 自改进化层（`plugins/evolution.js` 的 `selfModify`）生成 `plugins
 6. **权限登记**：新工具/命令必须登记 `caps.js`（未登记 = 默认仅主人）；群里 `user` 角色只放行 chat/vision/sticker（`plugins/roles.js` 的 `GROUP_USER_ALLOW`）。
 
 > 反面教材：v1.71.x 隐私事故（身体感觉对朋友注入）、v1.90.3 抢功记忆（主人的选择被记成 Momo 的）——都是「没想 userId 视角」的产物。
+
+## 10. 框架服务 vs 业务插件（v1.96.0 起强制）
+
+Momo 的「骨骼」= 框架服务（横切能力）。业务插件**只许消费框架服务，不许手搓横切逻辑**。
+
+**框架服务命名空间清单**（`time`/`identity`/`memory`/`budget`/`mood`/`audit`/`log`），承载与迁移状态见 `docs/architecture.md` §4.2。
+
+### 10.1 四条铁律
+
+1. **服务只搬不重写**：框架服务迁移期间，`index.js` 保留同名薄转发（`ctx.timeDirective()` 内部调 `host.apis.get("time").directive()`），业务插件零改动；行为以回归测试锁死。
+2. **一个横切面只有一个真相**：时间只有 time 服务、账本只有 budget 服务。插件自带副本（isoWeekKey/hmNow/parseReminder/daily_cny 读取/getHours 时段判断…）一律删除、改调服务。
+3. **声明式依赖**：业务插件在 `requires` 里写所依赖的框架服务命名空间；直调 `host.apis.get("time")` 却不声明 → 医生黄牌。
+4. **医生黄牌兜底**：`scripts/plugin-doctor.js` 静态检查——业务插件源码出现 `getHours(`/`daily_cny`（手搓横切特征字）→ 🟡 提示改调框架服务（check.js 不阻断，但新插件应直接合规）。
+
+### 10.2 框架服务插件本身的规矩
+
+- manifest 加 `system: true`（医生保护：**必须有 api 命名空间 + apiSpec 契约**，缺一即红）；
+- 命名空间名 = 服务名（`time`/`identity`/`memory`/`budget`/`mood`/`audit`/`log`）；
+- system 服务不提供运行时禁用（与业务插件的 /v1/plugins 启停隔离）。
+
+### 10.3 新功能开发检查单（写完插件过一遍）
+
+1. 需要时间（现在几点/时段/日期/间隔）→ `host.apis.get("time")`，别自己 new Date 解析；
+2. 需要身份（称呼/边界/是否主人/按人数据）→ 走 identity 装配器/`resolveCall`，别写死「主人」；
+3. 需要花钱/算账 → `host.apis.get("budget")`，别自己读 daily_cny、别自己写价格表；
+4. 需要情绪/「你在干嘛」→ `host.apis.get("mood")`；
+5. 需要发消息前自审/记流水 → `audit`/`log`；
+6. `requires` 里声明用到的框架服务；写完跑 `node scripts/plugin-doctor.js` 看黄牌。

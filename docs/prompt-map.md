@@ -1,4 +1,4 @@
-# Momo 的提示词地图（v1.95.1）
+# Momo 的提示词地图（v1.96.1）
 
 > 这份文档回答一个问题：**她每一轮思考时，模型到底看到了什么。**
 > 代码位置用常量名/函数名定位（v1.72.0 时点编写；行号会漂移，不写行号）。
@@ -186,7 +186,7 @@ settings.persona
 
 ## 6. 工具（工具描述也算提示词）
 
-- 插件 42 个 → 工具全部注册进 `host.allToolDefs()`
+- 插件 43 个 → 工具全部注册进 `host.allToolDefs()`
 - **预算耗尽**时只保留 7 个免费工具（`CHEAP_TOOLS`）：`send_sticker` `budget_view` `memory_view` `list_todo` `birthday_view` `goals_view` `check_balance`
 - **桌宠场景**会过滤掉 QQ 专用工具（`PET_EXCLUDE_TOOLS`）
 - 工具调用循环最多 6 步，每步都把 `assistant(tool_calls)` + `tool(result)` 追加进 messages——所以**调用越多，上下文越长、越贵**

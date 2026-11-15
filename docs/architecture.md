@@ -1,6 +1,6 @@
 # Momo 架构说明
 
-> 版本：v1.95.1 · 更新：2026-11-15
+> 版本：v1.96.1 · 更新：2026-11-15
 > 路径：`E:\Learn\Momo\`
 > 这份文档必须和代码同步。改了架构就改这里，别让它比代码旧。
 
@@ -19,7 +19,7 @@
 
 ```
 QQ ──WS──> SnowLuma ──WS(3001)──> 桥接 index.js
-                                   ├─ 插件平台（42 个插件 / 72 个工具 / 27 个命令，以 check.js/运行日志为准）
+                                   ├─ 插件平台（43 个插件 / 72 个工具 / 27 个命令，以 check.js/运行日志为准）
                                    ├─ Agent 循环（最多 6 步 工具调用）
                                    ├─ 本地状态（data/ JSON + stickers.db）
                                    └─ DeepSeek API
@@ -42,12 +42,12 @@ E:\Learn\Momo\
 ├── plugin-host.js           # 插件宿主：加载器 / ctx / 钩子 / 工具与命令注册表
 ├── sticker-store.js         # 表情包语义库（node:sqlite，非插件）
 ├── config.json              # 配置
-├── plugins/                 # 42 个功能插件
+├── plugins/                 # 43 个功能插件
 ├── body/                    # 自建身体（Python/PySide6，v0.1 起；见 body-architecture.md）
 ├── self/                    # 自我进化层（identity / reflections / skills / journal / pref）
 ├── data/                    # 运行时数据（不进版本库）
 ├── stickers/                # 表情包文件 + stickers.db 语义库
-├── test/                    # 63 个测试文件，纯 node 断言
+├── test/                    # 64 个测试文件，纯 node 断言
 ├── docs/                    # 文档（本文件、development.md、changelog/、decisions/）
 ├── archive/                 # 历史补丁脚本与旧文档
 ├── supervise.ps1            # 守护进程（崩溃自动重启）
@@ -58,12 +58,29 @@ E:\Learn\Momo\
 
 | 层 | 在哪 | 职责 |
 |---|---|---|
-| **基础层（内核）** | `index.js` | 消息接入、agent 循环、数据存储、预算、权限判定、插件分发 |
+| **基础层（内核）** | `index.js` | 消息接入、agent 循环、数据存储、预算、权限判定、插件分发；横切服务正框架化为「框架服务」（见 §4.2） |
 | **插件层** | `plugins/*.js` | 所有具体功能；通过 `ctx` 拿内核能力，通过 `api` 给别的插件用 |
 | **进化层** | `plugins/evolution.js` + `self/` | 自我内省、反思、技能规则、受限自改代码 |
 
 进程内三个全局：`host`（插件宿主）、`apiKey`、`cfg`。
 插件之间**不直接 require**，一律走 `ctx.getApi("<名字>")`。
+
+### 4.2 框架层（横切服务，v1.96.1 起）
+
+「几乎每个功能都要用」的能力收口成**框架服务**（system 插件，与业务插件同构），业务插件只许消费、不许手搓：
+
+| 框架服务 | 命名空间 | 承载 | 迁移 |
+|---|---|---|---|
+| 时间 | `time` | `plugins/time-service.js` | S2 / v1.96.1 ✅ |
+| 身份 | `identity` | `index.js`（装配器 buildPersonContext 已收口） | R1 / v1.94.1 ✅ |
+| 记忆 | `memory` | `plugins/memory.js` + `index.js` 注入函数 | S5 / v1.98.0 |
+| 预算 | `budget` | `plugins/budget-service.js` | S4 / v1.97.1 |
+| 情绪/活动 | `mood` | `plugins/mood-service.js` | S3 / v1.97.0 |
+| 审计 | `audit` | `plugins/audit-service.js` | S3 / v1.97.0 |
+| 感知 | `sense` | `plugins/pet-body.js`（已是服务） | 已框架化 |
+| 日志/流水 | `log` | `index.js` recordAction/journal | S4 顺带收口 |
+
+铁律（完整版见 `docs/plugin-guide.md` §10）：①服务只搬不重写（旧函数保留薄转发，插件零改动）；②一个横切面只有一个真相；③业务插件 `requires` 声明所依赖的框架服务；④医生黄牌兜底（手搓 `getHours`/`daily_cny`、直调框架服务不声明依赖 → 🟡）。
 
 ### 4.1 身体层（独立进程，v1.64.0 起）
 
@@ -140,7 +157,7 @@ E:\Learn\Momo\
 - 提示词地图（`docs/prompt-map.md`，v1.72.0）：一轮请求的提示词分层与动态块清单
 - 主动性调参（v1.72.0）：沉默 60 分钟主动搭话、身体自娱概率 ×2、每日生活费上限 3 元
 
-## 6. 插件清单（42 个）
+## 6. 插件清单（43 个）
 
 `appellations` `birthdays` `browse` `budget-report` `buzz` `capability-index` `dsh-link` `emotion`
 `evolution` `followup` `fun-core` `goals` `group-chat` `group-info` `group-memes` `hobby`
@@ -178,7 +195,7 @@ E:\Learn\Momo\
 - 重启：`taskkill /PID <node> /F` → supervisor 自动拉起（约 15 秒）
 - 自检：`node check.js`（语法 + 配置 + 插件结构）
 - 测试：`node test/<名字>.js`，全部跑一遍约 10 秒
-- 健康：日志出现 `插件平台就绪：42 个插件（工具 71 / 命令 26）` + `Bot 上线`
+- 健康：日志出现 `插件平台就绪：43 个插件（工具 71 / 命令 26）` + `Bot 上线`
 
 ## 10. 已知限制
 

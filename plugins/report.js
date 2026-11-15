@@ -48,25 +48,14 @@ function readJsonl(file, limit) {
 function tsOf(v) { const n = Number(v) || 0; return n && n < 1e12 ? Math.round(n * 1000) : n; }
 function pad2(n) { return String(n).padStart(2, "0"); }
 function dayKey(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
-function isoWeekKey(d) {
-  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-  const day = t.getUTCDay() || 7;
-  t.setUTCDate(t.getUTCDate() + 4 - day);
-  const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
-  const week = Math.ceil(((t - yearStart) / 86400000 + 1) / 7);
-  return `${t.getUTCFullYear()}-W${pad2(week)}`;
-}
+/* v1.96.1 框架服务 time：ISO 周/分钟数真相在 time 服务，这里只留薄转发 */
+function _time() { try { return _ctx.getApi ? _ctx.getApi("time") : null; } catch (e) { return null; } }
+function isoWeekKey(d) { const T = _time(); return T ? T.isoWeekKey(d) : null; }
+function isoWeekMonday(d) { const T = _time(); return T ? T.isoWeekMonday(d) : null; }
 function monthKey(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`; }
-function isoWeekMonday(d) {
-  // ISO 周周一（与 isoWeekKey 同口径，跨年边界一致）：用 UTC 消除本地时区偏移
-  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-  const day = t.getUTCDay() || 7;                 // 周一=1..周日=7
-  t.setUTCDate(t.getUTCDate() - (day - 1));
-  return new Date(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate());
-}
 function windowStart(kind, now) {
   const d = new Date(now);
-  if (kind === "week") return isoWeekMonday(d).getTime();
+  if (kind === "week") { const m = isoWeekMonday(d); return m ? m.getTime() : d.getTime(); }
   if (kind === "month") return new Date(d.getFullYear(), d.getMonth(), 1).getTime();
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 }
@@ -182,10 +171,7 @@ async function deliver(kind) {
 }
 
 /* ---------------- 定时 ---------------- */
-function hmNow(now) {
-  const d = new Date(now);
-  return d.getHours() * 60 + d.getMinutes();
-}
+function hmNow(now) { const T = _time(); return T ? T.hmNow(now) : -1; }
 
 function dueKind(now, state) {
   const at = String(_ctx.getSetting("report.daily_time", "23:00") || "23:00");
@@ -206,7 +192,8 @@ module.exports = {
   displayName: "给主人的报告",
   description: "日报/周报/月报整合，每天 23:00 用 LLM 口吻写",
   userScoped: true,
-  permissions: ["DATA_DIR", "SELF_DIR", "apiKey", "completeOnce", "config", "getSetting", "isMaster", "log", "recordAction", "recordAndSend", "sendPrivate", "settings", "todayText"],
+  requires: ["time"],
+  permissions: ["DATA_DIR", "SELF_DIR", "apiKey", "completeOnce", "config", "getSetting", "getApi", "isMaster", "log", "recordAction", "recordAndSend", "sendPrivate", "settings", "todayText"],
   version: "2.0.0",
   init(ctx) { _ctx = ctx; },
   tools: [

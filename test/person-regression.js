@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const R = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
 const idx = R("index.js");
+const ts = R("plugins/time-service.js");
 const pro = R("plugins/proactive.js");
 const evo = R("plugins/evolution.js");
 const rep = R("plugins/report.js");
@@ -19,7 +20,7 @@ T("事故 2026-11-13 反思跨人串台 → evolReflectionText 按人过滤", /f
 T("事故 2026-11-13 群聊张冠李戴 → 历史带「XX说：」前缀", idx.includes('+ "说：" + m.content') && idx.includes("_histForChat"));
 T("事故 2026-11-09 念头 [object Object] → selfStatus 取 .text", !/\.slice\(-3\)\.join\("；"\)/.test(evo) && (evo.includes("thoughtTexts") || /\.text/.test(evo)));
 T("事故 2026-11-09 看图崩溃 → describeImage 用 let", /let desc\s*=/.test(vis));
-T("事故 2026-11-09 爱说时间 → 不再指令「提到这个间隔」", !idx.includes("回应时请自然地提到这个间隔") && idx.includes("时间仅作背景参考"));
+T("事故 2026-11-09 爱说时间 → 不再指令「提到这个间隔」", !idx.includes("回应时请自然地提到这个间隔") && (idx.includes("时间仅作背景参考") || ts.includes("时间仅作背景参考")));
 T("事故 2026-11-15 前提当事实 → proactive 硬规则", pro.includes("对方没确认过结果的事") && pro.includes("禁止用陈述句断言"));
 T("事故 2026-11-15 跨时空重复 → proactive-log 持久化去重", idx.includes("proactiveLoggedDup") && idx.includes("appendProactiveLog"));
 T("分人守则 §9 → doctor 强制 userScoped 声明", doc.includes("userScoped"));

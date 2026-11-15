@@ -50,6 +50,9 @@ function satisfies(engine, kernel) {
 const KEBAB = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const SEMVER = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
 
+/* 框架服务命名空间（骨架铁律：业务插件只许消费、不许手搓；黄牌检查用） */
+const FRAMEWORK_NS = ["time", "identity", "memory", "budget", "mood", "audit", "log"];
+
 /* ---------------- 主诊断 ---------------- */
 function diagnose(opts) {
   const pluginsDir = opts.pluginsDir || path.join(__dirname, "..", "plugins");
@@ -60,11 +63,13 @@ function diagnose(opts) {
   try { files = fs.readdirSync(pluginsDir).filter((f) => f.endsWith(".js") && !f.startsWith("_")).sort(); }
   catch (e) { return report; }
 
-  const mods = [];   // {file, mod}
+  const mods = [];   // {file, mod, src}
   for (const f of files) {
     let mod = null;
     try { mod = require(path.join(pluginsDir, f)); } catch (e) { mod = { __loadError: e.message }; }
-    mods.push({ file: f, mod });
+    let src = "";
+    try { src = fs.readFileSync(path.join(pluginsDir, f), "utf8"); } catch (e) {}
+    mods.push({ file: f, mod, src });
   }
 
   /* 收集所有 api 命名空间（跨插件）用于 requires 交叉校验 + 冲突检测 */
@@ -79,7 +84,7 @@ function diagnose(opts) {
   }
   const seenName = new Map();
 
-  for (const { file, mod } of mods) {
+  for (const { file, mod, src } of mods) {
     const issues = [];
     const red = (m) => issues.push({ level: "red", msg: m });
     const yellow = (m) => issues.push({ level: "yellow", msg: m });
@@ -140,10 +145,29 @@ function diagnose(opts) {
         if (!Object.prototype.hasOwnProperty.call(s, "default")) yellow(`settings "${s.key}" 缺 default`);
         if (!s.label) yellow(`settings "${s.key}" 缺 label`);
       }
-      if (!Array.isArray(mod.permissions) || !mod.permissions.length) yellow("缺 permissions（用到的 ctx 能力清单）");
+      if (!mod.system && (!Array.isArray(mod.permissions) || !mod.permissions.length)) yellow("缺 permissions（用到的 ctx 能力清单）");
       if (mod.attribution) {
         if (!mod.attribution.source) yellow("attribution 缺 source");
         if (!mod.attribution.license) yellow("attribution 缺 license");
+      }
+      /* ---- 骨架（框架层）检查：system 服务保护 + 业务插件黄牌 ---- */
+      if (mod.system === true) {
+        if (!mod.api || typeof mod.api !== "object" || !Object.keys(mod.api).length) red("system 框架服务必须有 api 命名空间");
+        else if (!mod.apiSpec || typeof mod.apiSpec !== "object") red("system 框架服务必须有 apiSpec 契约");
+      } else {
+        // 黄牌 A：直调框架服务却未在 requires 声明（骨架铁律 3）
+        const called = new Set();
+        let m;
+        const RE_APIS = /apis\.get\(\s*["']([^"']+)["']\s*\)/g;
+        while ((m = RE_APIS.exec(src))) called.add(m[1]);
+        for (const ns of called) {
+          if (FRAMEWORK_NS.includes(ns) && !(Array.isArray(mod.requires) && mod.requires.includes(ns))) {
+            yellow(`调用了框架服务命名空间 "${ns}" 但未在 requires 声明（骨架铁律 3：业务插件只许消费框架服务，且要声明依赖）`);
+          }
+        }
+        // 黄牌 B：手搓横切逻辑（骨架铁律 2：一个横切面只有一个真相）
+        if (/\.getHours\s*\(/.test(src)) yellow("手搓时段判断（getHours），改调框架 time 服务");
+        if (/daily_cny/.test(src)) yellow("手搓预算读取（daily_cny），改调框架 budget 服务");
       }
     }
 
@@ -174,7 +198,7 @@ function formatText(report) {
     for (const i of p.issues) lines.push(`   - ${i.msg}`);
   }
   if (s.red === 0 && s.yellow === 0) lines.push("✅ 全部插件合规");
-  else if (s.red === 0) lines.push("⚠️ 无硬伤，但有 " + s.yellow + " 个插件缺元数据");
+  else if (s.red === 0) lines.push("⚠️ 无硬伤，但有 " + s.yellow + " 个插件有黄牌提醒（见 /插件体检）");
   else lines.push("❌ 有 " + s.red + " 个插件硬不满足，建议尽快处理");
   return lines.join("\n");
 }
@@ -194,4 +218,4 @@ if (require.main === module) {
   process.exit(report.ok ? 0 : 1);
 }
 
-module.exports = { diagnose, formatText, satisfies };
+module.exports = { diagnose, formatText, satisfies, FRAMEWORK_NS };

@@ -15,7 +15,8 @@ function recentQqChat(userId) {
   } catch (e) { return ""; }
 }
 function inQuietHours(pr) {
-  const h = new Date().getHours();
+  const T = (_ctx.getApi && _ctx.getApi("time")) || null;
+  const h = T ? T.hourNow() : 23;
   const qs = pr.quiet_start != null ? pr.quiet_start : 0;
   const qe = pr.quiet_end != null ? pr.quiet_end : 7;
   if (qs === qe) return false;
@@ -131,7 +132,7 @@ module.exports = {
   version: "1.0.0",
   // dailyPlan 已停用（改用 life-log 的真实活动），这里只依赖 followup；
   // 日程候选在代码里本就有 null 判断，缺了不影响其他候选
-  requires: ["followup"],
+  requires: ["followup", "time"],
   init(ctx) { _ctx = ctx; },
   apiSpec: {"proactive":{"recentQqChat":{"input":"无","output":"string","sideEffect":"只读"}}},
 

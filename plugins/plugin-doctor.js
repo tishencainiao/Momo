@@ -61,6 +61,7 @@ module.exports = {
   description: "检查插件清单是否合规（plugin_doctor 工具 + /插件体检 命令 + 每日巡检 + 落盘报告）",
   version: "1.0.0",
   userScoped: true,
+  requires: ["time"],
   permissions: ["BASE_VERSION", "DATA_DIR", "SELF_DIR", "config", "getSetting", "isMaster", "log", "recordAction", "recordAndSend", "sendPrivate"],
   init(ctx) { _ctx = ctx; },
   apiSpec: {"pluginDoctor":{"check":{"input":"无","output":"report","sideEffect":"写 data/plugin-health.json"},"issueBrief":{"input":"无","output":"string","sideEffect":"只读"}}},
@@ -108,7 +109,8 @@ module.exports = {
       const d = new Date(now);
       const t = String(_ctx.getSetting("plugin-doctor.patrol_time", "22:30")).split(":").map(Number);
       const patrolMin = (t[0] || 22) * 60 + (t[1] || 30);
-      const nowMin = d.getHours() * 60 + d.getMinutes();
+      const _t = (_ctx.getApi && _ctx.getApi("time")) || null;
+      const nowMin = _t ? _t.hmNow(d) : -1;
       if (nowMin < patrolMin) return;       // 还没到点
       const today = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
       const state = readJson(PATROL_FILE(), { last: "" });

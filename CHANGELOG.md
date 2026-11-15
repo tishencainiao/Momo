@@ -22,10 +22,12 @@
 > v1.46.2 起按月份拆分：明细在 `docs/changelog/<年>-<月>.md`，本文件只留规则与索引。
 > 较早版本的完整正文可直接读对应月份文件，或 `git log`。
 
-### 2026-11（114 个版本）→ [docs/changelog/2026-11.md](docs/changelog/2026-11.md)
+### 2026-11（116 个版本）→ [docs/changelog/2026-11.md](docs/changelog/2026-11.md)
 
 | 版本 | 日期 | 一句话 |
 |---|---|---|
+| v1.96.1 | 2026-11-15 | 框架服务 time 落地（S2）：时间真相收口 plugins/time-service.js，index.js 降级薄转发，7 插件改调服务 |
+| v1.96.0 | 2026-11-15 | 骨骼定名 S1：框架服务三层架构（architecture.md §4.2 横切服务表）+ plugin-guide §10 四铁律 + 医生骨架检查（system 服务保护：无 api/apiSpec 即红；业务插件黄牌：手搓 getHours/daily_cny、直调框架服务未声明 requires）|
 | v1.95.1 | 2026-11-15 | 分人守则落地 R3：doctor 强制 userScoped 声明（42 插件回填 31 true/11 false）+ 身份错误回归库 test/person-regression.js 12 条真实事故断言；MaiBot 式摘要/事实写回核实已存在（rollSessionSummary/maybeRollSummary + memory EXTRACT_BATCH）|
 | v1.95.0 | 2026-11-15 | 上下文装配 R2：17 动态块四档分级（必读/按需/预算内+总长度预算 6000/4000/2400/1200）+ 四区排版（此刻/你记得的/要做的事/顺带的）|
 | v1.94.1 | 2026-11-15 | 身份信封 R1：buildPersonContext 唯一装配器（私聊/群聊/proactive/桌宠四入口归一 {sender,room,channel} 信封）+ agentChatOnce 签名 11 参收拢为两参（纯重构零行为变化）|

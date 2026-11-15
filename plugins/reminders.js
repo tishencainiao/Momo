@@ -10,79 +10,11 @@ function loadReminders() { try { return JSON.parse(fs.readFileSync(remFile(), "u
 function saveReminders(r) { try { fs.mkdirSync(_dir, { recursive: true }); fs.writeFileSync(remFile(), JSON.stringify(r)); } catch (e) {} }
 function cfgBool(k, d) { try { const v = _ctx.getSetting(k, d); return v === false ? false : (v === true ? true : d); } catch (e) { return d; } }
 
-/* 中文数字 → 数值（支持 一~九十九、半、两、一个半、二十） */
-function cnToNum(s) {
-  const t = String(s || "").trim();
-  if (!t) return NaN;
-  if (/^\d+(\.\d+)?$/.test(t)) return Number(t);
-  const map = { 零: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
-  if (t === "十") return 10;
-  if (t.indexOf("十") >= 0) {
-    const parts = t.split("十");
-    const hi = parts[0] === "" ? 1 : (map[parts[0]] || 0);
-    const lo = parts[1] === "" ? 0 : (map[parts[1]] || 0);
-    return hi * 10 + lo;
-  }
-  if (t.length === 1 && map[t] != null) return map[t];
-  return NaN;
-}
-/* 数量：含「个」「半」（如 一个半、半小时、两） */
-function parseAmount(s) {
-  let t = String(s || "").trim().replace(/个/g, "");
-  if (!t) return NaN;
-  if (t === "半") return 0.5;
-  if (t.endsWith("半")) {
-    const base = t.slice(0, -1);
-    const n = base === "" ? 1 : cnToNum(base);
-    return Number.isFinite(n) ? n + 0.5 : NaN;
-  }
-  return cnToNum(t);
-}
-
-const AMOUNT = "([\\d零一二两三四五六七八九十百半个]+)";
-const UNIT = "(分钟|分|小时|钟头|时|天)";
-/* 清理提醒内容：去掉残留的「我/一下」等，太短就当没内容 */
-function cleanContent(s) {
-  let c = String(s || "").trim();
-  c = c.replace(/^(一下|一句|下)/, "").trim();
-  c = c.replace(/^[，。！？!?,.\s]+/, "").trim();
-  if (!c || c.length < 2) return "";
-  if (/^[我你他她它啊呀哦]$/.test(c)) return "";
-  return c.slice(0, 60);
-}
-function parseReminder(text) {
-  const s = String(text || "").replace(/\s+/g, "");
-  // 1. 相对时间：「X分钟/小时后提醒我YY」「半小时后」「一个半小时后」
-  let m = s.match(new RegExp(AMOUNT + UNIT + "(?:后|之后|以后)(?:提醒我|叫我|提醒一下|提醒|喊我)?[:：]?(.+)"));
-  if (m) {
-    const n = parseAmount(m[1]);
-    if (Number.isFinite(n)) {
-      const unit = String(m[2]);
-      const ms = unit.startsWith("分") ? n * 60000 : (unit === "天" ? n * 86400e3 : n * 3600e3);
-      const content = cleanContent(m[3]);
-      if (content) return { dueTs: Date.now() + ms, text: content };
-    }
-  }
-  // 2. 绝对时间：「明天/今晚/后天 X点Y分 提醒我ZZ」
-  m = s.match(/(明天|明早|今晚|后天|今天)?(上午|下午|晚上|中午)?(\d{1,2}|[一二两三四五六七八九十]{1,3})[:：点时](\d{1,2}|[一二三四五六七八九十]{1,3})?分?(?:提醒我|叫我|提醒一下|提醒|喊我)?[:：]?(.+)/);
-  if (m) {
-    const dayWord = String(m[1] || "");
-    const period = String(m[2] || "");
-    let hour = parseAmount(m[3]);
-    const min = m[4] ? parseAmount(m[4]) : 0;
-    const content = cleanContent(m[5]);
-    if (Number.isFinite(hour) && Number.isFinite(min) && content) {
-      if ((period === "下午" || period === "晚上") && hour < 12) hour += 12;
-      const now = new Date();
-      let target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, min, 0, 0);
-      if (dayWord === "明天" || dayWord === "明早") target = new Date(target.getTime() + 86400e3);
-      if (dayWord === "后天") target = new Date(target.getTime() + 2 * 86400e3);
-      if (dayWord !== "明天" && dayWord !== "后天" && target.getTime() <= now.getTime()) target = new Date(target.getTime() + 86400e3);
-      return { dueTs: target.getTime(), text: content };
-    }
-  }
-  return null;
-}
+/* v1.96.1 框架服务 time：中文时间词解析真相在 time 服务，这里只留薄转发 */
+function _time() { try { return _ctx.getApi ? _ctx.getApi("time") : null; } catch (e) { return null; } }
+function cnToNum(s) { const T = _time(); return T ? T.cnToNum(s) : NaN; }
+function parseAmount(s) { const T = _time(); return T ? T.parseAmount(s) : NaN; }
+function parseReminder(text) { const T = _time(); return T ? T.parseReminder(text) : null; }
 
 /* Windows 桌面通知（用系统 WinRT，无需装模块；-EncodedCommand 避免中文乱码） */
 function showDesktopToast(title, body) {
@@ -113,6 +45,7 @@ module.exports = {
   displayName: "提醒",
   description: "设提醒 + /提醒 + 到期检查定时器",
   userScoped: true,
+  requires: ["time"],
   permissions: ["DATA_DIR", "formatGap", "getApi", "getSetting", "log", "recordAndSend", "sendPrivate"],
   version: "1.1.0",
   init(ctx) { _ctx = ctx; _dir = ctx.DATA_DIR; },

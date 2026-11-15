@@ -34,6 +34,7 @@ plugin.init({
   },
   recordAction: () => {},
   getApi: (name) => {
+    if (name === "time") return require(path.join(__dirname, "..", "plugins", "time-service.js")).api.time;
     if (name === "lifeLog") return { lifeCtx: () => llText };
     if (name === "weather") return { weatherCtx: async () => "【天气】哈尔滨 -2°C" };
     if (name === "stickers") return { pickForText: (t) => ({ file: "E:/Learn/Momo/stickers/test.webp", label: "开心" }) };

@@ -22,7 +22,8 @@ function dailyHour() {
 /* 每天到点跑一次（错过会补跑；同一天只跑一次） */
 function dailyDue(now, st) {
   if (!enabled() || !dailyEnabled()) return false;
-  if (now.getHours() < dailyHour()) return false;
+  const _t = (_ctx.getApi && _ctx.getApi("time")) || null;
+  if ((_t ? _t.hourNow(now) : -1) < dailyHour()) return false;
   return ((st && st.lastDate) !== now.toDateString());
 }
 function tick() {
@@ -133,6 +134,7 @@ module.exports = {
   displayName: "记忆消化",
   description: "读消化后的「认识」，替换流水账注入（mem.digest）",
   userScoped: true,
+  requires: ["time"],
   permissions: ["DATA_DIR", "config", "getApi", "getSetting", "isMaster", "log", "recordAction", "setActivity"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; try { startTimer(); } catch (e) {} },

@@ -22,6 +22,7 @@ function makeCtx(settings) {
     DATA_DIR,
     log: () => {},
     getSetting: (k, d) => (Object.prototype.hasOwnProperty.call(settings, k) ? settings[k] : d),
+    getApi: (ns) => (ns === "time" ? require(path.join(__dirname, "..", "plugins", "time-service.js")).api.time : null),
   };
 }
 

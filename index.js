@@ -139,7 +139,7 @@ const { STYLE_DIRECTIVE, GROUP_DIRECTIVE, SITUATION_QQ, SITUATION_DESKTOP, situa
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.95.1";
+const BASE_VERSION = "1.96.1";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -1418,51 +1418,15 @@ async function proactiveAgentTurn(userId, intentDesc) {
 }
 
 /* ---------------- 联网搜索 ---------------- */
-function todayText() {
-  const w = "日一二三四五六";
-  const n = new Date();
-  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")} 星期${w[n.getDay()]} ${String(n.getHours()).padStart(2, "0")}:${String(n.getMinutes()).padStart(2, "0")}`;
-}
-/* 只到「日期 + 时段」，不含具体分钟——避免每分钟变化打断 prompt 缓存 */
-function dateText() {
-  const w = "日一二三四五六";
-  const n = new Date();
-  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")} 星期${w[n.getDay()]}`;
-}
-function timeDirective() {
-  return `【当前时间】现在是北京时间 ${todayText()}（${periodOfDay()}）。所有涉及时间、日期、时段的表述都以这个为准，绝对不要自己编造或猜测时间；时间仅作背景参考，除非对话自然需要（比如久别重逢、深夜、饭点），否则不要主动报时间。`;
-}
-function periodOfDay() {
-  const h = new Date().getHours();
-  if (h < 5) return "深夜";
-  if (h < 7) return "凌晨";
-  if (h < 9) return "早上";
-  if (h < 11) return "上午";
-  if (h < 13) return "中午";
-  if (h < 17) return "下午";
-  if (h < 19) return "傍晚";
-  if (h < 23) return "晚上";
-  return "深夜";
-}
-function formatGap(ms) {
-  const min = Math.round(ms / 60000);
-  if (min < 1) return "刚刚";
-  if (min < 60) return `${min} 分钟`;
-  const h = Math.floor(min / 60);
-  const m = min % 60;
-  if (h < 24) return m ? `${h} 小时 ${m} 分钟` : `${h} 小时`;
-  const d = Math.floor(h / 24);
-  const hh = h % 24;
-  return hh ? `${d} 天 ${hh} 小时` : `${d} 天`;
-}
-function timeAwarenessCtx(gapMs) {
-  let s = `【当前时间】现在是 ${todayText()}（${periodOfDay()}）`;
-  if (gapMs > 3600e3) {
-    s += `（距上次聊天 ${formatGap(gapMs)}）`;
-  }
-  s += `。时间仅作背景参考：除非对话自然需要（比如久别重逢、深夜、饭点），否则不要主动报时间、也不要主动提时间间隔。`;
-  return s;
-}
+/* v1.96.1 框架服务 time：以下函数降级为薄转发，真相在 plugins/time-service.js（骨骼方案 S2） */
+function _timeApi() { try { return (host && host.apis && host.apis.get("time")) || null; } catch (e) { return null; } }
+function todayText(d) { const t = _timeApi(); return t ? t.todayText(d) : ""; }
+/* 只到「日期 + 星期」，不含具体分钟——避免每分钟变化打断 prompt 缓存 */
+function dateText(d) { const t = _timeApi(); return t ? t.dateText(d) : ""; }
+function timeDirective(d) { const t = _timeApi(); return t ? t.timeDirective(d) : ""; }
+function periodOfDay(d) { const t = _timeApi(); return t ? t.periodOfDay(d) : "深夜"; }
+function formatGap(ms) { const t = _timeApi(); return t ? t.formatGap(ms) : "刚刚"; }
+function timeAwarenessCtx(gapMs) { const t = _timeApi(); return t ? t.timeAwarenessCtx(gapMs) : ""; }
 /* ---------------- 当前状态（进行态）+ 静默窗口 ---------------- */
 const CURRENT_STATUS_FILE = path.join(DATA_DIR, "current-status.json");
 function loadCurrentStatus() { try { return JSON.parse(fs.readFileSync(CURRENT_STATUS_FILE, "utf8")); } catch (e) { return {}; } }
@@ -1627,10 +1591,7 @@ function cleanText(s) {
 /* ---------------- QQ空间（发说说） ---------------- */
 const QZONE_STATE_FILE = path.join(DATA_DIR, "qzone.json");
 /* qzone 状态存取已迁移到插件 */
-function dayStr(off) {
-  const d = new Date(Date.now() - (off || 0) * 86400000);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
+function dayStr(off) { const t = _timeApi(); return t ? t.dayStr(off) : ""; }
 function dailyQzoneCount() { try { const a = host && host.apis.get("qzone"); return a ? a.dailyQzoneCount() : 0; } catch (e) { return 0; } }
 /* 发说说：自动配图（插件内部按内容挑图），返回值带图片数便于日志 */
 async function publishQzone(content, by) {
