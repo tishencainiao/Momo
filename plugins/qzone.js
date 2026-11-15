@@ -114,6 +114,7 @@ async function qzoneDailyPost() {
 
 /* 反馈：查自己说说有没有新评论 */
 async function checkQzoneFeedback() {
+  if (inLoginCooldown()) return 0;
   const st = loadQzoneState();
   const posts = st.posts || [];
   if (!posts.length) return 0;
@@ -135,7 +136,7 @@ async function checkQzoneFeedback() {
     }
     if (changed) { saveQzoneState(st); _ctx.log("info", `空间反馈：${changed} 条说说有新评论`); }
     return changed;
-  } catch (e) { return 0; }
+  } catch (e) { if (isQzoneLoginError(e.message)) { await notifyLoginLostOnce(); } return 0; }
 }
 
 async function fetchQzoneList(targetUin) { return await _ctx.qzoneHttp("get_qzone_msg_list", { target_uin: targetUin, num: 10 }); }
@@ -173,7 +174,26 @@ async function autoCommentNewPosts(uin, newPosts, settings) {
   if (done) { st.lastComment = st.lastComment || {}; st.lastComment[uin] = Date.now(); saveQzInfo(st); }
   return done;
 }
+/* 空间登录失效检测：NapCat 返回 -3000「请先登录空间」时，读动态/评论全挂但发说说不受影响。
+ * 处理：冷却 30 分钟不再尝试 + 一天最多提醒主人一次（去 NapCat 面板重新登录 QQ 即可恢复）。 */
+const QZ_LOGIN_FILE = () => path.join(_ctx.DATA_DIR, "qzone-login.json");
+function loginLostTs() { try { return Number(JSON.parse(fs.readFileSync(QZ_LOGIN_FILE(), "utf8")).ts || 0); } catch (e) { return 0; } }
+function setLoginLost() { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); fs.writeFileSync(QZ_LOGIN_FILE(), JSON.stringify({ ts: Date.now() })); } catch (e) {} }
+function isQzoneLoginError(msg) { const m = String(msg || ""); return m.includes("请先登录空间") || m.includes("-3000"); }
+async function notifyLoginLostOnce() {
+  const last = loginLostTs();
+  if (last && Date.now() - last < 24 * 3600e3) return;   // 一天最多一次
+  setLoginLost();
+  try {
+    const master = Number((_ctx.config.qq && _ctx.config.qq.master_user) || 0);
+    if (master) await _ctx.sendPrivate(master, "（系统提醒）QQ 空间登录失效了（NapCat 返回「请先登录空间」）。空间动态查看/评论暂停了，发说说不受影响。去 NapCat 面板重新登录 QQ，空间功能会自动恢复。");
+    _ctx.log("warn", "空间登录失效，已提醒主人（一天最多一次）");
+  } catch (e) { _ctx.log("warn", "空间登录失效通知发送失败: " + String(e.message).slice(0, 80)); }
+}
+function inLoginCooldown() { const t = loginLostTs(); return t && Date.now() - t < 30 * 60000; }
+
 async function viewSpaces(settings) {
+  if (inLoginCooldown()) return 0;                       // 登录失效冷却中，跳过这轮
   const users = (_ctx.config.qq && _ctx.config.qq.allowed_users) || [];
   let totalNew = 0;
   for (const u of users) {
@@ -184,7 +204,10 @@ async function viewSpaces(settings) {
         const n = await autoCommentNewPosts(u, newPosts, settings);
         if (n) _ctx.log("info", `空间评论 uin=${u}: ${n} 条`);
       }
-    } catch (e) { _ctx.log("warn", "查看空间失败 uin=" + u + ": " + e.message.slice(0, 120)); }
+    } catch (e) {
+      if (isQzoneLoginError(e.message)) { await notifyLoginLostOnce(); return totalNew; }   // 失效：提醒主人一次并停止本轮
+      _ctx.log("warn", "查看空间失败 uin=" + u + ": " + e.message.slice(0, 120));
+    }
   }
   return totalNew;
 }

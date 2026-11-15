@@ -120,6 +120,14 @@ global.Date = class extends RealDate {
   check("默认到 22 点结束", heSet && heSet.default === 22, String(heSet && heSet.default));
 
   global.Date = RealDate;
+  // 登录失效处理（源码级）：检测 -3000 + 冷却 + 一天最多提醒一次
+  const src = fs.readFileSync(require("path").join(__dirname, "..", "plugins", "qzone.js"), "utf8");
+  check("识别「请先登录空间」", src.includes("请先登录空间"));
+  check("识别 -3000", src.includes("-3000"));
+  check("有 30 分钟冷却", src.includes("30 * 60000"));
+  check("一天最多提醒一次", src.includes("24 * 3600e3"));
+  check("viewSpaces 先查冷却", src.includes("if (inLoginCooldown()) return 0"));
+
   console.log(`\n通过 ${pass} / 失败 ${fail}`);
   try { fs.rmSync(DIR, { recursive: true, force: true }); } catch (e) {}
   process.exit(fail ? 1 : 0);

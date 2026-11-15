@@ -23,6 +23,32 @@ function inQuietHours(pr) {
   if (qs < qe) return h >= qs && h < qe;
   return h >= qs || h < qe;
 }
+
+/* 时间感知方案 P2：把主人短期记忆里「带时间词的安排」筛出来，标注时段是否已到。
+ * 供主动搭话 intro（P1）与主聊天动态块共用。 */
+function pendingPlanCtx(userId) {
+  try {
+    const mem = (_ctx.getApi && _ctx.getApi("memory")) || null;
+    const T = (_ctx.getApi && _ctx.getApi("time")) || null;
+    if (!mem || !T || !T.annotatePlan) return "";
+    const shorts = (mem.loadShortMemories ? mem.loadShortMemories(userId) : null) || [];
+    const lines = [];
+    for (const m of shorts.slice(0, 12)) {
+      const a = T.annotatePlan(String((m && m.content) || ""), Date.now());
+      if (a) lines.push(`- ${a.content.slice(0, 60)}（${a.word}，${a.status}）`);
+    }
+    return lines.slice(0, 4).join("\n");
+  } catch (e) { return ""; }
+}
+/* P1：主动搭话前的「时间条件判断」附加说明（silence/followup 用） */
+function timePlanLine(userId) {
+  try {
+    const T = (_ctx.getApi && _ctx.getApi("time")) || null;
+    const nowTxt = T ? `${T.todayText()}（${T.periodOfDay()}）` : "（未知）";
+    const plans = pendingPlanCtx(userId);
+    return `现在的时间是 ${nowTxt}。\n主人最近的安排：${plans || "（没有带时间词的安排）"}\n搭话前先判断：主人说的那个计划到点了没？如果还没到（比如说的是「下午」而现在是中午），就不要问进度、不要假装他已经在做了；可以问候、分享小想法、或问点别的轻松的事。`;
+  } catch (e) { return ""; }
+}
 function proactiveLoop() {
   const P = _ctx.proactive;
   const pr = _ctx.config.proactive || {};
@@ -100,7 +126,8 @@ function proactiveLoop() {
           silence: `${_call}已经约 ${minutes} 分钟没和你说话了，自然搭话（问候、分享一个可爱的小想法、或问一个轻松的小问题）`,
         };
         /* R0-A1：所有主动搭话统一加「只提已确认事实」硬规则（防「你游戏输了」式未证实前提） */
-        const _intentText = (_intents[kind] || `主动和${_call}说点什么（自然、像平时聊天）`) + "（硬规则：只提对话里实际说过、对方确认过的事；对方没确认过结果的事——输赢、去向、成败、成绩——一律用疑问句轻轻重问，禁止用陈述句断言。）";
+        const _intentText = (_intents[kind] || `主动和${_call}说点什么（自然、像平时聊天）`) + "（硬规则：只提对话里实际说过、对方确认过的事；对方没确认过结果的事——输赢、去向、成败、成绩——一律用疑问句轻轻重问，禁止用陈述句断言。）"
+          + ((kind === "silence" || kind === "followup") ? "\n" + timePlanLine(u) : "");
         // ③ 日程/未完话头候选 → 先让大脑决定「该不该发」，再决定「说什么」
         if ((kind === "schedule" || kind === "followup") && P.shouldSendNow) {
           const _ok = await P.shouldSendNow(u, _intentText);
@@ -132,11 +159,11 @@ module.exports = {
   version: "1.0.0",
   // dailyPlan 已停用（改用 life-log 的真实活动），这里只依赖 followup；
   // 日程候选在代码里本就有 null 判断，缺了不影响其他候选
-  requires: ["followup", "time"],
+  requires: ["followup", "time", "memory"],
   init(ctx) { _ctx = ctx; },
-  apiSpec: {"proactive":{"recentQqChat":{"input":"无","output":"string","sideEffect":"只读"}}},
+  apiSpec: {"proactive":{"recentQqChat":{"input":"无","output":"string","sideEffect":"只读"},"pendingPlanCtx":{"input":"userId","output":"主人带时间词的安排清单（含已到/未到标注）","sideEffect":"只读"}}},
 
-  api: { proactive: { recentQqChat } },
+  api: { proactive: { recentQqChat, pendingPlanCtx } },
   hooks: {
     timer(payload) {
       const now = (payload && payload.now) || Date.now();

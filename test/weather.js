@@ -74,8 +74,16 @@ function check(name, cond, extra) {
   // 7. 换城市清缓存
   setTool.handler({ city: "哈尔滨" }, { userId: ME });
   await W.fetchWeather();
-  check("换城市后重新请求", calls === 1, "calls=" + calls);
+  check("换城市后重新请求（先试 Open-Meteo 再回退 wttr，≥1 次）", calls >= 1, "calls=" + calls);
   check("新城市生效", W.loadCity() === "哈尔滨");
+
+  // 8. 双源结构（源码级）：Open-Meteo 优先 + wttr.in 兜底 + WMO 描述
+  const src = fs.readFileSync(require("path").join(__dirname, "..", "plugins", "weather.js"), "utf8");
+  check("含 Open-Meteo 地理编码", src.includes("geocoding-api.open-meteo.com"));
+  check("fetchOpenMeteo 存在", src.includes("async function fetchOpenMeteo"));
+  check("设城市时先试 Open-Meteo", src.includes("if (city)"));
+  check("wttr.in 兜底保留", src.includes("https://wttr.in/"));
+  check("WMO 码表覆盖晴", src.includes('c === 0) return "晴"'));
 
   console.log(`\n通过 ${pass} / 失败 ${fail}`);
   try { fs.rmSync(DIR, { recursive: true, force: true }); } catch (e) {}

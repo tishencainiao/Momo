@@ -60,5 +60,24 @@ r = T.parseReminder("明天下午3点提醒我交作业");
 check("绝对 明天下午3点", r && r.text === "交作业" && new Date(r.dueTs).getHours() === 15);
 check("没时间 → null", T.parseReminder("提醒我喝水") === null);
 
+// 8. 时间感知方案 P1：时段词解析（固定基准 2026-11-15 12:00 北京时间）
+const NOON = ts(2026, 11, 15, 12, 0);
+let rg = T.resolveTimeRange("下午", NOON);
+check("下午 13-18", rg && new Date(rg.from).getHours() === 13 && new Date(rg.to).getHours() === 18);
+rg = T.resolveTimeRange("晚上", NOON);
+check("晚上 18-23", rg && new Date(rg.from).getHours() === 18 && new Date(rg.to).getHours() === 23);
+rg = T.resolveTimeRange("明天早上", NOON);
+check("明天早上=次日 5-9", rg && new Date(rg.from).getDate() === 16 && new Date(rg.from).getHours() === 5 && new Date(rg.to).getHours() === 9);
+check("无时段词 → null", T.resolveTimeRange("随便聊聊", NOON) === null);
+
+// 9. 时间感知方案 P1：annotatePlan 状态判断
+let pl = T.annotatePlan("下午去自习室", NOON);
+check("下午·现在中午→还没到", !!(pl && pl.status === "还没到"));
+pl = T.annotatePlan("下午去自习室", ts(2026, 11, 15, 14, 30));
+check("下午·现在下午→进行中", !!(pl && pl.status === "进行中"));
+pl = T.annotatePlan("早上出去跑步", ts(2026, 11, 15, 21, 0));
+check("早上·现在晚上→已过", !!(pl && pl.status === "已过"));
+check("无时间词 → null", T.annotatePlan("今天心情不错", NOON) === null);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

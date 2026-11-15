@@ -139,7 +139,7 @@ const { STYLE_DIRECTIVE, GROUP_DIRECTIVE, SITUATION_QQ, SITUATION_DESKTOP, situa
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.98.0";
+const BASE_VERSION = "1.98.3";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -916,6 +916,12 @@ async function agentChatOnce(history, userText, pctx) {
       if (_loops) _dput("todo", _loops);
     } catch (e) {}
     if (taskCtx) _dput("todo", taskCtx);
+    /* 时间感知方案 P2：主人最近的安排（带时间词，标注已到/没到）也进主聊天上下文 */
+    try {
+      const _pa = host.apis.get("proactive");
+      const _plans = _pa && _pa.pendingPlanCtx ? _pa.pendingPlanCtx(userId) : "";
+      if (_plans) _dput("todo", `【主人最近的安排（时间已换算；没到的别当进行中问）】\n${_plans}`);
+    } catch (e) {}
   }
   /* —— 区四【顺带的】装饰/感知：full 档才有（sticker/pulse/headpat/身体感觉），meta 需 low 以上 —— */
   if (_tierLv >= 3) {
@@ -1087,11 +1093,7 @@ async function proactiveAgentTurn(userId, intentDesc) {
     const raw = await agentChatOnce(history, intro, buildPersonContext({ sender: userId, room: 0, channel: "proactive" }));
     let reply = String((raw && raw.reply) || "").trim();
     if (!reply) return null;
-    /* R0-A2 + S3：主动搭话也过 before_send 审计（无工具台账，声称自己做过的事会被如实改写） */
-    const _bs = { text: reply, channel: "private", usedTools: [] };
-    if (host && host.runBeforeSend) host.runBeforeSend(_bs);
-    reply = String((_bs && _bs.text) || "").trim();
-    if (!reply) return null;
+    /* R0-A2 + S3：审计统一由 agentChatOnce 出口的 runBeforeSend 完成（此处不再重复审计，避免同一段话被审两遍） */
     if (lastProactiveMsg.get(userId) === "[object Object]") lastProactiveMsg.delete(userId);
     /* R0-B：持久化去重——比最近 10 条 + 跨人 6 小时冷却 + sha256 指纹（重启不丢） */
     if (proactiveLoggedDup(userId, reply)) { log("info", `主动搭话内容重复（含跨人冷却），跳过`); return null; }

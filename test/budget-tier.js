@@ -5,7 +5,7 @@ const path = require("path");
 const vm = require("vm");
 
 const ROOT = path.join(__dirname, "..");
-const src = fs.readFileSync(path.join(ROOT, "index.js"), "utf8");
+const src = fs.readFileSync(path.join(ROOT, "plugins", "budget-service.js"), "utf8");
 
 function extractFunc(s, name) {
   const start = s.indexOf("function " + name + "(");

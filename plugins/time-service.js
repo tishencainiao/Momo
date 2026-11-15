@@ -163,11 +163,54 @@ function parseReminder(text) {
   return null;
 }
 
+/* ---------------- 时段词 → 绝对区间（时间感知方案 P3） ----------------
+ * 把「下午/晚上/明天/一会儿/周X」等相对词换算成绝对区间，换算发生在注入 LLM 之前。 */
+function resolveTimeRange(word, now) {
+  const n = now ? new Date(now) : new Date();
+  const w = String(word || "");
+  if (/(一会儿|等会|等会儿|待会|稍后|马上)/.test(w)) return { word: "一会儿", from: n.getTime() + 15 * 60000, to: n.getTime() + 60 * 60000 };
+  const dayOff = w.includes("后天") ? 2 : w.includes("明天") ? 1 : 0;
+  const base = new Date(n);
+  if (dayOff) base.setDate(base.getDate() + dayOff);
+  const RANGES = { "凌晨": [0, 5], "早晨": [5, 9], "早上": [5, 9], "上午": [9, 11], "中午": [11, 13], "下午": [13, 18], "傍晚": [17, 19], "晚上": [18, 23], "深夜": [23, 24] };
+  for (const k in RANGES) {
+    if (w.includes(k)) {
+      const d0 = new Date(base); d0.setHours(RANGES[k][0], 0, 0, 0);
+      const d1 = new Date(base); d1.setHours(RANGES[k][1], 0, 0, 0);
+      if (RANGES[k][1] <= RANGES[k][0]) d1.setDate(d1.getDate() + 1);   // 深夜跨零点
+      return { word: k, from: d0.getTime(), to: d1.getTime() };
+    }
+  }
+  if (dayOff) {
+    const d0 = new Date(base); d0.setHours(0, 0, 0, 0);
+    return { word: dayOff === 1 ? "明天" : "后天", from: d0.getTime(), to: d0.getTime() + 24 * 3600e3 };
+  }
+  const wk = w.match(/周([一二三四五六日天])|星期([一二三四五六日天])/);
+  if (wk) {
+    const map = { "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "日": 0, "天": 0 };
+    const target = map[wk[1] || wk[2]];
+    const cur = n.getDay();
+    let diff = (target - cur + 7) % 7; if (diff === 0) diff = 7;   // 下一个该星期
+    const d0 = new Date(n); d0.setDate(d0.getDate() + diff); d0.setHours(0, 0, 0, 0);
+    return { word: "周" + (wk[1] || wk[2]), from: d0.getTime(), to: d0.getTime() + 24 * 3600e3 };
+  }
+  return null;
+}
+
+/* 给一条文本打「时段已到没到」的标注（时间感知方案 P2 用） */
+function annotatePlan(content, now) {
+  const r = resolveTimeRange(content, now);
+  if (!r) return null;
+  const nowT = now ? new Date(now).getTime() : Date.now();
+  const status = nowT < r.from ? "还没到" : (nowT < r.to ? "进行中" : "已过");
+  return { content: String(content || ""), word: r.word, from: r.from, to: r.to, status };
+}
+
 module.exports = {
   name: "time-service",
   displayName: "框架服务·时间",
   description: "时间/日期/时段/中文时间词解析的唯一真相（system）。所有业务插件按需取用，禁止自带钟表逻辑。",
-  version: "1.0.0",
+  version: "1.1.0",
   system: true,
   userScoped: false,
   engines: { kernel: ">=1.96.0" },
@@ -191,9 +234,11 @@ module.exports = {
       parseReminder: { input: "中文时间词文本", output: "{dueTs,text}|null", sideEffect: "只读" },
       parseAmount: { input: "中文数量", output: "number", sideEffect: "只读" },
       cnToNum: { input: "中文数字", output: "number", sideEffect: "只读" },
+      resolveTimeRange: { input: "含时间词的文本,now?", output: "{word,from,to}|null", sideEffect: "只读" },
+      annotatePlan: { input: "含时间词的文本,now?", output: "{content,word,from,to,status}|null（status=还没到/进行中/已过）", sideEffect: "只读" },
     },
   },
   api: {
-    time: { todayText, dateText, periodOfDay, hourNow, hmNow, timeDirective, formatGap, timeAwarenessCtx, dayStr, isoWeekKey, isoWeekMonday, parseReminder, parseAmount, cnToNum },
+    time: { todayText, dateText, periodOfDay, hourNow, hmNow, timeDirective, formatGap, timeAwarenessCtx, dayStr, isoWeekKey, isoWeekMonday, parseReminder, parseAmount, cnToNum, resolveTimeRange, annotatePlan },
   },
 };

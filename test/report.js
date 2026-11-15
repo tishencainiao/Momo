@@ -57,7 +57,11 @@ const ctx = {
   todayText: () => "2026-11-08 23:05",
   settings: () => ({ model: "test" }),
   getSetting: (k, d) => (settingsStore.has(k) ? settingsStore.get(k) : d),
-  getApi: (ns) => (ns === "time" ? require(path.join(ROOT, "plugins", "time-service.js")).api.time : null),
+  getApi: (ns) => {
+    if (ns === "time") return require(path.join(ROOT, "plugins", "time-service.js")).api.time;
+    if (ns === "budget") { const m = require(path.join(ROOT, "plugins", "budget-service.js")); m.init({ DATA_DIR: DATA, config: { qq: {}, budget: { daily_cny: 1 } }, log: () => {} }); return m.api.budget; }
+    return null;
+  },
   completeOnce: async (msgs) => { captured.prompt.push(String(msgs && msgs[0] && msgs[0].content || "")); return "这是一份测试报告：今天很有趣，花了 ¥0.66，还剩 ¥0.34。"; },
   log: () => {},
   recordAction: () => {},

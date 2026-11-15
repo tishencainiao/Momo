@@ -43,8 +43,9 @@ check(think("看图", true) === true, "带图片 → 思考");
 check(think("嗯", true) === true, "哪怕带图短句也思考");
 
 /* P2-c：budgetTier 四档（从源码提取真实函数，stub loadBudget/budgetCfg） */
-const tierSrc = extractFunc(src, "budgetTier");
-const levelSrc = extractFunc(src, "budgetLevel");
+const svcSrc = fs.readFileSync(path.join(ROOT, "plugins", "budget-service.js"), "utf8");
+const tierSrc = extractFunc(svcSrc, "budgetTier");
+const levelSrc = extractFunc(svcSrc, "budgetLevel");
 if (tierSrc && levelSrc) {
   function tierAt(spent, daily) {
     const c = {};

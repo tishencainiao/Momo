@@ -90,7 +90,7 @@ check("不拦「对方点了他爱吃的」", looks("对方点了他爱吃的") 
 /* ---------- 4. 记忆提炼过滤 ---------- */
 const mem = require("E:/Learn/Momo/plugins/memory.js");
 mem.init({ DATA_DIR: DIR, log: () => {} });
-const d1 = mem.api.memory.dropAgentDeeds([
+const d1 = mem.api.memoryOps.dropAgentDeeds([
   { content: "主人打游戏累了会先休息，并接受大肥鱼放轻音乐助眠" },
   { content: "主人喜欢喝杨枝甘露奶茶" },
 ]);
