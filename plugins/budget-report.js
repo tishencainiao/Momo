@@ -26,7 +26,7 @@ function breakdownLine(b) {
 }
 
 function dailyBill(b) {
-  const daily = Number((_ctx.config.budget && _ctx.config.budget.daily_cny) || 1);
+  const daily = _ctx.getApi("budget").dailyCny();
   const pct = Math.round((b.spent_cny || 0) / daily * 100);
   const calls = Object.entries(b.calls || {}).map(([k, v]) => `${KIND_LABEL[k] || k} ${v}次`).join("、") || "无";
   const hitIn = b.tokens_hit || 0;
@@ -51,7 +51,7 @@ function weeklyReport() {
   const byKind = {};
   for (const d of days) for (const [k, v] of Object.entries(d.spend_by || {})) byKind[k] = (byKind[k] || 0) + v;
   const kindStr = Object.entries(byKind).map(([k, v]) => `${KIND_LABEL[k] || k} ¥${v.toFixed(2)}`).join("、") || "无";
-  const daily = Number((_ctx.config.budget && _ctx.config.budget.daily_cny) || 1);
+  const daily = _ctx.getApi("budget").dailyCny();
   return [
     `📈 本周账单汇总（近 ${days.length} 天）`,
     `总花费：¥${total.toFixed(3)}（日均 ¥${(total / days.length).toFixed(3)}，日预算 ¥${daily}）`,
@@ -64,6 +64,7 @@ module.exports = {
   displayName: "账本",
   description: "生活费记账 + /花费 命令 + 账本 api（供报告/身体读）",
   userScoped: true,
+  requires: ["budget"],
   permissions: ["DATA_DIR", "config", "isMaster", "sendPrivate"],
   version: "1.1.0",
   init(ctx) { _ctx = ctx; },

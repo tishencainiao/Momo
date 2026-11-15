@@ -22,10 +22,11 @@
 > v1.46.2 起按月份拆分：明细在 `docs/changelog/<年>-<月>.md`，本文件只留规则与索引。
 > 较早版本的完整正文可直接读对应月份文件，或 `git log`。
 
-### 2026-11（117 个版本）→ [docs/changelog/2026-11.md](docs/changelog/2026-11.md)
+### 2026-11（118 个版本）→ [docs/changelog/2026-11.md](docs/changelog/2026-11.md)
 
 | 版本 | 日期 | 一句话 |
 |---|---|---|
+| v1.97.1 | 2026-11-15 | 骨骼 S4：budget-service 框架服务（价格表唯一真相），4 插件删 daily_cny 轮子 |
 | v1.97.0 | 2026-11-15 | 骨骼 S3：mood+audit 框架服务化，before_send 钩子统一吹牛审计 |
 | v1.96.1 | 2026-11-15 | 框架服务 time 落地（S2）：时间真相收口 plugins/time-service.js，index.js 降级薄转发，7 插件改调服务 |
 | v1.96.0 | 2026-11-15 | 骨骼定名 S1：框架服务三层架构（architecture.md §4.2 横切服务表）+ plugin-guide §10 四铁律 + 医生骨架检查（system 服务保护：无 api/apiSpec 即红；业务插件黄牌：手搓 getHours/daily_cny、直调框架服务未声明 requires）|

@@ -85,7 +85,7 @@ function collect(kind, now) {
 
   const actions = readJsonl(path.join(DATA(), "actions.jsonl"), 20000).filter((a) => tsOf(a.ts) >= start);
   const budget = readJson(path.join(DATA(), "budget.json"), {}) || {};
-  const daily = Number((_ctx.config.budget && _ctx.config.budget.daily_cny) || 1);
+  const daily = _ctx.getApi("budget").dailyCny();
   const bodyEvents = readJsonl(path.join(DATA(), "body-events.jsonl"), 20000).filter((e) => tsOf(e.ts) >= start);
   const headpat = readJson(path.join(DATA(), "headpat.json"), {}) || {};
   const goals = readJson(path.join(DATA(), "goals.json"), { goals: [] }) || {};
@@ -192,7 +192,7 @@ module.exports = {
   displayName: "给主人的报告",
   description: "日报/周报/月报整合，每天 23:00 用 LLM 口吻写",
   userScoped: true,
-  requires: ["time"],
+  requires: ["time", "budget"],
   permissions: ["DATA_DIR", "SELF_DIR", "apiKey", "completeOnce", "config", "getSetting", "getApi", "isMaster", "log", "recordAction", "recordAndSend", "sendPrivate", "settings", "todayText"],
   version: "2.0.0",
   init(ctx) { _ctx = ctx; },

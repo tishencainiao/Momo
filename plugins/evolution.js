@@ -73,11 +73,11 @@ function loadProposals() {
 function selfStatusText(userId) {
   const e = _ctx.getEmotion();
   const b = _ctx.loadBudget();
-  const bc = _ctx.budgetCfg();
+  const bc = _ctx.getApi("budget").budgetCfg();
   const st = _ctx.loadMindState();
   const thoughts = (st.thoughts || []).slice(-3).map((x) => (typeof x === "string" ? x : (x && x.text) || "")).filter(Boolean).join("；");
-  const pct = Math.round((b.spent_cny || 0) / bc.daily_cny * 100);
-  return `情绪：${e.name}（强度 ${Math.round(e.intensity * 100)}/100）；心情：${Math.round(_ctx.getMood())}/100；无聊度：${Math.round(_ctx.getBoredom())}/100；对对方好感度：${Math.round(_ctx.getFavor(userId))}/100；今日生活费：¥${(b.spent_cny || 0).toFixed(3)}/${bc.daily_cny}（${pct}%）；最近念头：${thoughts || "（无）"}`;
+  const pct = Math.round((b.spent_cny || 0) / bc.dailyCny() * 100);
+  return `情绪：${e.name}（强度 ${Math.round(e.intensity * 100)}/100）；心情：${Math.round(_ctx.getMood())}/100；无聊度：${Math.round(_ctx.getBoredom())}/100；对对方好感度：${Math.round(_ctx.getFavor(userId))}/100；今日生活费：¥${(b.spent_cny || 0).toFixed(3)}/${bc.dailyCny()}（${pct}%）；最近念头：${thoughts || "（无）"}`;
 }
 function selfLogText(limit) {
   try {
@@ -739,6 +739,7 @@ module.exports = {
   displayName: "进化层",
   description: "自我内省、愿望、反思/探索、评分调参、技能规则、插件元认知（特权）",
   userScoped: true,
+  requires: ["budget"],
   permissions: ["BASE_VERSION", "DATA_DIR", "SELF_DIR", "addMood", "bochaKey", "bochaSearch", "budgetCfg", "canAfford", "completeOnce", "config", "formatResults", "getBoredom", "getEmotion", "getFavor", "getMood", "getSetting", "isBudgetExhausted", "isMaster", "loadBudget", "loadEvolution", "loadMemories", "loadMindState", "loadSession", "loadShortMemories", "log", "pickStickerByIds", "reasonComplete", "recordAction", "recordAndSend", "registry", "reloadEvolution", "resolveTargetId", "sendPrivate", "sendStickerImage", "settings", "textSimilar"],
   version: "1.1.0",
   settings: [

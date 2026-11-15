@@ -15,7 +15,7 @@ const dayStr = (off) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
 
-let settings = { "entertainment.daily_self_max": 2, "entertainment.daily_cny": 0.3 };
+let settings = { "entertainment.daily_self_max": 2, "entertainment.daily_cap": 0.3 };
 let budgetOut = false;
 const plugin = require("E:/Learn/Momo/plugins/fun-core.js");
 plugin.init({
