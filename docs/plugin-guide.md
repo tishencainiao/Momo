@@ -21,6 +21,7 @@
 | `engines.kernel` | 选 | 依赖的内核版本（`>=1.81.0` / `^1.80.0`），不写=不限制 |
 | `requires` | 选 | 依赖的 api 命名空间数组，如 `["search","body"]`（缺依赖=红） |
 | `permissions` | ✅ 黄 | 用到的 ctx 能力清单（`_ctx.xxx` 的名字），体检会静态扫描核对 |
+| `userScoped` | ✅ 黄 | 分人守则 §9 强制：`true`=按人处理数据/发消息（涉及 userId），`false`=纯系统级；体检缺声明=黄 |
 | `settings` | 选 | 可调参数，每项 `{key,label,type,default,desc}` |
 | `attribution` | 选 | 借鉴来源归因 `{source,license,note}`（借鉴开源必填，见第 6 节） |
 | `api` | 选 | 导出给其他插件的函数，**必须嵌套** `api:{<ns>:{fn1,fn2}}` → 别人 `apis.get("<ns>").fn()` |

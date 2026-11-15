@@ -738,6 +738,7 @@ module.exports = {
   name: "evolution",
   displayName: "进化层",
   description: "自我内省、愿望、反思/探索、评分调参、技能规则、插件元认知（特权）",
+  userScoped: true,
   permissions: ["BASE_VERSION", "DATA_DIR", "SELF_DIR", "addMood", "bochaKey", "bochaSearch", "budgetCfg", "canAfford", "completeOnce", "config", "formatResults", "getBoredom", "getEmotion", "getFavor", "getMood", "getSetting", "isBudgetExhausted", "isMaster", "loadBudget", "loadEvolution", "loadMemories", "loadMindState", "loadSession", "loadShortMemories", "log", "pickStickerByIds", "reasonComplete", "recordAction", "recordAndSend", "registry", "reloadEvolution", "resolveTargetId", "sendPrivate", "sendStickerImage", "settings", "textSimilar"],
   version: "1.1.0",
   settings: [

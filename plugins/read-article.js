@@ -214,6 +214,7 @@ module.exports = {
   name: "read-article",
   displayName: "读文章",
   description: "读一篇文章并复述（read_article）",
+  userScoped: false,
   permissions: ["DATA_DIR", "SELF_DIR", "addMood", "completeOnce", "getApi", "getSetting", "log"],
   version: "1.0.0",
   requires: ["fun-core", "hobby"],

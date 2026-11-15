@@ -16,6 +16,7 @@ module.exports = {
   name: "birthdays",
   displayName: "生日",
   description: "记生日、查生日、每日生日祝福检查",
+  userScoped: true,
   permissions: ["DATA_DIR", "dayStr", "log", "recordAndSend", "sendPrivate", "todayMMDD"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; _dir = ctx.DATA_DIR; },

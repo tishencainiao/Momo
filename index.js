@@ -139,7 +139,7 @@ const { STYLE_DIRECTIVE, GROUP_DIRECTIVE, SITUATION_QQ, SITUATION_DESKTOP, situa
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.93.0";
+const BASE_VERSION = "1.95.1";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -903,7 +903,10 @@ async function completeOnce(messages, settings, maxTokens, temperature, opts) {
 async function reasonComplete(messages, settings, maxTokens, opts) {
   const endpoint = settings.base_url.replace(/\/+$/, "") + "/v1/chat/completions";
   const model = settings.reasoner_model || "deepseek-v4-pro";
-  const _extra = (opts && opts.noThink) ? { thinking: { type: "disabled" } } : {};
+  const _noThink = !!(opts && opts.noThink);
+  /* R0-C1：支持显式 reasoning_effort（不传则维持服务端默认 high） */
+  const _extra = _noThink ? { thinking: { type: "disabled" } } : {};
+  if (!_noThink && opts && opts.effort) _extra.reasoning_effort = opts.effort;
   const body = JSON.stringify(Object.assign({ model, messages, stream: false, max_tokens: maxTokens || 2000 }, _extra));
   let lastErr = null;
   for (let attempt = 1; attempt <= 3; attempt++) {
@@ -915,6 +918,7 @@ async function reasonComplete(messages, settings, maxTokens, opts) {
       const data = await resp.json();
       const msg = (data.choices && data.choices[0] && data.choices[0].message) || {};
       const text = String(msg.content || "");
+      if (!text && !_noThink) { log("warn", "reasonComplete 返回空 content，降级关闭思考重试一次"); return reasonComplete(messages, settings, maxTokens, Object.assign({}, opts, { noThink: true })); }
       if (!text) log("warn", "reasonComplete 返回空 content（推理模型可能把 token 全耗在思考上了，请增大 max_tokens 或改用 completeOnce）");
       const _p = usageParts(data.usage || null, messages, text);
       recordSpend("reason", _p.miss, _p.out, _p.hit, 0, true);
@@ -1071,11 +1075,42 @@ function shouldThinkChat(userText, hasImages) {
   if (/(为什么|怎么|如何|帮我|分析|建议|解释|对比|区别|能不能|可不可以|是不是|该不该|哪个更好)/.test(t)) return true; // 复杂请求
   return false;
 }
-async function agentChatOnce(history, userText, settings, memories, persona, call, userId, taskCtx, shortMemories, summaryKey, extraInfo) {
+/* R1 身份信封：所有聊天入口先归一为同一份信封，再交给唯一装配器。
+ * env: { sender=说话的人, room=0私聊/群号, channel=private|group|proactive|pet }
+ * opts 可覆盖：settings（如预算耗尽降 200）、taskCtx、messageId（群聊） */
+function buildPersonContext(env, opts) {
+  const o = opts || {};
+  const userId = Number(env.sender);
+  const settings = Object.assign({}, o.settings || resolveChatSettings());
+  let memories, shortMemories, persona, call, summaryKey, extraInfo = null;
+  const taskCtx = o.taskCtx || "";
+  if (env.channel === "group") {
+    const groupId = Number(env.room) || 0;
+    settings.max_tokens = Math.min(settings.max_tokens || 2048, 250);
+    memories = host.apis.get("groupInfo").filterMemoriesForGroup(loadMemories(userId), groupId);
+    shortMemories = host.apis.get("groupInfo").filterMemoriesForGroup(pruneShortMemories(userId), groupId);
+    summaryKey = "g" + groupId + "_" + userId;
+    extraInfo = { groupId, messageId: o.messageId };
+  } else if (env.channel === "pet") {
+    memories = loadMemories(userId);
+    shortMemories = pruneShortMemories(userId);
+    summaryKey = null;
+    extraInfo = { petMode: true };
+  } else {
+    memories = loadMemories(userId);
+    shortMemories = pruneShortMemories(userId);
+    summaryKey = undefined;
+  }
+  call = resolveCall(userId);
+  persona = userPersona(userId, settings);
+  return { settings, memories, persona, call, userId, taskCtx, shortMemories, summaryKey, extraInfo };
+}
+async function agentChatOnce(history, userText, pctx) {
+  const settings = pctx.settings, memories = pctx.memories, persona = pctx.persona, call = pctx.call, userId = pctx.userId, taskCtx = pctx.taskCtx, shortMemories = pctx.shortMemories;
   const _think = shouldThinkChat(userText, false);
-  const _extraInfo = extraInfo || null;
-  /* 摘要键：私聊=userId，群聊=会话键（避免把私聊摘要带进群） */
-  const _sumKey = (summaryKey === undefined) ? userId : summaryKey;
+  const _extraInfo = pctx.extraInfo || null;
+  /* 摘要键：私聊=userId，群聊=会话键（避免把私聊摘要带进群）；pet 传 null=不用摘要 */
+  const _sumKey = (pctx.summaryKey === undefined) ? userId : pctx.summaryKey;
   /* ===== 稳定前缀（几乎不变，缓存命中靠它；P2：stickerPrompt/summaryCtx 移出前缀到动态尾部）===== */
   const messages = [{ role: "system", content: persona || settings.persona }];
   messages.push({ role: "system", content: STYLE_DIRECTIVE });
@@ -1097,103 +1132,118 @@ async function agentChatOnce(history, userText, settings, memories, persona, cal
     messages.push(..._hist);
   }
 
-  /* ===== 动态块（全部放最后，避免打断前缀缓存）===== */
-  const _dyn = [];
-  /* P2：表情包提示词移到动态尾部（它随表情库变化，放前缀会击穿缓存） */
-  const sp = stickerPrompt();
-  if (sp) _dyn.push(sp);
-  /* 静默准备池：她之前攒着想说的话，挑合适的自然带出来 */
-  const _pending = host.apis.get("mind").pendingNudgesText(3);
-/* 未解决的事：她之前没想明白的，聊天时可以自然而然想起来 */
-try {
-  const _loops = host.apis.get("mind").openLoopsText(host.apis.get("mind").loadMindState());
-  if (_loops) _dyn.push(_loops);
-} catch (e) {}
-/* 元认知：对自己刚才表现的觉察，下一轮自己改 */
-try {
-  const _mc = host && host.apis.get("metaCog");
-  const _mctx = _mc && _mc.metaCtx ? _mc.metaCtx() : "";
-  if (_mctx) _dyn.push(_mctx);
-} catch (e) {}
-/* 插件提供的动态上下文（v0.4 起）：插件 export 一个 contextProvider(payload) → 文本/对象 */
-try {
-  const _cps = (host && host.contextProviders) || [];
-  for (const _cp of _cps) {
-    try {
-      const _r = _cp({ userId, petMode: !!(_extraInfo && _extraInfo.petMode) });
-      const _s = typeof _r === "string" ? _r : (_r && (_r.content || _r.text)) || "";
-      if (_s && String(_s).trim()) _dyn.push(String(_s).trim());
-    } catch (e) { log("warn", "contextProvider 失败: " + String(e && e.message).slice(0, 100)); }
-  }
-} catch (e) {}
-/* 空闲心跳带来的节奏感：她知道"现在是什么时候、你在不在" */
-try {
-  const _pulse = pulseCtx();
-  if (_pulse) _dyn.push(_pulse);
-} catch (e) {}
-/* 摸头的余韵：刚被摸过头，这次聊天可以自然带一句 */
-try {
-  const _hp = headpatCtx();
-  if (_hp) _dyn.push(_hp);
-} catch (e) {}
-/* 刚才发的表情包：她说「这张」时知道指哪张 */
-try {
-  const _sk = stickerSessionKey(userId, _extraInfo && _extraInfo.groupId);
-  const _sr = stickerRefCtx(_sk);
-  if (_sr) _dyn.push(_sr);
-} catch (e) {}
-  if (_pending) _dyn.push(`【你之前想过要做、但还没做完的事（只是想法，不是已经做成了；合适就自然提，不用全说）】\n${_pending}`);
-  const _mdHas = (() => { try { const a = host && host.apis.get("memoryDigest"); return a ? a.hasDigest(userId) : false; } catch (e) { return false; } })();
-  if (memories && memories.length) {
-    if (!_mdHas) _dyn.push(memoryIndexPrompt(memories, call));
-    const _rel = retrieveMemories(memories, userText, _mdHas ? 4 : 6);
-    if (_rel.length && (_mdHas || _rel.length !== memories.length)) _dyn.push(memoryPrompt(_rel, call));
-  }
-  if (shortMemories && shortMemories.length) {
-    _dyn.push(memoryIndexPrompt(shortMemories, call));
-    const _relS = retrieveMemories(shortMemories, userText, 3);
-    if (_relS.length && _relS.length !== shortMemories.length) _dyn.push(shortMemoryPrompt(_relS, call));
-  }
-  /* 结构化用户画像（名字/生日/兴趣/性格/偏好），让她真的"记得这个人" */
-  try {
-    const _upa = host && host.apis.get("userProfile");
-    const _up = _upa ? _upa.profileCtx(userId) : "";
-    if (_up) _dyn.push(_up);
-  } catch (e) {}
+  /* ===== 动态块（全部放最后，避免打断前缀缓存；R2：四档分级 + 总长度预算 + 四区排版）===== */
+  const _tier = budgetTier();   // P2-c/R2：预算越紧上下文越省（full/low/flash/minimal），同一调用内不变
+  const _tierLv = { full: 3, low: 2, flash: 1, minimal: 0 }[_tier] != null ? { full: 3, low: 2, flash: 1, minimal: 0 }[_tier] : 3;
+  const _dbudget = { full: 6000, low: 4000, flash: 2400, minimal: 1200 }[_tier] || 6000;
+  const _zones = { now: [], mem: [], todo: [], extra: [] };
+  let _dynLen = 0;
+  const _dput = (zone, t) => {
+    if (!t) return;
+    const s = String(t);
+    if (_dynLen + s.length > _dbudget) return;   // 总长度预算：超了就丢低优先级块（区四先满先丢）
+    _zones[zone].push(s);
+    _dynLen += s.length;
+  };
+  /* —— 区一【此刻】必读：任何预算档都注入（她在"现在"这件事上不能撒谎）—— */
   const _td = timeDirective();
-  if (_td) _dyn.push(_td);
-  const _esp = moodPrompt();
-  if (_esp) _dyn.push(_esp);
-  _dyn.push(activityCtx());
-  /* 运行状态：让她对「这次跑了多久 / 刚被重启过」有真实感知 */
+  if (_td) _dput("now", _td);
   try {
     const upMs = Date.now() - BOOT_TS;
     const upTxt = upMs < 10 * 60000
       ? "刚启动不久（之前那段对你来说还是空白的，别假装记得）"
       : `这次已经连续运行了 ${formatGap(upMs)}`;
-    _dyn.push(`【你的运行状态】${upTxt}。`);
+    _dput("now", `【你的运行状态】${upTxt}。`);
   } catch (e) {}
-  /* 生活费：让她随时能如实回答「你还有钱吗」，钱紧时也别乱花 */
+  _dput("now", activityCtx());
   try {
     const _bl = budgetLevel();
     const lvName = { rich: "宽裕", normal: "够用", tight: "紧张", empty: "快没了" }[_bl.level] || _bl.level;
-    _dyn.push(`【生活费】${budgetLine()}，状态${lvName}。钱紧时就别做花钱的事，好好陪对方聊天。`);
+    _dput("now", `【生活费】${budgetLine()}，状态${lvName}。钱紧时就别做花钱的事，好好陪对方聊天。`);
   } catch (e) {}
-  if (userId != null) _dyn.push(favorPrompt(userId));
-  if (taskCtx) _dyn.push(taskCtx);
+  /* —— 区二【你记得的】按需：flash/minimal 档不注入，省 token —— */
+  const _mdHas = (() => { try { const a = host && host.apis.get("memoryDigest"); return a ? a.hasDigest(userId) : false; } catch (e) { return false; } })();
+  if (_tierLv >= 1) {
+    if (memories && memories.length) {
+      if (!_mdHas) _dput("mem", memoryIndexPrompt(memories, call));
+      const _rel = retrieveMemories(memories, userText, _mdHas ? 4 : 6);
+      if (_rel.length && (_mdHas || _rel.length !== memories.length)) _dput("mem", memoryPrompt(_rel, call));
+    }
+    if (shortMemories && shortMemories.length) {
+      _dput("mem", memoryIndexPrompt(shortMemories, call));
+      const _relS = retrieveMemories(shortMemories, userText, 3);
+      if (_relS.length && _relS.length !== shortMemories.length) _dput("mem", shortMemoryPrompt(_relS, call));
+    }
+    try {
+      const _upa = host && host.apis.get("userProfile");
+      const _up = _upa ? _upa.profileCtx(userId) : "";
+      if (_up) _dput("mem", _up);
+    } catch (e) {}
+    const _esp = moodPrompt();
+    if (_esp) _dput("mem", _esp);
+    if (userId != null) _dput("mem", favorPrompt(userId));
+  }
+  /* —— 区三【要做的事】念头/任务：full/low 档 —— */
+  if (_tierLv >= 1) {
+    const _pending = host.apis.get("mind").pendingNudgesText(3);
+    if (_pending) _dput("todo", `【你之前想过要做、但还没做完的事（只是想法，不是已经做成了；合适就自然提，不用全说）】\n${_pending}`);
+    try {
+      const _loops = host.apis.get("mind").openLoopsText(host.apis.get("mind").loadMindState());
+      if (_loops) _dput("todo", _loops);
+    } catch (e) {}
+    if (taskCtx) _dput("todo", taskCtx);
+  }
+  /* —— 区四【顺带的】装饰/感知：full 档才有（sticker/pulse/headpat/身体感觉），meta 需 low 以上 —— */
+  if (_tierLv >= 3) {
+    const sp = stickerPrompt();
+    if (sp) _dput("extra", sp);
+    try {
+      const _cps = (host && host.contextProviders) || [];
+      for (const _cp of _cps) {
+        try {
+          const _r = _cp({ userId, petMode: !!(_extraInfo && _extraInfo.petMode) });
+          const _s = typeof _r === "string" ? _r : (_r && (_r.content || _r.text)) || "";
+          if (_s && String(_s).trim()) _dput("extra", String(_s).trim());
+        } catch (e) { log("warn", "contextProvider 失败: " + String(e && e.message).slice(0, 100)); }
+      }
+    } catch (e) {}
+    try {
+      const _pulse = pulseCtx();
+      if (_pulse) _dput("extra", _pulse);
+    } catch (e) {}
+    try {
+      const _hp = headpatCtx();
+      if (_hp) _dput("extra", _hp);
+    } catch (e) {}
+    try {
+      const _sk = stickerSessionKey(userId, _extraInfo && _extraInfo.groupId);
+      const _sr = stickerRefCtx(_sk);
+      if (_sr) _dput("extra", _sr);
+    } catch (e) {}
+  }
+  if (_tierLv >= 2) {
+    try {
+      const _mc = host && host.apis.get("metaCog");
+      const _mctx = _mc && _mc.metaCtx ? _mc.metaCtx() : "";
+      if (_mctx) _dput("extra", _mctx);
+    } catch (e) {}
+  }
   /* P1-a/P2-b：复杂消息走推理模型时，加隐藏式内心戏 + 回答前逻辑自检（只对开思考的消息注入） */
   if (_think) {
-    _dyn.push("【回答前】内心先按「理解问题→检索相关记忆→组织语言」三步想清楚，再把结论用口语说出来；思考过程不要说给主人听。");
-    _dyn.push("【回答前自查】有没有答非所问、张冠李戴、把猜测说成事实？有就先修正再回答。");
+    _dput("extra", "【回答前】内心先按「理解问题→检索相关记忆→组织语言」三步想清楚，再把结论用口语说出来；思考过程不要说给主人听。");
+    _dput("extra", "【回答前自查】有没有答非所问、张冠李戴、把猜测说成事实？有就先修正再回答。");
   }
+  const _zoneHeads = { now: "【此刻】", mem: "【你记得的】", todo: "【要做的事】", extra: "【顺带的】" };
+  const _dyn = [];
+  for (const z of ["now", "mem", "todo", "extra"]) if (_zones[z].length) _dyn.push(_zoneHeads[z] + "\n" + _zones[z].join("\n"));
 
-  if (_dyn.length) messages.push({ role: "system", content: "【实时上下文】\n" + _dyn.join("\n") });
+  if (_dyn.length) messages.push({ role: "system", content: "【实时上下文】\n" + _dyn.join("\n\n") });
   messages.push({ role: "user", content: userText });
 
   const stickers = [];
   const _usedTools = [];   // 本轮真正执行成功的工具名（输出后审计要用：说了什么 vs 真做了什么）
   const budgetOut = isBudgetExhausted();
-  const _tier = budgetTier();   // P2-c：预算越紧推理越省（full/low/flash/minimal）
+  /* R2：_tier 已在动态块上方计算（同一调用内不变），此处不再重复 */
   // 预算耗尽时：只封禁花钱/高风险工具，保留本地只读工具（查账单/记忆/待办/体检等不花钱）
   const CHEAP_TOOLS = new Set(["send_sticker", "budget_view", "memory_view", "list_todo", "birthday_view", "goals_view", "check_balance"]);
   let _toolDefs = host ? (budgetOut ? host.allToolDefs().filter((t) => CHEAP_TOOLS.has(t.function.name)) : host.allToolDefs()) : (budgetOut ? AGENT_TOOLS.filter((t) => t.function.name === "send_sticker") : AGENT_TOOLS);
@@ -1296,6 +1346,18 @@ function addOverclaimReflection(capability, saidText) {
     fs.writeFileSync(p, JSON.stringify(arr));
   } catch (e) {}
 }
+/* R0-A3：对方纠正「没说过」→ 写反思（说对方的事前先确认） */
+function notePremiseCorrection(userId, saidText) {
+  try {
+    const p = path.join(SELF_DIR, "reflections.json");
+    let arr = [];
+    try { const d = JSON.parse(fs.readFileSync(p, "utf8")); if (Array.isArray(d)) arr = d; } catch (e) {}
+    arr.push({ text: `我把「${String(saidText || "").slice(0, 30)}」当事实说出去，对方纠正说没这回事。以后说对方的事（输赢/去向/做过什么）前，要么对话里见过，要么先用疑问句问。`, from: "premise", ts: Date.now(), subject: "premise" });
+    while (arr.length > 100) arr.shift();
+    fs.mkdirSync(SELF_DIR, { recursive: true });
+    fs.writeFileSync(p, JSON.stringify(arr));
+  } catch (e) {}
+}
 function auditReply(text, usedTools) {
   const src = String(text || "");
   if (!src) return { text: src, blocked: false };
@@ -1331,20 +1393,21 @@ async function recordAndSend(userId, text) {
 async function proactiveAgentTurn(userId, intentDesc) {
   if (!apiKey || isBudgetExhausted()) return null;
   try {
-    const settings = resolveChatSettings();
     const history = loadSession(userId);
-    const memories = loadMemories(userId);
-    const shortMemories = pruneShortMemories(userId);
     const call = resolveCall(userId);
-    const persona = userPersona(userId, settings);
-    /* P1-f：dailyPlan 命名空间无任何插件注册（死引用，_pCtx 恒空），删掉 */
     const intro = `（系统提示，这不是${call}说的话，是你自己此刻想主动找${call}说话）意图：${intentDesc}。直接说，不要任何解释、不要括号动作。`;
-    const raw = await agentChatOnce(history, intro, settings, memories, persona, call, userId, "", shortMemories);
-    const reply = String((raw && raw.reply) || "").trim();
+    const raw = await agentChatOnce(history, intro, buildPersonContext({ sender: userId, room: 0, channel: "proactive" }));
+    let reply = String((raw && raw.reply) || "").trim();
+    if (!reply) return null;
+    /* R0-A2：主动搭话也过吹牛审计（无工具台账，声称自己做过的事会被如实改写） */
+    const _aud = auditReply(reply, []);
+    reply = String((_aud && _aud.text) || "").trim();
     if (!reply) return null;
     if (lastProactiveMsg.get(userId) === "[object Object]") lastProactiveMsg.delete(userId);
-    if (proactiveDup(lastProactiveMsg.get(userId) || "", reply)) { log("info", `主动搭话内容重复，跳过`); return null; }
+    /* R0-B：持久化去重——比最近 10 条 + 跨人 6 小时冷却 + sha256 指纹（重启不丢） */
+    if (proactiveLoggedDup(userId, reply)) { log("info", `主动搭话内容重复（含跨人冷却），跳过`); return null; }
     lastProactiveMsg.set(userId, reply);
+    appendProactiveLog(userId, reply);
     const stickers = (raw && raw.stickers) || [];
     await recordAndSend(userId, reply);
     for (const s of stickers.slice(0, 2)) {
@@ -1710,6 +1773,32 @@ function proactiveDup(a, b) {
   return common >= 2 && common / Math.min(ka.size, kb.size) >= 0.4;
 }
 
+/* R0-B：主动消息持久化去重（最近 10 条近似 + 跨人 6h 冷却 + sha256 精确指纹，重启不丢） */
+const PROACTIVE_LOG_FILE = path.join(DATA_DIR, "proactive-log.json");
+function hashString(s) { return require("crypto").createHash("sha256").update(String(s)).digest("hex"); }
+function loadProactiveLog() { try { const d = JSON.parse(fs.readFileSync(PROACTIVE_LOG_FILE, "utf8")); return Array.isArray(d) ? d : []; } catch (e) { return []; } }
+function appendProactiveLog(userId, text) {
+  try {
+    const a = loadProactiveLog();
+    a.push({ userId: Number(userId), text: String(text || "").slice(0, 200), ts: Date.now(), fp: hashString(`${userId}|${String(text || "")}`) });
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(PROACTIVE_LOG_FILE, JSON.stringify(a.slice(-60)));
+  } catch (e) {}
+}
+function proactiveLoggedDup(userId, text) {
+  const s = String(text || "").trim();
+  if (!s) return true;
+  const fp = hashString(`${userId}|${s}`);
+  const a = loadProactiveLog();
+  if (a.some((x) => x && x.fp === fp)) return true;
+  const mine = a.filter((x) => x && x.userId === Number(userId)).slice(-10);
+  if (mine.some((x) => proactiveDup(x.text, s))) return true;
+  const cutoff = Date.now() - 6 * 3600e3;
+  const others = a.filter((x) => x && x.userId !== Number(userId) && x.ts >= cutoff).slice(-20);
+  if (others.some((x) => proactiveDup(x.text, s))) return true;
+  return false;
+}
+
 const BOREDOM_FILE = path.join(DATA_DIR, "boredom.json");
 function getBoredom() { try { const d = JSON.parse(fs.readFileSync(BOREDOM_FILE, "utf8")); return Number(d.value) || 0; } catch (e) { return 0; } }
 async function fetchFunImage() {
@@ -1847,7 +1936,7 @@ async function deliberateMind(settings, st, percept, ctxBits) {
   const lv = budgetLevel().level;
   try {
     const raw = (lv === "rich")
-      ? await reasonComplete([{ role: "user", content: prompt }], settings, 700)
+      ? await reasonComplete([{ role: "user", content: prompt }], settings, 1024, { effort: "low" })
       : await completeOnce([{ role: "user", content: prompt }], settings, 500, 0.7);
     const m = String(raw).match(/\{[\s\S]*\}/);
     if (m) { const j = JSON.parse(m[0]); return Array.isArray(j.intents) ? j.intents.slice(0, 3) : []; }
@@ -1946,7 +2035,10 @@ async function runMindAction(action, content, settings, masterUin, now) {
       if (masterUin && now - (lastProactiveAt.get(masterUin) || 0) >= proactiveIntervalMs(masterUin)) {
         const img = await fetchFunImage();
         const cap = content || "给你看个好玩的～";
+        /* R0-B：心流分享也过持久化去重（跨人冷却） */
+        if (proactiveLoggedDup(masterUin, cap)) { log("info", "心智-分享趣图跳过：内容最近发过"); return; }
         await recordAndSend(masterUin, cap);
+        appendProactiveLog(masterUin, cap);
         if (img) {
           await onebotSend("send_msg", { message_type: "private", user_id: masterUin, message: [{ type: "image", data: { file: "file:///" + img.replace(/\\/g, "/") } }] }).catch(() => {});
         }
@@ -2742,7 +2834,7 @@ async function processPrivateChat(userId, text, images, voiceRequested, msgTime)
     }
     setActivity("在陪" + call + "聊天");
     if (!rawReply) {
-      agentRes = await agentChatOnce(history, text, settings, memories, persona, call, userId, taskCtx, shortMemories);
+      agentRes = await agentChatOnce(history, text, buildPersonContext({ sender: userId, room: 0, channel: "private" }, { taskCtx, settings }));
       rawReply = agentRes && agentRes.reply;
     }
     if (!rawReply) throw new Error("模型未返回内容");
@@ -2916,9 +3008,6 @@ async function processGroupChat(groupId, userId, text, images, msgTime, direct, 
       }
     }
     const gCall = resolveCall(userId);
-    const gPersona = userPersona(userId, settings);
-    const gMemories = host.apis.get("groupInfo").filterMemoriesForGroup(loadMemories(userId), groupId);
-    const gShort = host.apis.get("groupInfo").filterMemoriesForGroup(pruneShortMemories(userId), groupId);
     const gKey = "g" + groupId + "_" + userId;
     const _lastMsgT = (loadMsgTimes())[gKey] || 0;
     const gapMs = (_lastMsgT && msgTime) ? (msgTime - _lastMsgT) * 1000 : 0;
@@ -2938,9 +3027,9 @@ async function processGroupChat(groupId, userId, text, images, msgTime, direct, 
     let _gWeatherCtx = "";
     try { const _gW = host && host.apis.get("weather"); if (_gW) _gWeatherCtx = await _gW.weatherCtx(); } catch (e) {}
     const gCtx = [GROUP_DIRECTIVE, gInfoCtx, timeCtx, gMemberCtx, gLogCtx, gMemeCtx, _gLifeCtx, _gWeatherCtx, _gTeachCtx, "注意：有些事是对方在私聊里告诉你的，别在群里随便说。"].filter(Boolean).join("\n") || undefined;
-    const gSettings = Object.assign({}, settings, { max_tokens: Math.min(settings.max_tokens || 2048, 250) });
+    /* R1：群聊 max_tokens 上限由 buildPersonContext 统一处理 */
     setActivity("在群里陪" + gCall + "聊天");
-    const gRes = await agentChatOnce(_histForChat, text, gSettings, gMemories, gPersona, gCall, userId, gCtx, gShort, gKey, { groupId, messageId: GROUP_LAST_MSGID.get(Number(groupId) + "_" + Number(userId)) });
+    const gRes = await agentChatOnce(_histForChat, text, buildPersonContext({ sender: userId, room: groupId, channel: "group" }, { taskCtx: gCtx, messageId: GROUP_LAST_MSGID.get(Number(groupId) + "_" + Number(userId)) }));
     const rawReply = gRes && gRes.reply;
     const reply = stripStageDirections(rawReply) || rawReply;
     if (reply) {
@@ -3148,7 +3237,6 @@ function withTimeout(p, ms) {
 
 /* 用 Momo 的大脑回桌宠的一句话 */
 async function petChat(petMessages) {
-  const settings = resolveChatSettings();
   const master = Number((cfg.qq && cfg.qq.master_user) || 0);
   const arr = Array.isArray(petMessages) ? petMessages : [];
   const lastUser = [...arr].reverse().find((m) => m && m.role === "user");
@@ -3158,12 +3246,9 @@ async function petChat(petMessages) {
   const history = arr.slice(0, lastIdx)
     .filter((m) => m && (m.role === "user" || m.role === "assistant"))
     .map((m) => ({ role: m.role, content: String(m.content || "").slice(0, 2000) }));
-  const persona = userPersona(master, settings);
-  const memories = loadMemories(master);
-  const short = pruneShortMemories(master);
   const petCtx = "【当前渠道】你和主人正通过**桌宠聊天窗口**说话（不是 QQ）。他能看到你的样子，但你们是靠打字交流的。";
   const _t0 = Date.now();
-  const res = await agentChatOnce(history, userText, settings, memories, persona, resolveCall(master), master, petCtx, short, null, { petMode: true });
+  const res = await agentChatOnce(history, userText, buildPersonContext({ sender: master, room: 0, channel: "pet" }, { taskCtx: petCtx }));
   log("info", `桌宠联脑完成 耗时 ${Date.now() - _t0}ms（历史 ${history.length} 条）`);
   const reply = String((res && res.reply) || "").trim();
   return reply || "（嗯……我在想）";
@@ -3305,7 +3390,7 @@ host = createHost({
   completeOnce, reasonComplete, qzoneHttp, bochaKey,
   cleanText, UA, sleep, recordSpend, estimateTokens, maybeCollect,
   getEmotion, getMood, addMood, setMood, getBoredom, addBoredom, loadBudget, budgetCfg, loadMindState: () => host.apis.get("mind").loadMindState(), textSimilar,
-  getLastSentSticker, stickerSessionKey,
+  getLastSentSticker, stickerSessionKey, notePremiseCorrection,
   loadEvolution, reloadEvolution, pickStickerByIds, SELF_DIR, BASE_VERSION,
   proactive: {
     get lastInteractionTs() { return lastInteractionTs; },
@@ -3322,7 +3407,7 @@ host = createHost({
       try {
         const st = getCurrentStatus(userId);
         const act = loadActivityState();
-        const ask = `你是 Momo。现在 ${todayText()}（${periodOfDay()}）。你的想法：${idea}。对方当前状态：${st ? st.text : "未知"}。你刚才在做：${act && act.text ? act.text : "发呆"}。请判断：现在适合给对方发消息吗？考虑时间是否合适、会不会打扰、内容是否必要。只回答 yes 或 no。`;
+        const ask = `你是 Momo。现在 ${todayText()}（${periodOfDay()}）。你的想法：${idea}。对方当前状态：${st ? st.text : "未知"}。你刚才在做：${act && act.text ? act.text : "发呆"}。请判断：现在适合给对方发消息吗？考虑时间是否合适、会不会打扰、内容是否必要；再检查这段想法有没有把对方没确认过的事说成事实（比如对方输没输、去了哪、买没买），有就说 no。只回答 yes 或 no。`;
         const ans = await completeOnce([{ role: "user", content: ask }], resolveChatSettings(), 10, 0.2);
         return /yes/i.test(String(ans || ""));
       } catch (e) { return true; }

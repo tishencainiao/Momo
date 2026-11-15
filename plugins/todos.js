@@ -26,6 +26,7 @@ module.exports = {
   name: "todos",
   displayName: "待办",
   description: "待办增删查 + /待办 + 到期提醒",
+  userScoped: true,
   permissions: ["DATA_DIR", "formatGap", "log", "recordAndSend", "sendPrivate"],
   version: "1.0.0",
   attribution: {

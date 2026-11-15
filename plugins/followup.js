@@ -20,6 +20,12 @@ function recordOutbound(userId, text) {
   a.push({ id: "f" + Date.now().toString(36), userId: Number(userId), q, ts: Date.now(), status: "pending" });
   save(a);
 }
+function rejectPendingFor(userId) {
+  const a = load();
+  let changed = false;
+  for (const f of a) if (f.userId === Number(userId) && f.status === "pending") { f.status = "rejected"; f.doneAt = Date.now(); changed = true; }
+  if (changed) save(a);
+}
 function markAnswered(userId) {
   const a = load();
   let changed = false;
@@ -40,18 +46,29 @@ module.exports = {
   name: "followup",
   displayName: "未完话头",
   description: "主动问过的事避免反复追问，可作主动搭话由头",
+  userScoped: true,
   permissions: ["DATA_DIR"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },
-  apiSpec: {"followup":{"recordOutbound":{"input":"","output":"","sideEffect":"写盘"},"markAnswered":{"input":"","output":"","sideEffect":""},"pendingFor":{"input":"","output":"","sideEffect":""},"pendingCtx":{"input":"","output":"","sideEffect":""}}},
+  apiSpec: {"followup":{"recordOutbound":{"input":"","output":"","sideEffect":"写盘"},"markAnswered":{"input":"","output":"","sideEffect":""},"rejectPendingFor":{"input":"","output":"","sideEffect":"写盘"},"pendingFor":{"input":"","output":"","sideEffect":""},"pendingCtx":{"input":"","output":"","sideEffect":""}}},
 
-  api: { followup: { recordOutbound, markAnswered, pendingFor, pendingCtx } },
+  api: { followup: { recordOutbound, markAnswered, rejectPendingFor, pendingFor, pendingCtx } },
   hooks: {
     reply(payload) {
       const { userId, reply } = payload || {};
       if (!userId || !reply) return;
       markAnswered(userId);            // 用户开口了 → 之前的待答算揭过
       recordOutbound(userId, reply);   // 这轮若又问了问题，记成新的待答
+    },
+    private_message(payload) {
+      const { userId, raw } = payload || {};
+      const t = String(raw || "").trim();
+      if (!userId || !t || t.length > 60) return;
+      /* R0-A3：对方纠正「我没说过/别乱说」→ 未完话头全标 rejected + 写反思 */
+      if (/(没说过|没说我|别乱说|你记错|瞎说|乱说|乱讲|瞎扯|哪有|哪来的)/.test(t)) {
+        rejectPendingFor(userId);
+        try { if (_ctx.notePremiseCorrection) _ctx.notePremiseCorrection(userId, t); } catch (e) {}
+      }
     },
   },
 };

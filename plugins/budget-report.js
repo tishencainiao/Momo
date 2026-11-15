@@ -63,6 +63,7 @@ module.exports = {
   name: "budget-report",
   displayName: "账本",
   description: "生活费记账 + /花费 命令 + 账本 api（供报告/身体读）",
+  userScoped: true,
   permissions: ["DATA_DIR", "config", "isMaster", "sendPrivate"],
   version: "1.1.0",
   init(ctx) { _ctx = ctx; },

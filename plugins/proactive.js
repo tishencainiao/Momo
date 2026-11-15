@@ -98,12 +98,14 @@ function proactiveLoop() {
           followup: `你之前问过${_call}「${followQ || ""}」。如果有真实的话头就自然提一下；如果没有，就正常打个招呼，不要编造新话题或假经历。`,
           silence: `${_call}已经约 ${minutes} 分钟没和你说话了，自然搭话（问候、分享一个可爱的小想法、或问一个轻松的小问题）`,
         };
+        /* R0-A1：所有主动搭话统一加「只提已确认事实」硬规则（防「你游戏输了」式未证实前提） */
+        const _intentText = (_intents[kind] || `主动和${_call}说点什么（自然、像平时聊天）`) + "（硬规则：只提对话里实际说过、对方确认过的事；对方没确认过结果的事——输赢、去向、成败、成绩——一律用疑问句轻轻重问，禁止用陈述句断言。）";
         // ③ 日程/未完话头候选 → 先让大脑决定「该不该发」，再决定「说什么」
         if ((kind === "schedule" || kind === "followup") && P.shouldSendNow) {
-          const _ok = await P.shouldSendNow(u, _intents[kind]);
+          const _ok = await P.shouldSendNow(u, _intentText);
           if (!_ok) { _ctx.log("info", `主动搭话[${kind}] 大脑决定不发`); return; }
         }
-        const text = await P.proactiveAgentTurn(u, _intents[kind] || `主动和${_call}说点什么（自然、像平时聊天）`);
+        const text = await P.proactiveAgentTurn(u, _intentText);
         if (!text) return;
         const _fu2 = _ctx.getApi && _ctx.getApi("followup");
         if (_fu2) _fu2.recordOutbound(u, text);
@@ -124,6 +126,7 @@ module.exports = {
   name: "proactive",
   displayName: "主动行为",
   description: "何时能打扰 + 说什么话（状态/定时在内核 proactive 束）",
+  userScoped: true,
   permissions: ["apiKey", "config", "getActivity", "getApi", "isUserQuiet", "loadSession", "log", "markProbed", "nowHM", "proactive", "recordAction", "setActivity"],
   version: "1.0.0",
   // dailyPlan 已停用（改用 life-log 的真实活动），这里只依赖 followup；

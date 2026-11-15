@@ -307,6 +307,7 @@ module.exports = {
   name: "group-info",
   displayName: "群/用户信息",
   description: "OneBot 扩展接口：群成员/群日志/跨窗口（M8 下沉）",
+  userScoped: true,
   permissions: ["DATA_DIR", "config", "getApi", "isMaster", "log", "onebotSend", "recordAction"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },

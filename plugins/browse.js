@@ -165,6 +165,7 @@ module.exports = {
   name: "browse",
   displayName: "刷视频",
   description: "看 B 站热门视频并「看懂」一条（browse 工具）",
+  userScoped: false,
   permissions: ["DATA_DIR", "completeOnce", "getApi", "getSetting", "isBudgetExhausted", "log"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },

@@ -97,6 +97,7 @@ function diagnose(opts) {
       else if (!SEMVER.test(String(mod.version))) yellow(`version "${mod.version}" 非 semver`);
       if (!mod.displayName) yellow("缺 displayName（友好中文名）");
       if (!mod.description || !String(mod.description).trim()) yellow("缺 description（用途介绍）");
+      if (typeof mod.userScoped !== "boolean") yellow("缺 userScoped 声明（分人守则 §9：true=按人处理数据/发消息，false=纯系统级）");
       if (mod.engines && mod.engines.kernel && !satisfies(mod.engines.kernel, kernel)) {
         red(`engines.kernel "${mod.engines.kernel}" 不满足当前内核 ${kernel}`);
       }

@@ -27,6 +27,7 @@ module.exports = {
   name: "appellations",
   displayName: "称呼",
   description: "给自己和别人起称呼（/叫我、/称呼 命令）",
+  userScoped: true,
   permissions: ["isMaster", "loadAppellations", "log", "recordAction", "resolveCall", "resolveTargetId", "saveAppellations", "sendPrivate", "getApi", "getFavor"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },

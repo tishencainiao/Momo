@@ -132,6 +132,7 @@ module.exports = {
   name: "memory-digest",
   displayName: "记忆消化",
   description: "读消化后的「认识」，替换流水账注入（mem.digest）",
+  userScoped: true,
   permissions: ["DATA_DIR", "config", "getApi", "getSetting", "isMaster", "log", "recordAction", "setActivity"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; try { startTimer(); } catch (e) {} },

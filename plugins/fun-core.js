@@ -84,6 +84,7 @@ module.exports = {
   name: "fun-core",
   displayName: "娱乐公共底座",
   description: "活动流水 + 每日次数闸门 + 娱乐预算闸门",
+  userScoped: false,
   permissions: ["DATA_DIR", "dayStr", "getSetting", "isBudgetExhausted"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },

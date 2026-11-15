@@ -67,6 +67,7 @@ module.exports = {
   name: "settings",
   displayName: "可配置参数",
   description: "让 Momo 自己查看/修改各功能暴露的可调参数",
+  userScoped: true,
   permissions: ["isMaster", "log", "recordAction", "registry", "setSetting"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },

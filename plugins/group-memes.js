@@ -72,6 +72,7 @@ module.exports = {
   name: "group-memes",
   displayName: "群梗",
   description: "学群里的黑话/梗，只在对应群生效",
+  userScoped: true,
   permissions: ["DATA_DIR", "log"],
   version: "1.0.0",
   init(ctx2) { _ctx = ctx2; },

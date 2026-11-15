@@ -221,6 +221,7 @@ module.exports = {
   name: "capability-index",
   displayName: "能力索引",
   description: "扫描工具/命令、按身份过滤、生成能力摘要与负清单",
+  userScoped: true,
   permissions: ["DATA_DIR", "config", "log", "registry"],
   version: "1.0.0",
   attribution: {

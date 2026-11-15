@@ -151,6 +151,7 @@ module.exports = {
   name: "roles",
   displayName: "角色与权限",
   description: "管理员/用户/访客三级身份",
+  userScoped: true,
   permissions: ["DATA_DIR", "config", "getFavor", "getSetting", "loadAppellations"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },

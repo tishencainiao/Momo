@@ -303,6 +303,7 @@ module.exports = {
   name: "qzone",
   displayName: "QQ 空间",
   description: "发说说 / 看动态 / 评论",
+  userScoped: true,
   permissions: ["DATA_DIR", "completeOnce", "config", "dayStr", "getApi", "getSetting", "isMaster", "log", "qzoneHttp", "recordAction", "sendPrivate", "settings", "todayText"],
   version: "1.2.0",
   init(ctx) { _ctx = ctx; },

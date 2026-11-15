@@ -60,6 +60,7 @@ module.exports = {
   displayName: "插件体检",
   description: "检查插件清单是否合规（plugin_doctor 工具 + /插件体检 命令 + 每日巡检 + 落盘报告）",
   version: "1.0.0",
+  userScoped: true,
   permissions: ["BASE_VERSION", "DATA_DIR", "SELF_DIR", "config", "getSetting", "isMaster", "log", "recordAction", "recordAndSend", "sendPrivate"],
   init(ctx) { _ctx = ctx; },
   apiSpec: {"pluginDoctor":{"check":{"input":"无","output":"report","sideEffect":"写 data/plugin-health.json"},"issueBrief":{"input":"无","output":"string","sideEffect":"只读"}}},

@@ -121,6 +121,7 @@ module.exports = {
   name: "interact",
   displayName: "互动",
   description: "名片点赞、拍一拍",
+  userScoped: true,
   permissions: ["isMaster", "log", "onebotSend", "recordAction", "resolveCall", "resolveTargetId", "sendPrivate"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },

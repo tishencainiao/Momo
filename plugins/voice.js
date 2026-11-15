@@ -195,6 +195,7 @@ module.exports = {
   name: "voice",
   displayName: "语音",
   description: "TTS 发音 + 语音转文字（QQ 原生转写→SAPI 兜底）",
+  userScoped: true,
   permissions: ["DATA_DIR", "config", "getSetting", "log", "onebotSend", "qzoneHttp", "sendPrivate"],
   version: "1.2.0",
   init(ctx) { _ctx = ctx; },

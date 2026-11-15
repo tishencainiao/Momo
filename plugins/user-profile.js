@@ -125,6 +125,7 @@ module.exports = {
   name: "user-profile",
   displayName: "用户画像",
   description: "结构化用户画像",
+  userScoped: true,
   permissions: ["DATA_DIR", "completeOnce", "getSetting", "isMaster", "loadSession", "log", "resolveTargetId", "settings"],
   version: "1.0.0",
   attribution: {

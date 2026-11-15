@@ -18,6 +18,7 @@ module.exports = {
   name: "group-chat",
   displayName: "群聊行为设置",
   description: "声明群聊可调参数（具体逻辑在内核）",
+  userScoped: false,
   permissions: ["getSetting"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },

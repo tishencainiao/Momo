@@ -110,6 +110,7 @@ module.exports = {
   name: "meta-cog",
   displayName: "元认知",
   description: "逐条统计 + 提醒注入 + 每日复盘",
+  userScoped: false,
   permissions: ["DATA_DIR", "config", "dayStr", "getApi", "getSetting", "log"],
   version: "1.1.0",
   attribution: {

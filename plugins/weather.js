@@ -87,6 +87,7 @@ module.exports = {
   name: "weather",
   displayName: "天气",
   description: "城市天气 + 自然关心主人",
+  userScoped: true,
   permissions: ["DATA_DIR", "getSetting", "isMaster", "log", "recordAction", "setSetting"],
   version: "1.1.0",
   init(ctx) { _ctx = ctx; },

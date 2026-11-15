@@ -395,6 +395,7 @@ module.exports = {
   name: "pet-body",
   displayName: "身体联动",
   description: "让大脑指挥桌面上的身体（HTTP 127.0.0.1:4010）",
+  userScoped: true,
   permissions: ["addBoredom", "addMood", "budgetLevel", "describeImageFile", "getApi", "getBoredom", "getEmotion", "getMood", "getSetting", "isMaster", "log", "recordAction", "sendPrivate", "setSetting"],
   version: "1.0.0",
   init(ctx) {

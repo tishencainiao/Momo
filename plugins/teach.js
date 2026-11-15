@@ -180,6 +180,7 @@ module.exports = {
   name: "teach",
   displayName: "教学系统",
   description: "主人主动教 Momo 东西，并跟踪哪些教学真的生效",
+  userScoped: true,
   permissions: ["DATA_DIR", "config", "getApi", "isMaster", "loadMemories", "log", "saveMemories", "sendPrivate", "stickerSessionKey"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },

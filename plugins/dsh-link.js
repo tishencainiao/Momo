@@ -94,6 +94,7 @@ module.exports = {
   name: "dsh-link",
   displayName: "DSH 联动通知",
   description: "读 DSH 事件文件 → QQ 通知主人",
+  userScoped: true,
   permissions: ["DATA_DIR", "config", "isMaster", "log", "recordAction", "recordAndSend", "sendPrivate"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },

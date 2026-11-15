@@ -579,6 +579,7 @@ module.exports = {
   name: "stickers",
   displayName: "表情包",
   description: "表情包语义库 + 收藏",
+  userScoped: true,
   permissions: ["DATA_DIR", "STICKER_DB", "canAfford", "completeOnce", "config", "getLastSentSticker", "getSetting", "isBudgetExhausted", "isMaster", "log", "mimeOf", "onebotSend", "recordAndSend", "sendPrivate", "settings"],
   version: "2.0.0",
   settings: [

@@ -6,6 +6,7 @@ module.exports = {
   name: "mute",
   displayName: "屏蔽",
   description: "屏蔽/解除屏蔽（主人专属，数据层在内核）",
+  userScoped: true,
   permissions: ["addMute", "isMaster", "log", "recordAction", "removeMute", "resolveTargetId"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },

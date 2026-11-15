@@ -112,6 +112,7 @@ module.exports = {
   name: "reminders",
   displayName: "提醒",
   description: "设提醒 + /提醒 + 到期检查定时器",
+  userScoped: true,
   permissions: ["DATA_DIR", "formatGap", "getApi", "getSetting", "log", "recordAndSend", "sendPrivate"],
   version: "1.1.0",
   init(ctx) { _ctx = ctx; _dir = ctx.DATA_DIR; },

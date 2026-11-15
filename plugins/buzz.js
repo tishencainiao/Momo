@@ -113,6 +113,7 @@ module.exports = {
   name: "buzz",
   displayName: "吃瓜",
   description: "读百度实时热搜、写一句自己的看法（read_buzz）",
+  userScoped: false,
   permissions: ["DATA_DIR", "addBoredom", "completeOnce", "getApi", "log"],
   version: "1.0.0",
   requires: ["fun-core", "hobby"],

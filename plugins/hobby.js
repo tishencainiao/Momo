@@ -116,6 +116,7 @@ module.exports = {
   name: "hobby",
   displayName: "兴趣档案",
   description: "爱好 + 收藏夹",
+  userScoped: false,
   permissions: ["SELF_DIR", "getSetting", "log"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },

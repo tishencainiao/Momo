@@ -334,6 +334,7 @@ module.exports = {
   name: "puzzle",
   displayName: "玩谜题",
   description: "数独，带存档、跨天、代码判定",
+  userScoped: false,
   permissions: ["DATA_DIR", "SELF_DIR", "addBoredom", "addMood", "completeOnce", "formatGap", "getApi", "getSetting", "log"],
   version: "1.0.0",
   requires: ["fun-core", "hobby"],

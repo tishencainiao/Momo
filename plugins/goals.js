@@ -22,6 +22,7 @@ module.exports = {
   name: "goals",
   displayName: "目标系统",
   description: "定目标、看目标、今日计划、上下文注入",
+  userScoped: true,
   permissions: ["DATA_DIR", "apiKey", "dayStr", "isBudgetExhausted", "isMaster", "log", "parseMemoryJson", "sendPrivate", "settings"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; _dir = ctx.DATA_DIR; },

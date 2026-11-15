@@ -21,7 +21,7 @@ ok(satisfies("bogus", "1.81.0") === true, "解析不了放行不误伤");
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "momo-doctor-"));
 function write(f, body) { fs.writeFileSync(path.join(dir, f), body); }
 
-write("good.js", `module.exports = { name: "good-tool", displayName: "好工具", description: "测", version: "1.0.0", permissions: ["log"], init(){} };`);
+write("good.js", `module.exports = { name: "good-tool", displayName: "好工具", description: "测", version: "1.0.0", userScoped: true, permissions: ["log"], init(){} };`);
 write("nometa.js", `module.exports = { name: "nometa", version: "1.0.0", init(){} };`);
 write("badname.js", `module.exports = { name: "BadName", displayName: "坏名", description: "x", version: "1.0.0", permissions: ["log"], init(){} };`);
 write("missing-req.js", `module.exports = { name: "missing-req", displayName: "缺依赖", description: "x", version: "1.0.0", permissions: ["log"], requires: ["nonexistent-ns"], init(){} };`);

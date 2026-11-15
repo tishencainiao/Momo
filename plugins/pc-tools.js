@@ -209,6 +209,7 @@ module.exports = {
   name: "pc-tools",
   displayName: "电脑工具",
   description: "截图/找文件/开软件/系统信息（仅主人）",
+  userScoped: true,
   permissions: ["DATA_DIR", "completeOnce", "config", "isMaster", "log", "onebotSend", "sendPrivate"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; },
