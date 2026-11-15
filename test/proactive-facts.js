@@ -16,8 +16,8 @@ check("硬规则覆盖输赢/去向/成败/成绩", prs.includes("输赢、去�
 /* A2a shouldSendNow 前提审计 */
 check("shouldSendNow 问句含前提审计", idx.includes("对方没确认过的事说成事实"));
 
-/* A2b proactiveAgentTurn 接吹牛审计 */
-check("proactiveAgentTurn 接 auditReply", idx.includes("auditReply(reply, [])"));
+/* A2b proactiveAgentTurn 接吹牛审计（S3 起经 before_send 钩子） */
+check("proactiveAgentTurn 接 before_send 审计", idx.includes("runBeforeSend(_bs)"));
 
 /* B 持久化去重 */
 check("有 proactiveLoggedDup", idx.includes("function proactiveLoggedDup"));

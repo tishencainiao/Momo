@@ -84,6 +84,7 @@ function createHost(core) {
     isUserQuiet: (u) => core.userQuietState(u),
     markProbed: (u) => core.markProbed(u),
     getActivity: () => core.loadActivityState(),
+    setActivity: (t) => core.setActivity(t),
     sendPrivate: (u, t) => core.sendPrivate(u, t),
     sendGroup: (g, t) => core.onebotSend("send_msg", { message_type: "group", group_id: Number(g), message: [{ type: "text", data: { text: String(t) } }] }),
     recordAndSend: (u, t) => core.recordAndSend(u, t),
@@ -172,6 +173,14 @@ function createHost(core) {
         if (r && typeof r.then === "function") r.catch((e) => core.log("warn", `插件钩子 ${kind} 失败: ${e.message.slice(0, 120)}`));
       } catch (e) { core.log("warn", `插件钩子 ${kind} 失败: ${e.message.slice(0, 120)}`); }
     }
+  }
+
+  /* before_send：发送前变换钩子（骨骼方案 S3）。钩子直接改 payload.text，返回 payload。 */
+  function runBeforeSend(payload) {
+    for (const fn of hookLists.before_send || []) {
+      try { fn(payload || {}); } catch (e) { core.log("warn", `before_send 钩子失败: ${e.message.slice(0, 120)}`); }
+    }
+    return payload;
   }
 
   const pluginRecords = new Map();   // file -> { mod, tools:[], commands:[], hooks:{}, ctxProviders:[], apis:[] }
@@ -290,7 +299,7 @@ function createHost(core) {
 
   function allToolDefs() { return core.AGENT_TOOLS.concat(plugins.flatMap((p) => (p.tools || []).map((t) => t.def))); }
 
-  return { plugins, toolRegistry, commandRegistry, apis, hookLists, contextProviders, loadPlugins, runHook, allToolDefs, ctx, reloadPlugin, watchPlugins, checkRequires, pluginRecords, setPluginEnabled, pluginState: () => ({ disabled: Array.from(disabledSet) }) };
+  return { plugins, toolRegistry, commandRegistry, apis, hookLists, contextProviders, loadPlugins, runHook, runBeforeSend, allToolDefs, ctx, reloadPlugin, watchPlugins, checkRequires, pluginRecords, setPluginEnabled, pluginState: () => ({ disabled: Array.from(disabledSet) }) };
 }
 
 module.exports = { createHost };

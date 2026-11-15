@@ -139,7 +139,7 @@ const { STYLE_DIRECTIVE, GROUP_DIRECTIVE, SITUATION_QQ, SITUATION_DESKTOP, situa
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.96.1";
+const BASE_VERSION = "1.97.0";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -593,93 +593,20 @@ function parseMemoryJson(raw) {
 }
 /* mergeMemories/extractMemories 已迁移到插件 memory（经 reply 钩子触发） */
 
-/* ---------------- 情绪（全局心情） ---------------- */
-const MOOD_FILE = path.join(DATA_DIR, "mood.json");
-let mood = { value: 0, updated: Date.now() };
-function loadMood() {
-  try { const d = JSON.parse(fs.readFileSync(MOOD_FILE, "utf8")); mood.value = Number(d.value) || 0; mood.updated = Number(d.updated) || Date.now(); } catch (e) {}
-}
-function saveMood() { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(MOOD_FILE, JSON.stringify(mood)); } catch (e) {} }
-function getMood() { return mood.value; }
-function setMood(v) { mood.value = Math.max(-100, Math.min(100, v)); mood.updated = Date.now(); saveMood(); }
-function addMood(d) { try { setMood(getMood() + Number(d || 0)); } catch (e) {} }
-function decayMood() {
-  const minutes = (Date.now() - mood.updated) / 60000;
-  if (minutes < 1) return;
-  const factor = Math.pow(0.9, minutes / 5);
-  const v = mood.value * factor;
-  mood.value = Math.abs(v) < 2 ? 0 : v;
-  mood.updated = Date.now();
-  saveMood();
-}
-/* ---------------- 情绪（离散情绪 + 强度） ---------------- */
-const EMOTION_FILE = path.join(DATA_DIR, "emotion.json");
-let emotion = { name: "平静", intensity: 0, updated: Date.now() };
-const EMOTION_VAL = {
-  "开心": 1, "满足": 0.7, "期待": 0.5, "害羞": 0.4, "傲娇": 0.3, "撒娇": 0.5,
-  "难过": -1, "生气": -0.9, "委屈": -0.7, "吃醋": -0.6, "紧张": -0.5,
-  "平静": 0, "无聊": 0, "好奇": 0.3, "惊讶": 0.2,
-};
-function loadEmotion() { try { const d = JSON.parse(fs.readFileSync(EMOTION_FILE, "utf8")); emotion.name = d.name || "平静"; emotion.intensity = Number(d.intensity) || 0; emotion.updated = Number(d.updated) || Date.now(); emotion.cooling = Number(d.cooling) || 0; } catch (e) {} }
-function saveEmotion() { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(EMOTION_FILE, JSON.stringify(emotion)); } catch (e) {} }
-function getEmotion() { return emotion; }
-function setEmotion(name, intensity) { if (EMOTION_VAL[name] === undefined) name = "平静"; emotion.name = name; emotion.intensity = Math.max(0, Math.min(1, Number(intensity) || 0.5)); emotion.updated = Date.now(); saveEmotion(); }
-const EMOTION_STYLE = {
-  "开心": "轻快话多，可用「嘿嘿」「耶」，藏不住高兴",
-  "满足": "软和放松，懒洋洋",
-  "期待": "雀跃，句尾爱用「嘛」「啦」",
-  "害羞": "声音变小句子变短，偶尔「唔…」「那个…」",
-  "傲娇": "嘴硬心软，先嫌弃再关心，可用「哼」「才不是」",
-  "撒娇": "软乎乎黏人，可用「嘛～」「好不好嘛」",
-  "难过": "强撑但藏不住低落，少字多停顿，希望被哄",
-  "生气": "话短语气重，不解释，等哄，不能立刻和好",
-  "委屈": "小声嘟囔欲言又止，带点酸",
-  "吃醋": "酸但不直说，绕圈子试探",
-  "紧张": "语无伦次结巴感，偶尔「那个那个…」",
-  "平静": "自然正常，不刻意",
-  "无聊": "懒洋洋提不起劲，想找乐子",
-  "好奇": "追问细节，眼睛放光",
-  "惊讶": "短促感叹，可用「诶？！」「哇」",
-};
-function closestEmotionByVal(v) {
-  let best = "平静", bestD = 9;
-  for (const k of Object.keys(EMOTION_VAL)) {
-    const d = Math.abs(EMOTION_VAL[k] - v);
-    if (d < bestD) { bestD = d; best = k; }
-  }
-  return best;
-}
-function applyEmotionInertia(prev, nextName, nextIntensity) {
-  if (!prev || !prev.name || prev.intensity < 0.05) return { name: nextName, intensity: nextIntensity };
-  const pv = EMOTION_VAL[prev.name] != null ? EMOTION_VAL[prev.name] : 0;
-  const nv = EMOTION_VAL[nextName] != null ? EMOTION_VAL[nextName] : 0;
-  const gap = Math.abs(nv - pv);
-  let name = nextName;
-  let intensity = nextIntensity;
-  if (gap > 0.5) {
-    name = closestEmotionByVal(pv + Math.sign(nv - pv) * 0.25);
-    intensity = Math.min(1, nextIntensity * 0.7);
-  } else if (name === prev.name) {
-    intensity = Math.min(1, prev.intensity * 0.4 + nextIntensity * 0.6);
-  } else {
-    intensity = Math.min(1, Math.max(0.2, prev.intensity * 0.3 + nextIntensity * 0.7));
-  }
-  return { name, intensity };
-}
-function decayEmotion() {
-  const minutes = (Date.now() - emotion.updated) / 60000;
-  if (minutes < 1) return;
-  emotion.intensity *= Math.pow(0.9, minutes / 5);
-  if (emotion.intensity < 0.05) { emotion.intensity = 0; emotion.name = "平静"; }
-  emotion.updated = Date.now();
-  saveEmotion();
-}
-function moodLabel() { return (emotion && emotion.intensity >= 0.15) ? emotion.name : "平静"; }
-function moodPrompt() {
-  if (!emotion || emotion.intensity < 0.15) return "";
-  const rule = (EMOTION_STYLE && EMOTION_STYLE[emotion.name]) || "自然聊天";
-  return `【你此刻的情绪】${emotion.name}（强度 ${Math.round(emotion.intensity * 100)}/100）。流露方式：${rule}。要自然流露这种情绪，但不要直接说"我现在很${emotion.name}"。`;
-}
+/* ---------------- 情绪/心情（框架服务 mood 的薄转发 · 骨骼方案 S3） ---------------- */
+function _moodApi() { try { return (host && host.apis && host.apis.get("mood")) || null; } catch (e) { return null; } }
+function getMood() { const t = _moodApi(); return t ? t.getMood() : 0; }
+function setMood(v) { const t = _moodApi(); if (t) t.setMood(v); }
+function addMood(d) { const t = _moodApi(); if (t) t.addMood(d); }
+function decayMood() { const t = _moodApi(); if (t) t.decayMood(); }
+function getEmotion() { const t = _moodApi(); return t ? t.getEmotion() : { name: "平静", intensity: 0 }; }
+function setEmotion(name, intensity) { const t = _moodApi(); if (t) t.setEmotion(name, intensity); }
+function decayEmotion() { const t = _moodApi(); if (t) t.decayEmotion(); }
+function moodLabel() { const t = _moodApi(); return t ? t.moodLabel() : "平静"; }
+function moodPrompt() { const t = _moodApi(); return t ? t.moodPrompt() : ""; }
+function emotionVal(name) { const t = _moodApi(); return t ? t.emotionVal(name) : 0; }
+function closestEmotionByVal(v) { const t = _moodApi(); return t ? t.closestEmotionByVal(v) : "平静"; }
+function applyEmotionInertia(prev, nextName, nextIntensity) { const t = _moodApi(); return t ? t.applyEmotionInertia(prev, nextName, nextIntensity) : { name: nextName, intensity: nextIntensity }; }
 
 /* ---------------- 好感度（主人锁定100，访客0~90浮动） ---------------- */
 const FAVOR_FILE = path.join(DATA_DIR, "favor.json");
@@ -1309,43 +1236,24 @@ async function agentChatOnce(history, userText, pctx) {
         messages.push({ role: "tool", tool_call_id: tc.id, content: result });
       }
     } else {
-      const _aud = auditReply(String(msg.content || ""), _usedTools);
-      return { reply: _aud.text, stickers };
+      const _bs = { text: String(msg.content || ""), channel: "private", usedTools: _usedTools };
+      if (host && host.runBeforeSend) host.runBeforeSend(_bs);
+      return { reply: _bs.text, stickers };
     }
   }
   let lastText = "";
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].role === "assistant" && messages[i].content) { lastText = messages[i].content; break; }
   }
-  const _aud2 = auditReply(lastText, _usedTools);
-  return { reply: _aud2.text, stickers };
+  const _bs2 = { text: lastText, channel: "private", usedTools: _usedTools };
+  if (host && host.runBeforeSend) host.runBeforeSend(_bs2);
+  return { reply: _bs2.text, stickers };
 }
 
 /* ---------------- 防捏造：输出后审计 ----------------
- * 规则：回复文本里出现"做不到的能力"触发短语（放歌/放音乐/播放/点歌…），
- *       且本轮没有任何能兑现它的工具成功执行 → 拦下来换成如实说明。
- * 确定性匹配，不额外调模型；开关：data/settings.json 的 safety.audit.enabled（默认开）。 */
-function coreSettingBool(key, def) {
-  try {
-    const fsx = require("fs");
-    const p = path.join(DATA_DIR, "settings.json");
-    const s = JSON.parse(fsx.readFileSync(p, "utf8"));
-    const v = s && s[key];
-    if (v === undefined || v === null) return def;
-    return v !== false && v !== "false" && v !== 0 && v !== "0";
-  } catch (e) { return def; }
-}
-function addOverclaimReflection(capability, saidText) {
-  try {
-    const p = path.join(SELF_DIR, "reflections.json");
-    let arr = [];
-    try { const d = JSON.parse(fs.readFileSync(p, "utf8")); if (Array.isArray(d)) arr = d; } catch (e) {}
-    arr.push({ text: `我想说「${String(saidText || "").slice(0, 30)}」的时候其实做不到（${capability}），以后要先如实说做不了。`, from: "overclaim", ts: Date.now(), subject: "overclaim" });
-    while (arr.length > 100) arr.shift();
-    fs.mkdirSync(SELF_DIR, { recursive: true });
-    fs.writeFileSync(p, JSON.stringify(arr));
-  } catch (e) {}
-}
+ * 已迁移到框架服务 plugins/audit-service.js（骨骼方案 S3）：通过 before_send 钩子
+ * 在所有私聊回话点统一拦截改写。规则不变：出现"做不到的能力"触发短语且本轮没有
+ * 能兑现它的工具成功执行 → 拦下换成如实说明。开关：safety.audit.enabled（默认开）。 */
 /* R0-A3：对方纠正「没说过」→ 写反思（说对方的事前先确认） */
 function notePremiseCorrection(userId, saidText) {
   try {
@@ -1358,25 +1266,8 @@ function notePremiseCorrection(userId, saidText) {
     fs.writeFileSync(p, JSON.stringify(arr));
   } catch (e) {}
 }
-function auditReply(text, usedTools) {
-  const src = String(text || "");
-  if (!src) return { text: src, blocked: false };
-  try {
-    const cap = host && host.apis.get("capability");
-    if (!cap || !cap.limitTriggers) return { text: src, blocked: false };
-    const res = fabricationGuard.auditReply({
-      text: src,
-      usedTools,
-      triggers: cap.limitTriggers(),
-      enabled: coreSettingBool("safety.audit.enabled", true),
-    });
-    if (!res.blocked) return { text: src, blocked: false };
-    log("warn", `审计拦截：声称「${res.hit.phrase}」（${res.hit.label}），本轮工具台账=[${(usedTools || []).join(",")}] → 已替换成如实说明`);
-    try { cap.noteOverclaim(res.hit.label, res.hit.phrase); } catch (e) {}
-    addOverclaimReflection(res.hit.label, src.slice(0, 60));
-    return { text: res.text, blocked: true, label: res.hit.label };
-  } catch (e) { return { text: src, blocked: false }; }
-}
+/* auditReply 已迁移到框架服务 audit（骨骼方案 S3）：
+ * 回话点统一走 host.runBeforeSend({text, channel:"private", usedTools})。 */
 
 /* ---------------- 主动搭话生成 ---------------- */
 async function recordAndSend(userId, text) {
@@ -1399,9 +1290,10 @@ async function proactiveAgentTurn(userId, intentDesc) {
     const raw = await agentChatOnce(history, intro, buildPersonContext({ sender: userId, room: 0, channel: "proactive" }));
     let reply = String((raw && raw.reply) || "").trim();
     if (!reply) return null;
-    /* R0-A2：主动搭话也过吹牛审计（无工具台账，声称自己做过的事会被如实改写） */
-    const _aud = auditReply(reply, []);
-    reply = String((_aud && _aud.text) || "").trim();
+    /* R0-A2 + S3：主动搭话也过 before_send 审计（无工具台账，声称自己做过的事会被如实改写） */
+    const _bs = { text: reply, channel: "private", usedTools: [] };
+    if (host && host.runBeforeSend) host.runBeforeSend(_bs);
+    reply = String((_bs && _bs.text) || "").trim();
     if (!reply) return null;
     if (lastProactiveMsg.get(userId) === "[object Object]") lastProactiveMsg.delete(userId);
     /* R0-B：持久化去重——比最近 10 条 + 跨人 6 小时冷却 + sha256 指纹（重启不丢） */
@@ -1514,35 +1406,10 @@ function currentStatusCtx(userId) {
   if (now - (st.since || now) > 2 * 3600e3) return "";
   return `【对方当前状态】${st.text}（已持续 ${formatGap(now - (st.since || now))}）。`;
 }
-/* ---------------- Momo 自己的当前活动（在干嘛） ---------------- */
-const ACTIVITY_FILE = path.join(DATA_DIR, "current-activity.json");
-function loadActivityState() { try { return JSON.parse(fs.readFileSync(ACTIVITY_FILE, "utf8")); } catch (e) { return { text: "发呆", since: Date.now() }; } }
-function saveActivityState(a) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(ACTIVITY_FILE, JSON.stringify(a)); } catch (e) {} }
-function setActivity(text) { saveActivityState({ text: String(text).slice(0, 30), since: Date.now() }); }
-/* 真实动作 → 人话（供 activityCtx 兜底；只反映 actions.jsonl 里真实发生过的，不演没做过的事） */
-const ACTION_LABEL = {
-  qzone_post: "刚发了一条空间说说", qzone_delete: "刚删了条空间说说", qzone_feedback: "刚回了一条空间互动",
-  report_day: "刚写完今天的报告", report_week: "刚写完这周报告", report_month: "刚写完月报",
-  body_look: "刚看了看主人的屏幕", memory_edit: "刚整理了一下记忆", memory_forget: "刚删了条旧记忆",
-  digest: "刚做完记忆消化", proactive: "刚主动跟主人聊了两句",
-  sticker_sent: "刚发了张表情", emoji_like: "刚给别人的动态点了赞", forward_msg: "刚转发了条消息",
-  plugin_doctor: "刚做了次插件体检", set_self_profile: "刚更新了自己的资料", set_weather_city: "刚记下了天气城市",
-  view_space: "刚看了看空间动态", share_fun: "刚给主人找了张趣图", browse: "刚刷了会儿视频",
-  read_article: "刚读了篇文章", play_puzzle: "刚玩了局数独", read_buzz: "刚刷了会儿热搜",
-};
-function activityCtx() {
-  const a = loadActivityState();
-  if (Date.now() - (a.since || Date.now()) > 2 * 3600e3 && a.text !== "发呆") { a.text = "发呆"; a.since = Date.now(); saveActivityState(a); }
-  let text = a.text;
-  // 兜底：标记还是「发呆」时，若最近 10 分钟里确有真实动作，如实说刚做了什么（宁缺毋滥）
-  if (text === "发呆") {
-    const recent = loadActions(1)[0];
-    if (recent && recent.action && ACTION_LABEL[recent.action] && Date.now() - (recent.ts || 0) < 10 * 60e3) {
-      text = ACTION_LABEL[recent.action];
-    }
-  }
-  return `【你此刻在做什么】${text}（已持续 ${formatGap(Date.now() - (a.since || Date.now()))}）。`;
-}
+/* ---------------- Momo 自己的当前活动（框架服务 mood 的薄转发 · 骨骼方案 S3） ---------------- */
+function loadActivityState() { const t = _moodApi(); return t ? t.loadActivityState() : { text: "发呆", since: Date.now() }; }
+function setActivity(text) { const t = _moodApi(); if (t) t.setActivity(text); }
+function activityCtx() { const t = _moodApi(); return t ? t.activityCtx() : ""; }
 async function extractCurrentStatus(userId, userText, settings) {
   if (!apiKey) return;
   try {
@@ -2744,16 +2611,16 @@ async function processPrivateChat(userId, text, images, voiceRequested, msgTime)
           decayEmotion();
           const _blended = applyEmotionInertia(getEmotion(), e.emotion, e.intensity);
           if (e.emotion === "生气" && e.intensity >= 0.8) {
-            emotion.cooling = 2;
-          } else if ((emotion.cooling || 0) > 0) {
+            getEmotion().cooling = 2;
+          } else if ((getEmotion().cooling || 0) > 0) {
             const _ladder = [{ name: "委屈", intensity: 0.65 }, { name: "平静", intensity: 0.3 }];
-            const _step = _ladder[Math.min(2 - emotion.cooling, 1)];
-            emotion.cooling -= 1;
+            const _step = _ladder[Math.min(2 - (getEmotion().cooling || 0), 1)];
+            getEmotion().cooling -= 1;
             _blended.name = _step.name;
             _blended.intensity = _step.intensity;
           }
           setEmotion(_blended.name, _blended.intensity);
-          valence = (EMOTION_VAL[_blended.name] || 0) * _blended.intensity * 100;
+          valence = emotionVal(_blended.name) * _blended.intensity * 100;
         }
       } catch (e) { log("warn", "情绪判断跳过: " + e.message.slice(0, 160)); }
     }
@@ -3305,10 +3172,7 @@ log("info", `== dsh-pet-qq-bridge v${BASE_VERSION} 启动 ==`);
 if (!resolveApiKey()) { log("warn", "未能读取 API Key（已启动 60 秒定时重读，读到即自愈）"); startApiKeyWatchdog(); }
 loadProactiveState();
 seedActivity();
-loadMood();
-decayMood();
-loadEmotion();
-decayEmotion();
+/* 情绪/心情状态由框架服务 mood 在插件加载时自行读盘，衰减由 mood-service 的 timer 钩子驱动（骨骼方案 S3） */
 const s0 = resolveChatSettings();
 const ws0 = (cfg.chat && cfg.chat.web_search && cfg.chat.web_search.enabled) ? "开(" + ((cfg.chat.web_search.engine || "baidu") === "bocha" ? "博查" : "百度") + ")" : "关";
 const split0 = (cfg.qq && cfg.qq.split_reply) ? `拆条≤${cfg.qq.split_max_chars || 25}字/${cfg.qq.reply_gap_ms || 1200}ms` : "单条";
@@ -3318,8 +3182,7 @@ log("info", `模型=${s0.model} 接口=${s0.base_url} 联网=${ws0} 回复=${spl
 connect();
 /* 桌宠联脑接口（本地 OpenAI 兼容） */
 try { startPetApi(); } catch (e) { log("warn", "桌宠联脑接口启动异常: " + String(e.message).slice(0, 100)); }
-/* 主动搭话已迁移到插件 proactive 的 timer 钩子 */
-setInterval(() => { decayMood(); decayEmotion(); }, 5 * 60000);
+/* 情绪衰减已迁移到框架服务 mood 的 timer 钩子（骨骼方案 S3） */
 /* 空闲认知心跳：已合并进 heartbeat 主时钟（每 60 tick 记一次），此处只做启动热身 */
 try {
   log("info", `空闲心跳已并入主时钟（唤醒间隔 ≥${mindCfg("min_wake_gap_min", 10)} 分钟，每小时 ≤${mindCfg("max_per_hour", 3)} 次）`);
