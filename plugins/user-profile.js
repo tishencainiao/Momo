@@ -8,7 +8,7 @@ let _ctx = null;
 
 const FILE = () => path.join(_ctx.DATA_DIR, "user-profile.json");
 function loadAll() { try { return JSON.parse(fs.readFileSync(FILE(), "utf8")); } catch (e) { return {}; } }
-function saveAll(o) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); fs.writeFileSync(FILE(), JSON.stringify(o, null, 2)); } catch (e) {} }
+function saveAll(o) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(FILE(), o); } catch (e) {} }
 
 function cfgNum(k, d) { try { const v = Number(_ctx.getSetting(k, d)); return Number.isFinite(v) ? v : d; } catch (e) { return d; } }
 function cfgBool(k, d) { try { const v = _ctx.getSetting(k, d); return v === false ? false : (v === true ? true : d); } catch (e) { return d; } }

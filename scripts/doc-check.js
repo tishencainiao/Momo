@@ -103,6 +103,26 @@ for (const f of docFiles) {
   }
 }
 
+// 7) 框架对账：package.json 版本 == BASE_VERSION；AGENTS.md 插件数 == pluginCount；architecture daily_cny == config
+const pkgText = readText(path.join(root, 'package.json'));
+if (pkgText) {
+  const pv = String((pkgText.match(/"version"\s*:\s*"([^"]+)"/) || [])[1] || "");
+  if (pv && pv !== baseVersion) fail('package.json 版本 ' + pv + ' 与 BASE_VERSION ' + baseVersion + ' 不一致');
+}
+const agentsText = readText(path.join(root, 'AGENTS.md'));
+if (agentsText) {
+  const am = agentsText.match(/(\d+)\s*个插件/);
+  if (am && Number(am[1]) !== pluginCount) fail('AGENTS.md 写 ' + am[1] + ' 个插件，实际 ' + pluginCount);
+}
+const cfgText = readText(path.join(root, 'config.json'));
+const archText = readText(path.join(root, 'docs', 'architecture.md'));
+if (cfgText && archText) {
+  let daily = 1;
+  try { const cfg = JSON.parse(cfgText); daily = Number(cfg.budget && cfg.budget.daily_cny) || 1; } catch {}
+  const dm = archText.match(/`budget\.daily_cny` \| 每日生活费上限 \| `(\d+)`/);
+  if (dm && Number(dm[1]) !== daily) fail('architecture.md 写 daily_cny=' + dm[1] + '，config.json 实际 ' + daily);
+}
+
 // 6) 索引完整性：docs/index.md 必须覆盖所有 docs/*.md（顶层），漏登记=红（拦提交）
 const indexText = readText(path.join(root, 'docs', 'index.md'));
 if (!indexText) {

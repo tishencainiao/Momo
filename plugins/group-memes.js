@@ -8,7 +8,7 @@ let _ctx = null;
 
 const file = () => path.join(_ctx.DATA_DIR, "group-memes.json");
 function load() { try { const d = JSON.parse(fs.readFileSync(file(), "utf8")); return (d && typeof d === "object") ? d : {}; } catch (e) { return {}; } }
-function save(d) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); fs.writeFileSync(file(), JSON.stringify(d)); } catch (e) {} }
+function save(d) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(file(), d); } catch (e) {} }
 
 /* 学一个梗（同群同梗去重，重复说会累加 used） */
 function learn(groupId, meme, meaning, byUserId) {

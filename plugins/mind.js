@@ -20,7 +20,7 @@ const mindFile = () => path.join(_ctx.DATA_DIR, "mind.json");
 const pendingFile = () => path.join(_ctx.DATA_DIR, "pending-nudges.json");
 
 function loadMindState() { try { return JSON.parse(fs.readFileSync(mindFile(), "utf8")); } catch (e) { return { thoughts: [], last_think: 0 }; } }
-function saveMindState(st) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); fs.writeFileSync(mindFile(), JSON.stringify(st)); } catch (e) {} }
+function saveMindState(st) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(mindFile(), st); } catch (e) {} }
 /* 念头统一存成 {ts, text}（兼容旧的纯字符串），并最多留 100 条 */
 function pushThought(st, t) {
   const txt = String(t || "").slice(0, 120);
@@ -70,7 +70,7 @@ function mindHistoryText(limit) {
 
 /* ---- 待办意图（pending nudges） ---- */
 function loadPending() { try { const a = JSON.parse(fs.readFileSync(pendingFile(), "utf8")); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
-function savePending(a) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); fs.writeFileSync(pendingFile(), JSON.stringify(a.slice(-40))); } catch (e) {} }
+function savePending(a) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(pendingFile(), a.slice(-40)); } catch (e) {} }
 function addPendingNudge(item) {
   const arr = loadPending();
   const c = String(item.content || "").trim().slice(0, 160);

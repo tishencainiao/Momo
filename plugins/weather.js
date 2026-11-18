@@ -119,7 +119,7 @@ function saveCity(city, userId) {
     if (_ctx.setSetting) _ctx.setSetting("weather.city", c);
     // 同时写旧文件，保持向后兼容
     fs.mkdirSync(_ctx.DATA_DIR, { recursive: true });
-    fs.writeFileSync(cityFile(), JSON.stringify({ city: c, setBy: Number(userId) || 0, ts: Date.now() }));
+    _ctx.writeJsonAtomic(cityFile(), { city: c, setBy: Number(userId) || 0, ts: Date.now() });
     cache = null; cacheTs = 0; cacheCity = "";   // 换城市 → 清缓存
     try { _ctx.recordAction({ action: "set_weather_city", by: Number(userId) || 0, detail: c, ok: true }); } catch (e2) {}
     return true;

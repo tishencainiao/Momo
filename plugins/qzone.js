@@ -7,9 +7,9 @@ let _ctx = null;
 const QZONE_STATE_FILE = () => path.join(_ctx.DATA_DIR, "qzone-state.json");
 const QZONE_INFO_FILE = () => path.join(_ctx.DATA_DIR, "qzone-info.json");
 function loadQzoneState() { try { return JSON.parse(fs.readFileSync(QZONE_STATE_FILE(), "utf8")); } catch (e) { return {}; } }
-function saveQzoneState(st) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); fs.writeFileSync(QZONE_STATE_FILE(), JSON.stringify(st)); } catch (e) {} }
+function saveQzoneState(st) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(QZONE_STATE_FILE(), st); } catch (e) {} }
 function loadQzInfo() { try { return JSON.parse(fs.readFileSync(QZONE_INFO_FILE(), "utf8")); } catch (e) { return {}; } }
-function saveQzInfo(s) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); fs.writeFileSync(QZONE_INFO_FILE(), JSON.stringify(s)); } catch (e) {} }
+function saveQzInfo(s) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(QZONE_INFO_FILE(), s); } catch (e) {} }
 
 function dailyQzoneCount() { const st = loadQzoneState(); return (st.dates && st.dates[_ctx.dayStr(0)]) || 0; }
 function weeklyQzoneCount() {
@@ -178,7 +178,7 @@ async function autoCommentNewPosts(uin, newPosts, settings) {
  * 处理：冷却 30 分钟不再尝试 + 一天最多提醒主人一次（去 NapCat 面板重新登录 QQ 即可恢复）。 */
 const QZ_LOGIN_FILE = () => path.join(_ctx.DATA_DIR, "qzone-login.json");
 function loginLostTs() { try { return Number(JSON.parse(fs.readFileSync(QZ_LOGIN_FILE(), "utf8")).ts || 0); } catch (e) { return 0; } }
-function setLoginLost() { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); fs.writeFileSync(QZ_LOGIN_FILE(), JSON.stringify({ ts: Date.now() })); } catch (e) {} }
+function setLoginLost() { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(QZ_LOGIN_FILE(), { ts: Date.now() }); } catch (e) {} }
 function isQzoneLoginError(msg) { const m = String(msg || ""); return m.includes("请先登录空间") || m.includes("-3000"); }
 async function notifyLoginLostOnce() {
   const last = loginLostTs();
@@ -220,7 +220,7 @@ let lastTick = 0;
  */
 const QZONE_PENDING_FILE = () => path.join(_ctx.DATA_DIR, "qzone-pending.json");
 function loadPending() { try { return JSON.parse(fs.readFileSync(QZONE_PENDING_FILE(), "utf8")); } catch (e) { return {}; } }
-function savePending(o) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); fs.writeFileSync(QZONE_PENDING_FILE(), JSON.stringify(o)); } catch (e) {} }
+function savePending(o) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(QZONE_PENDING_FILE(), o); } catch (e) {} }
 function selfDeleteWindowMs() { return cfgNum("qzone.delete_self_window_min", 60) * 60000; }
 
 /* 本机记录的说说（含 tid），新的在前 */

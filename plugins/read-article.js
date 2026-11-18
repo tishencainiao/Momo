@@ -21,7 +21,7 @@ const SOURCES = [
 
 const stateFile = () => path.join(_ctx.DATA_DIR, "read-article-state.json");
 function loadState() { try { return JSON.parse(fs.readFileSync(stateFile(), "utf8")) || {}; } catch (e) { return {}; } }
-function saveState(s) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); fs.writeFileSync(stateFile(), JSON.stringify(s)); } catch (e) {} }
+function saveState(s) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(stateFile(), s); } catch (e) {} }
 function hostLastTs(host) { const s = loadState(); return Number((s.host_ts || {})[host]) || 0; }
 function markHost(host) { const s = loadState(); s.host_ts = s.host_ts || {}; s.host_ts[host] = Date.now(); saveState(s); }
 
@@ -141,7 +141,7 @@ function appendReflection(text, subject) {
     arr.push({ text: String(text).slice(0, 160), from: "read", ts: Date.now(), subject: String(subject || "").slice(0, 20) });
     while (arr.length > 100) arr.shift();
     fs.mkdirSync(_ctx.SELF_DIR, { recursive: true });
-    fs.writeFileSync(p, JSON.stringify(arr));
+    _ctx.writeJsonAtomic(p, arr);
   } catch (e) {}
 }
 function appendJournal(text) {
@@ -152,7 +152,7 @@ function appendJournal(text) {
     arr.push({ ts: Date.now(), text: String(text).slice(0, 300), from: "read" });
     while (arr.length > 200) arr.shift();
     fs.mkdirSync(_ctx.SELF_DIR, { recursive: true });
-    fs.writeFileSync(p, JSON.stringify(arr));
+    _ctx.writeJsonAtomic(p, arr);
   } catch (e) {}
 }
 

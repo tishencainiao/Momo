@@ -34,7 +34,7 @@ T("pet 入口带 taskCtx", /buildPersonContext\(\{ sender: master, room: 0, chan
       resolveCall: (u) => "U" + u,
       host: { apis: { get: (ns) => ({ filterMemoriesForGroup: (arr, g) => arr.map((x) => ({ content: "g" + g + x.content })) }) } },
     };
-    vm.runInNewContext("f = " + fnSrc, sandbox);
+    vm.runInNewContext("var apiOf = function (ns) { return host && host.apis && host.apis.get(ns); };\nf = " + fnSrc, sandbox);
     const f = sandbox.f;
     const priv = f({ sender: 7, room: 0, channel: "private" }, {});
     T("private 装配", priv.userId === 7 && priv.call === "U7" && priv.persona === "persona-7" && priv.summaryKey === undefined && priv.taskCtx === "" && priv.memories.length === 1 && priv.settings.max_tokens === 2048 && priv.extraInfo === null);

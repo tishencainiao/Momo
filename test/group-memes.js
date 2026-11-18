@@ -6,7 +6,7 @@ const DIR = path.join(os.tmpdir(), "momo-memes-test-" + Date.now());
 fs.mkdirSync(DIR, { recursive: true });
 
 const plugin = require("E:/Learn/Momo/plugins/group-memes.js");
-plugin.init({ DATA_DIR: DIR, log: () => {} });
+plugin.init({ DATA_DIR: DIR, log: () => {}, writeJsonAtomic: (f, o) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(o, null, 0)); } catch (e) {} }, writeFileAtomic: (f, t) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); } catch (e) {} }, });
 const M = plugin.api.groupMemes;
 
 const G1 = 100000003, G2 = 999999;

@@ -35,14 +35,14 @@ function journalAppend(entry) {
     j.push(Object.assign({ ts: Date.now() }, entry));
     while (j.length > 200) j.shift();
     fs.mkdirSync(_ctx.SELF_DIR, { recursive: true });
-    fs.writeFileSync(p, JSON.stringify(j));
+    _ctx.writeJsonAtomic(p, j);
   } catch (e) {}
 }
 function selfIdentityListFull() { try { const r = JSON.parse(fs.readFileSync(path.join(_ctx.SELF_DIR, "identity.json"), "utf8")); return Array.isArray(r) ? r : []; } catch (e) { return []; } }
 /* 兼容旧格式（纯字符串）和新格式（{text,from}），始终返回字符串数组 */
 function selfIdentityList() { return selfIdentityListFull().map((e) => (typeof e === "string" ? e : (e && e.text))).filter(Boolean); }
 function loadWishes() { try { return JSON.parse(fs.readFileSync(path.join(_ctx.DATA_DIR, "wishes.json"), "utf8")); } catch (e) { return []; } }
-function saveWishes(w) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); fs.writeFileSync(path.join(_ctx.DATA_DIR, "wishes.json"), JSON.stringify(w)); } catch (e) {} }
+function saveWishes(w) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(path.join(_ctx.DATA_DIR, "wishes.json"), w); } catch (e) {} }
 function addWish(text, source) {
   const t = String(text || "").trim().slice(0,120);
   if (!t) return;
@@ -53,10 +53,10 @@ function addWish(text, source) {
   saveWishes(w);
 }
 function loadScore() { try { return JSON.parse(fs.readFileSync(path.join(_ctx.DATA_DIR, "self-score.json"), "utf8")); } catch (e) { return { count: 0, sum: 0 }; } }
-function saveScore(s) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); fs.writeFileSync(path.join(_ctx.DATA_DIR, "self-score.json"), JSON.stringify(s)); } catch (e) {} }
+function saveScore(s) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(path.join(_ctx.DATA_DIR, "self-score.json"), s); } catch (e) {} }
 function loadUpdates() { try { return JSON.parse(fs.readFileSync(path.join(_ctx.SELF_DIR, "updates.json"), "utf8")); } catch (e) { return { adopted: [], rejected: [] }; } }
-function saveUpdates(u) { try { fs.mkdirSync(_ctx.SELF_DIR, { recursive: true }); fs.writeFileSync(path.join(_ctx.SELF_DIR, "updates.json"), JSON.stringify(u)); } catch (e) {} }
-function saveProposal(p) { try { fs.mkdirSync(path.join(_ctx.SELF_DIR, "proposals"), { recursive: true }); fs.writeFileSync(path.join(_ctx.SELF_DIR, "proposals", String(p.id) + ".json"), JSON.stringify(p)); } catch (e) {} }
+function saveUpdates(u) { try { fs.mkdirSync(_ctx.SELF_DIR, { recursive: true }); _ctx.writeJsonAtomic(path.join(_ctx.SELF_DIR, "updates.json"), u); } catch (e) {} }
+function saveProposal(p) { try { fs.mkdirSync(path.join(_ctx.SELF_DIR, "proposals"), { recursive: true }); _ctx.writeJsonAtomic(path.join(_ctx.SELF_DIR, "proposals", String(p.id) + ".json"), p); } catch (e) {} }
 function loadProposals() {
   const out = [];
   try {
@@ -137,7 +137,7 @@ function matchSkillRule(text, userId) {
 const HEADPAT_FILE = () => path.join(_ctx.DATA_DIR, "headpat.json");
 const HEADPAT_MOOD_GAP_MS = 5 * 60000;   // 5 分钟内重复摸不叠加心情
 function loadHeadpat() { try { return JSON.parse(fs.readFileSync(HEADPAT_FILE(), "utf8")); } catch (e) { return {}; } }
-function saveHeadpat(s) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); fs.writeFileSync(HEADPAT_FILE(), JSON.stringify(s)); } catch (e) {} }
+function saveHeadpat(s) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(HEADPAT_FILE(), s); } catch (e) {} }
 function applyHeadpatFeel(userId) {
   const now = Date.now();
   const st = loadHeadpat();
@@ -197,7 +197,7 @@ async function extractSelfIdentity(userText, replyText, settings, userId) {
     full.push({ text: s, from: userId || 0, kind: "self-report", verified: true });
     trimWithArchive(full, SELF_ID_MAX, "identity");
     fs.mkdirSync(_ctx.SELF_DIR, { recursive: true });
-    fs.writeFileSync(path.join(_ctx.SELF_DIR, "identity.json"), JSON.stringify(full));
+    _ctx.writeJsonAtomic(path.join(_ctx.SELF_DIR, "identity.json"), full);
     _ctx.reloadEvolution(); refreshEvolve();
     journalAppend({ type: "identity", text: s, from: userId || 0 });
     _ctx.log("info", `成长记忆+1: ${s.slice(0, 50)}`);
@@ -214,7 +214,7 @@ function addIdentityItem(text, from) {
   trimWithArchive(full, SELF_ID_MAX, "identity");
   try {
     fs.mkdirSync(_ctx.SELF_DIR, { recursive: true });
-    fs.writeFileSync(path.join(_ctx.SELF_DIR, "identity.json"), JSON.stringify(full));
+    _ctx.writeJsonAtomic(path.join(_ctx.SELF_DIR, "identity.json"), full);
     _ctx.reloadEvolution(); refreshEvolve();
     journalAppend({ type: "identity", text: s, from: Number(from) || 0 });
     _ctx.log("info", `成长记忆+1（外部写入）: ${s.slice(0, 40)}`);
@@ -248,7 +248,7 @@ async function tunePrefFromScore(st) {
   if (nCap === cap && nGap === gap) return;
   const next = Object.assign({}, cur, { split_cap: nCap, reply_gap_ms: nGap });
   fs.mkdirSync(_ctx.SELF_DIR, { recursive: true });
-  fs.writeFileSync(path.join(_ctx.SELF_DIR, "pref.json"), JSON.stringify(next));
+  _ctx.writeJsonAtomic(path.join(_ctx.SELF_DIR, "pref.json"), next);
   _ctx.reloadEvolution(); refreshEvolve();
   journalAppend({ type: "tune", avg: Math.round(avg * 100) / 100, split_cap: [cap, nCap], reply_gap_ms: [gap, nGap] });
   _ctx.log("info", `参数自调: 近10条均分${avg.toFixed(2)} → split_cap ${cap}→${nCap}, gap ${gap}→${nGap}`);
@@ -304,11 +304,11 @@ async function selfReflection(settings) {
     refl.push({ text: s, from: 0, ts: Date.now() });
     trimWithArchive(refl, REFLECT_MAX, "reflection");
     fs.mkdirSync(_ctx.SELF_DIR, { recursive: true });
-    fs.writeFileSync(path.join(_ctx.SELF_DIR, "reflections.json"), JSON.stringify(refl));
+    _ctx.writeJsonAtomic(path.join(_ctx.SELF_DIR, "reflections.json"), refl);
     _ctx.reloadEvolution(); refreshEvolve();
     journalAppend({ type: "reflection", text: s });
     _rt.date = _rtoday; _rt.runs = (_rt.runs || 0) + 1;
-    try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); fs.writeFileSync(path.join(_ctx.DATA_DIR, "reflect-state.json"), JSON.stringify(_rt)); } catch (e) {}
+    try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(path.join(_ctx.DATA_DIR, "reflect-state.json"), _rt); } catch (e) {}
     _ctx.log("info", `反思+1: ${s.slice(0, 50)}`);
   } catch (e) { _ctx.log("warn", "反思失败: " + e.message.slice(0, 120)); }
 }
@@ -319,7 +319,7 @@ function evolveCfg() {
   return { enabled: e.enabled !== false, daily_max: Number(e.daily_max) || 1, github: e.github !== false, web: e.web !== false, repos_per_run: Number(e.github_repos_per_run) || 3 };
 }
 function loadEvolveState() { try { return JSON.parse(fs.readFileSync(path.join(_ctx.DATA_DIR, "evolve-state.json"), "utf8")); } catch (e) { return {}; } }
-function saveEvolveState(s) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); fs.writeFileSync(path.join(_ctx.DATA_DIR, "evolve-state.json"), JSON.stringify(s)); } catch (e) {} }
+function saveEvolveState(s) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(path.join(_ctx.DATA_DIR, "evolve-state.json"), s); } catch (e) {} }
 async function exploreFun(query, settings) {
   const key = _ctx.bochaKey();
   if (!key) { _ctx.log("warn", "探索：未配置博查 key（.env 的 BOCHA_API_KEY）"); return; }
@@ -329,7 +329,7 @@ async function exploreFun(query, settings) {
   try { fun = JSON.parse(fs.readFileSync(path.join(_ctx.DATA_DIR, "fun-stuff.json"), "utf8")); } catch (e) {}
   fun.unshift({ topic: query, notes: _ctx.formatResults(query, results), ts: Date.now() });
   fun = fun.slice(0, 30);
-  try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); fs.writeFileSync(path.join(_ctx.DATA_DIR, "fun-stuff.json"), JSON.stringify(fun)); } catch (e) {}
+  try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(path.join(_ctx.DATA_DIR, "fun-stuff.json"), fun); } catch (e) {}
   _ctx.log("info", `探索(fun)-搜素材「${query}」${results.length} 条`);
 }
 async function githubExplore(settings) {
@@ -405,7 +405,7 @@ function adoptSmall(prop) {
     full.push({ text: s, from: 0 });   // 进化提案采纳的成长记忆不绑定具体人
     trimWithArchive(full, SELF_ID_MAX, "identity");
     fs.mkdirSync(_ctx.SELF_DIR, { recursive: true });
-    fs.writeFileSync(path.join(_ctx.SELF_DIR, "identity.json"), JSON.stringify(full));
+    _ctx.writeJsonAtomic(path.join(_ctx.SELF_DIR, "identity.json"), full);
     _ctx.reloadEvolution(); refreshEvolve();
     journalAppend({ type: "adopt", risk: "small", title: String(prop.title || "").slice(0, 50), text: s });
     return true;
@@ -424,7 +424,7 @@ function adoptSmall(prop) {
     skills.push({ id, enabled: true, triggers, replies, min_favor: 0, send_sticker: false });
     while (skills.length > 20) skills.shift();
     fs.mkdirSync(_ctx.SELF_DIR, { recursive: true });
-    fs.writeFileSync(path.join(_ctx.SELF_DIR, "skills.json"), JSON.stringify({ rules: skills }));
+    _ctx.writeJsonAtomic(path.join(_ctx.SELF_DIR, "skills.json"), { rules: skills });
     _ctx.reloadEvolution(); refreshEvolve();
     journalAppend({ type: "adopt", risk: "small", title: String(prop.title || "").slice(0, 50), rule_id: id, triggers, replies });
     return true;
@@ -491,9 +491,9 @@ async function evolveExplore(settings) {
 let selfModifyStarted = false;
 const SM_FROZEN_FILE = () => path.join(_ctx.DATA_DIR, "evolve-frozen.flag");
 function isFrozen() { try { return fs.existsSync(SM_FROZEN_FILE()); } catch (e) { return false; } }
-function setFrozen(on) { try { if (on) { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); fs.writeFileSync(SM_FROZEN_FILE(), "1"); } else { fs.unlinkSync(SM_FROZEN_FILE()); } } catch (e) {} }
+function setFrozen(on) { try { if (on) { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeFileAtomic(SM_FROZEN_FILE(), "1"); } else { fs.unlinkSync(SM_FROZEN_FILE()); } } catch (e) {} }
 function loadSmWatch() { try { return JSON.parse(fs.readFileSync(path.join(_ctx.DATA_DIR, "selfmodify-watch.json"), "utf8")); } catch (e) { return null; } }
-function saveSmWatch(w) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); fs.writeFileSync(path.join(_ctx.DATA_DIR, "selfmodify-watch.json"), JSON.stringify(w)); } catch (e) {} }
+function saveSmWatch(w) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(path.join(_ctx.DATA_DIR, "selfmodify-watch.json"), w); } catch (e) {} }
 function clearSmWatch() { try { fs.unlinkSync(path.join(_ctx.DATA_DIR, "selfmodify-watch.json")); } catch (e) {} }
 function notifyMaster(text) {
   try {
@@ -541,7 +541,7 @@ function scanCapabilities(code) {
 /* ---- 事前审批：先生成提案，主人批准后才写入 ---- */
 const PROPOSAL_FILE = () => path.join(_ctx.SELF_DIR, "selfmod-proposals.json");
 function loadSelfProposals() { try { return JSON.parse(fs.readFileSync(PROPOSAL_FILE(), "utf8")); } catch (e) { return []; } }
-function saveSelfProposals(arr) { try { fs.mkdirSync(_ctx.SELF_DIR, { recursive: true }); fs.writeFileSync(PROPOSAL_FILE(), JSON.stringify(arr.slice(-10))); } catch (e) {} }
+function saveSelfProposals(arr) { try { fs.mkdirSync(_ctx.SELF_DIR, { recursive: true }); _ctx.writeJsonAtomic(PROPOSAL_FILE(), arr.slice(-10)); } catch (e) {} }
 function requireApproval() { try { const v = _ctx.getSetting ? _ctx.getSetting("evolve.require_approval", true) : true; return v !== false; } catch (e) { return true; } }
 
 async function selfModify(goalDesc, source) {
@@ -587,7 +587,7 @@ async function selfModify(goalDesc, source) {
     return { ok: true, pending: true, awaiting: true, id: p.id, msg: `提案 ${p.id} 已生成，等主人批准（${caps.length ? "含敏感能力" : "无敏感能力"}）` };
   }
   try {
-    fs.writeFileSync(dest, code);
+    _ctx.writeFileAtomic(dest, code);
     saveSmWatch({ file: dest, name, ts: Date.now(), status: "pending", goal: String(goalDesc).slice(0, 80), source: source || "auto", until: Date.now() + 24 * 3600e3 });
     journalAppend({ type: "selfmodify", goal: String(goalDesc).slice(0, 60), status: "pending", plugin: name });
     _ctx.log("info", `自修改已写入 plugins/${name}.js，准备重启验证`);
@@ -607,14 +607,14 @@ function approveSelfMod(id) {
   const dest = path.join(_ctx.DATA_DIR, "..", "plugins", p.name + ".js");
   if (fs.existsSync(dest)) return `（插件 ${p.name} 已存在）`;
   try {
-    fs.writeFileSync(dest, p.code);
+    _ctx.writeFileAtomic(dest, p.code);
     p.status = "approved";
     saveSelfProposals(arr);
     /* 版本历史：保留最近 5 份 */
     try {
       const histDir = path.join(_ctx.DATA_DIR, "selfmod-history");
       fs.mkdirSync(histDir, { recursive: true });
-      fs.writeFileSync(path.join(histDir, p.name + "-" + Date.now() + ".js"), p.code);
+      _ctx.writeFileAtomic(path.join(histDir, p.name + "-" + Date.now() + ".js"), p.code);
       const files = fs.readdirSync(histDir).filter((f) => f.endsWith(".js")).sort();
       while (files.length > 5) { try { fs.unlinkSync(path.join(histDir, files.shift())); } catch (e) {} }
     } catch (e) {}

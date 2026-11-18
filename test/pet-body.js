@@ -28,6 +28,8 @@ const ctx = {
   setSetting: (k, v) => store.set(k, v),
   isMaster: (u) => String(u) === "100000001",
   log: () => {},
+  writeJsonAtomic: (f, o) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(o, null, 0)); } catch (e) {} },
+  writeFileAtomic: (f, t) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); } catch (e) {} },
   recordAction: (e) => actions.push(e),
   sendPrivate: (u, t) => { ctx._lastPrivate = { u, t }; },
   getApi: (n) => (n === "voice" ? fakeVoice : null),

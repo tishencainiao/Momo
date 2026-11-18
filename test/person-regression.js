@@ -24,6 +24,14 @@ T("事故 2026-11-09 爱说时间 → 不再指令「提到这个间隔」", !id
 T("事故 2026-11-15 前提当事实 → proactive 硬规则", pro.includes("对方没确认过结果的事") && pro.includes("禁止用陈述句断言"));
 T("事故 2026-11-15 跨时空重复 → proactive-log 持久化去重", idx.includes("proactiveLoggedDup") && idx.includes("appendProactiveLog"));
 T("分人守则 §9 → doctor 强制 userScoped 声明", doc.includes("userScoped"));
+/* E1~E5 变聪明五件（2026-11-18 方案 M1） */
+T("E1 → think 阈值放宽（20 字/8 字问句）", idx.includes("t.length >= 20") && idx.includes("t.length >= 8"));
+T("E1 → 连续第 3 轮强制思考", idx.includes("thinkStreak") && idx.includes("_consec >= 3"));
+T("E1 → daily_cny 2", (() => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, "..", "config.json"), "utf8")).budget.daily_cny === 2; } catch (e) { return false; } })());
+T("E2 → premise 纠正置顶注入", idx.includes("premiseReminders") && idx.includes("【主人纠正过你的话（最高优先，别犯第二次）】") && idx.includes('from === "premise"'));
+T("E3 → 跨通道镜头装配", idx.includes("channelLens") && idx.includes("【你们在 QQ 里最近聊的") && idx.includes("【你们在桌宠窗口里最近聊的"));
+T("E3 → 桌宠对话落盘 pet 会话", idx.includes('loadSession("pet" + master)'));
+T("E5 → 计划保鲜 annotatePlan 豁免", R("plugins/memory-service.js").includes("annotatePlan") && R("plugins/memory-service.js").includes('status !== "已过"'));
 
 console.log(`person-regression: ${pass}/${pass + fail} passed`);
 process.exit(fail ? 1 : 0);

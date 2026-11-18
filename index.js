@@ -28,7 +28,7 @@ function recordAction(entry) {
     // 只保留最近 500 条，避免无限增长
     try {
       const lines = fs.readFileSync(ACTION_LOG_FILE, "utf8").split("\n").filter(Boolean);
-      if (lines.length > 600) fs.writeFileSync(ACTION_LOG_FILE, lines.slice(-500).join("\n") + "\n");
+      if (lines.length > 600) writeFileAtomic(ACTION_LOG_FILE, lines.slice(-500).join("\n") + "\n");
     } catch (e2) {}
   } catch (err) { try { log("warn", "写操作记录失败: " + String(err.message).slice(0, 80)); } catch (e3) {} }
 }
@@ -112,7 +112,11 @@ function bochaKey() {
   return process.env.BOCHA_API_KEY || ((cfg.chat && cfg.chat.web_search && cfg.chat.web_search.bocha_api_key) || "");
 }
 
-process.on("uncaughtException", (e) => log("error", "未捕获异常: " + (e && e.stack || e)));
+process.on("uncaughtException", (e) => {
+  try { log("error", "未捕获异常（进程将退出，由 supervisor 自动拉起）: " + (e && e.stack || e)); } catch (e2) {}
+  /* R2：uncaughtException 后状态不可信，退出让 supervisor 拉起干净进程（配合 R1 原子写不丢数据） */
+  setTimeout(() => { try { process.exit(1); } catch (e3) {} }, 300);
+});
 process.on("unhandledRejection", (e) => log("error", "未处理拒绝: " + (e && e.stack || e)));
 
 function loadConfig() {
@@ -139,7 +143,7 @@ const { STYLE_DIRECTIVE, GROUP_DIRECTIVE, SITUATION_QQ, SITUATION_DESKTOP, situa
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.98.5";
+const BASE_VERSION = "1.99.1";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -195,7 +199,7 @@ function evolReflectionText(userId) {
 
 /* ---------------- 生活费预算（S4：唯一真相已迁 plugins/budget-service.js，此处只留薄转发+兜底，绞杀者模式） ---------------- */
 const USD_CNY = 7.2;
-function _budgetApi() { try { return (host && host.apis && host.apis.get("budget")) || null; } catch (e) { return null; } }
+function _budgetApi() { try { return (host && host.apis && apiOf("budget")) || null; } catch (e) { return null; } }
 function budgetCfg() {
   const t = _budgetApi();
   if (t) return t.budgetCfg();
@@ -261,12 +265,12 @@ function startApiKeyWatchdog() {
 /* ---------------- 会话存取 ---------------- */
 function sessionPath(userId) { return path.join(SESS_DIR, String(userId) + ".json"); }
 function loadSession(userId) { try { const d = JSON.parse(fs.readFileSync(sessionPath(userId), "utf8")); if (Array.isArray(d.messages)) return d.messages; } catch (e) {} return []; }
-function saveSession(userId, messages) { try { fs.mkdirSync(SESS_DIR, { recursive: true }); fs.writeFileSync(sessionPath(userId), JSON.stringify({ updated: Date.now(), messages })); } catch (e) {} }
+function saveSession(userId, messages) { try { fs.mkdirSync(SESS_DIR, { recursive: true }); writeJsonAtomic(sessionPath(userId), { updated: Date.now(), messages }); } catch (e) {} }
 
 /* ---------------- 会话摘要（L1：滚动压缩长对话，防止超过 40 轮后失忆） ---------------- */
 function summaryFile(userId) { return path.join(SESS_DIR, String(userId) + ".summary.json"); }
 function loadSummary(userId) { try { const d = JSON.parse(fs.readFileSync(summaryFile(userId), "utf8")); return String(d.summary || ""); } catch (e) { return ""; } }
-function saveSummary(userId, s) { try { fs.mkdirSync(SESS_DIR, { recursive: true }); fs.writeFileSync(summaryFile(userId), JSON.stringify({ summary: String(s).slice(0, 2000), updated: Date.now() })); } catch (e) {} }
+function saveSummary(userId, s) { try { fs.mkdirSync(SESS_DIR, { recursive: true }); writeJsonAtomic(summaryFile(userId), { summary: String(s).slice(0, 2000), updated: Date.now() }); } catch (e) {} }
 function summaryCtx(userId) { const s = loadSummary(userId); return s ? `【早前对话摘要】${s}` : ""; }
 async function rollSessionSummary(userId, history, settings, keep) {
   const k = Math.max(10, Number(keep) || 40);
@@ -317,7 +321,7 @@ function userGroupContext(userId) {
     return parts.length ? "对方最近在群里说过：" + parts.join("；") : "";
   } catch (e) { return ""; }
 }
-function recentQqChat(userId) { try { const a = host && host.apis.get("proactive"); return a ? a.recentQqChat(userId) : ""; } catch (e) { return ""; } }
+function recentQqChat(userId) { try { const a = host && apiOf("proactive"); return a ? a.recentQqChat(userId) : ""; } catch (e) { return ""; } }
 function trimHistory(messages, lim, chars) {
   let out = messages.slice(-lim);
   let total = 0; for (const m of out) total += String(m.content || "").length;
@@ -327,7 +331,7 @@ function trimHistory(messages, lim, chars) {
 
 /* ---------------- 长期记忆库（按 QQ 号隔离；主人记忆已于 2026-11-08 迁入本库，不再与旧桌宠互通） ---------------- */
 /* 记忆存取/检索/注入配方（S5：唯一真相已迁 plugins/memory-service.js，此处薄转发，绞杀者模式） */
-function _memApi() { try { return (host && host.apis && host.apis.get("memory")) || null; } catch (e) { return null; } }
+function _memApi() { try { return (host && host.apis && apiOf("memory")) || null; } catch (e) { return null; } }
 function memPath(userId) { const t = _memApi(); return t ? t.memPath(userId) : null; }
 function loadMemories(userId) { const t = _memApi(); return t ? t.loadMemories(userId) : []; }
 function topMemories(items, n) { const t = _memApi(); return t ? t.topMemories(items, n) : (items || []).slice(0, n); }
@@ -391,7 +395,7 @@ function parseMemoryJson(raw) {
 /* mergeMemories/extractMemories 已迁移到插件 memory（经 reply 钩子触发） */
 
 /* ---------------- 情绪/心情（框架服务 mood 的薄转发 · 骨骼方案 S3） ---------------- */
-function _moodApi() { try { return (host && host.apis && host.apis.get("mood")) || null; } catch (e) { return null; } }
+function _moodApi() { try { return (host && host.apis && apiOf("mood")) || null; } catch (e) { return null; } }
 function getMood() { const t = _moodApi(); return t ? t.getMood() : 0; }
 function setMood(v) { const t = _moodApi(); if (t) t.setMood(v); }
 function addMood(d) { const t = _moodApi(); if (t) t.addMood(d); }
@@ -409,7 +413,39 @@ function applyEmotionInertia(prev, nextName, nextIntensity) { const t = _moodApi
 const FAVOR_FILE = path.join(DATA_DIR, "favor.json");
 const VISITOR_FAVOR_MAX = 90;
 function loadFavor() { try { return JSON.parse(fs.readFileSync(FAVOR_FILE, "utf8")); } catch (e) { return {}; } }
-function saveFavor(f) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(FAVOR_FILE, JSON.stringify(f)); } catch (e) {} }
+
+/* 原子写：临时文件 + rename 覆盖，进程在写入瞬间被杀也不会留下半截文件（R1-1） */
+function writeFileAtomic(file, text) {
+  const tmp = file + ".tmp-" + process.pid;
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(tmp, text);
+    let ok = false;
+    for (let i = 0; i < 3 && !ok; i++) {
+      try { fs.renameSync(tmp, file); ok = true; }
+      catch (e) { if (i >= 2) throw e; const t0 = Date.now(); while (Date.now() - t0 < 200) {} }
+    }
+  } catch (e) {
+    try { fs.unlinkSync(tmp); } catch (e2) {}
+    throw e;
+  }
+}
+function writeJsonAtomic(file, obj) { writeFileAtomic(file, JSON.stringify(obj)); }
+
+/* R1-3：内核取插件能力的统一入口——缺插件时返回安全默认而不是 TypeError。
+   mind/groupInfo 在聊天热路径上，给精确默认；其余命名空间给 Proxy 空函数兜底（调用不崩、结果 undefined）。 */
+const NS_DEFAULT = {
+  mind: { pendingNudgesText: () => "", openLoopsText: () => "", loadMindState: () => ({}), mindHistoryText: () => "", loadOpenLoops: () => [], thoughtTexts: () => [], thoughtList: () => [], saveMindState: () => {}, pushThought: () => {}, pushOpenLoop: () => {}, scoreIntent: () => 0, addPendingNudge: () => false },
+  groupInfo: { loadGroupMembers: () => [], filterMemoriesForGroup: (m) => (m || []), crossWindowCtx: () => "", groupMemberCtx: () => "", groupLogCtx: () => "", groupMemesCtx: () => "", recordCrossWindow: () => {}, rememberGroupMember: () => {}, detectGroupMeme: () => {}, recordGroupLog: () => {}, groupInfoCtx: async () => "" },
+};
+const _noopFn = () => undefined;
+function apiOf(ns) {
+  const a = host && host.apis && host.apis.get(ns);
+  if (a) return a;
+  if (NS_DEFAULT[ns]) return NS_DEFAULT[ns];
+  return new Proxy({}, { get: (t, k) => (k in t ? t[k] : _noopFn) });
+}
+function saveFavor(f) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); writeJsonAtomic(FAVOR_FILE, f); } catch (e) {} }
 function getFavor(userId) {
   if (isMaster(userId)) return 100;
   const f = loadFavor();
@@ -432,10 +468,10 @@ function favorPrompt(userId) {
 
 /* ---------------- 情绪判断（一次轻量调用，同时驱动心情与好感度） ---------------- */
 /* 情绪检测已迁移到插件 emotion，以下为代理 */
-async function detectEmotion(userText, settings, userId) { try { const a = host && host.apis.get("emotion"); return a ? await a.detectEmotion(userText, settings, userId) : null; } catch (e) { return null; } }
+async function detectEmotion(userText, settings, userId) { try { const a = host && apiOf("emotion"); return a ? await a.detectEmotion(userText, settings, userId) : null; } catch (e) { return null; } }
 
 /* ---------------- 语音 ---------------- */
-function wantsVoice(text) { try { const a = host && host.apis.get("voice"); return a ? a.wantsVoice(text) : /语音|说句话|说一句|用声音|念给我|读给我|念一下|读一下/.test(text); } catch (e) { return /语音|说句话|说一句|用声音|念给我|读给我|念一下|读一下/.test(text); } }
+function wantsVoice(text) { try { const a = host && apiOf("voice"); return a ? a.wantsVoice(text) : /语音|说句话|说一句|用声音|念给我|读给我|念一下|读一下/.test(text); } catch (e) { return /语音|说句话|说一句|用声音|念给我|读给我|念一下|读一下/.test(text); } }
 function stripStageDirections(text) {
   let t = String(text);
   // 1. 成对 XML 内部标签（system_reminder/DSML/tool 等）整体删除（含内容），防 DeepSeek 串台
@@ -447,7 +483,7 @@ function stripStageDirections(text) {
   return t.replace(/\s+/g, " ").trim();
 }
 async function sendVoice(userId, text) {
-  const a = host && host.apis.get("voice");
+  const a = host && apiOf("voice");
   if (!a) throw new Error("语音插件未加载");
   await a.sendVoice(userId, text);
 }
@@ -473,20 +509,20 @@ function qqSettingBool(key, def) {
 function warmVoice() {
   try {
     if (!qqSettingBool("qq.voice_warm", true)) return;
-    const a = host && host.apis.get("voice");
+    const a = host && apiOf("voice");
     if (a && a.warmVoice) a.warmVoice();
   } catch (e) {}
 }
 
 /* ---------------- 角色与称呼（主人/访客） ---------------- */
 function isMaster(userId) {
-  try { const a = host && host.apis.get("roles"); if (a) return a.resolveRole(userId) === "admin"; } catch (e) {}
+  try { const a = host && apiOf("roles"); if (a) return a.resolveRole(userId) === "admin"; } catch (e) {}
   return Number(userId) === Number((cfg.qq && cfg.qq.master_user) || 0);
 }
 /* 能力鉴权（阶段 3）：没登记的工具/命令默认只给管理员 */
 const capsTable = require("./caps");
 function canDo(userId, cap, channel) {
-  try { const a = host && host.apis.get("roles"); if (a) return !!a.can(userId, cap, channel ? { channel } : undefined); } catch (e) {}
+  try { const a = host && apiOf("roles"); if (a) return !!a.can(userId, cap, channel ? { channel } : undefined); } catch (e) {}
   return isMaster(userId);
 }
 function toolAllowed(userId, name, channel) {
@@ -499,11 +535,11 @@ function cmdAllowed(userId, key) {
 }
 function appsPath() { return path.join(DATA_DIR, "appellations.json"); }
 function loadAppellations() { try { return JSON.parse(fs.readFileSync(appsPath(), "utf8")); } catch (e) { return {}; } }
-function saveAppellations(apps) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(appsPath(), JSON.stringify(apps)); } catch (e) {} }
+function saveAppellations(apps) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); writeJsonAtomic(appsPath(), apps); } catch (e) {} }
 /* 屏蔽名单 */
 function mutePath() { return path.join(DATA_DIR, "mute.json"); }
 function loadMute() { try { return JSON.parse(fs.readFileSync(mutePath(), "utf8")); } catch (e) { return {}; } }
-function saveMute(m) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(mutePath(), JSON.stringify(m)); } catch (e) {} }
+function saveMute(m) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); writeJsonAtomic(mutePath(), m); } catch (e) {} }
 function isMuted(userId) { const m = loadMute(); return !!(m[String(userId)]); }
 function addMute(userId, name) { const m = loadMute(); m[String(userId)] = { name: String(name || "").slice(0, 20), ts: Date.now() }; saveMute(m); }
 function removeMute(userId) { const m = loadMute(); delete m[String(userId)]; saveMute(m); }
@@ -513,7 +549,7 @@ function resolveTargetId(name) {
   const apps = loadAppellations();
   for (const [id, nm] of Object.entries(apps)) { if (String(nm).includes(s) || s.includes(String(nm))) return Number(id); }
   try {
-    const gm = host.apis.get("groupInfo").loadGroupMembers();
+    const gm = apiOf("groupInfo").loadGroupMembers();
     for (const members of Object.values(gm)) {
       for (const [id, info] of Object.entries(members || {})) { if (String(info.name || "").includes(s)) return Number(id); }
     }
@@ -522,11 +558,11 @@ function resolveTargetId(name) {
 }
 /* 愿望清单（做不到的事 → 进化材料） */
 const WISH_FILE = path.join(DATA_DIR, "wishes.json");
-function loadWishes() { try { const a = host && host.apis.get("evolution"); return a ? a.loadWishes() : []; } catch (e) { return []; } }
-function addWish(text, source) { try { const a = host && host.apis.get("evolution"); if (a) a.addWish(text, source); } catch (e) {} }
+function loadWishes() { try { const a = host && apiOf("evolution"); return a ? a.loadWishes() : []; } catch (e) { return []; } }
+function addWish(text, source) { try { const a = host && apiOf("evolution"); if (a) a.addWish(text, source); } catch (e) {} }
 function resolveCall(userId) {
   try {
-    const a = host && host.apis.get("roles");
+    const a = host && apiOf("roles");
     if (a) {
       const p = a.person(userId);
       if (p.role === "admin") return "主人";
@@ -562,7 +598,7 @@ function userPersona(userId, settings) {
     : `【称呼】对方不是你的主人，称呼他「${call}」或「你」，语气自然友好。\n【权限认知】找文件、截图、开软件、代发QQ等电脑/QQ操作只有主人能用；对方要求这类事时自然婉拒（如「这个只有我主人能用哦～」），不要答应、也不要假装做过了。`;
   /* 记忆消化：有「认识」就用认识替代流水账（默认关，settings 打开） */
   let _mdText = null;
-  try { const _md = host && host.apis.get("memoryDigest"); _mdText = _md ? _md.digestText(userId) : null; } catch (e) {}
+  try { const _md = host && apiOf("memoryDigest"); _mdText = _md ? _md.digestText(userId) : null; } catch (e) {}
   const growth = _mdText ? null : evolIdentityText(userId);
   const lessons = _mdText ? null : evolReflectionText(userId);
   /* 双轨注入：消化摘要（长期认识）+ 最近 8 条原文（近期鲜活细节） */
@@ -595,7 +631,7 @@ function loadProactiveState() {
 function saveProactiveState() {
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(PROACTIVE_STATE_FILE, JSON.stringify({ lastProactiveTs, greeted: Array.from(greeted), lastActiveAt: Object.fromEntries(lastActiveAt), lastProactiveAt: Object.fromEntries(lastProactiveAt) }));
+    writeJsonAtomic(PROACTIVE_STATE_FILE, { lastProactiveTs, greeted: Array.from(greeted), lastActiveAt: Object.fromEntries(lastActiveAt), lastProactiveAt: Object.fromEntries(lastProactiveAt) });
   } catch (e) {}
 }
 
@@ -794,11 +830,14 @@ function shouldThinkChat(userText, hasImages) {
   if (hasImages) return true;
   const t = String(userText || "").trim();
   if (!t) return false;
-  if (t.length >= 60) return true;                                  // 长文本
-  if (/[？?]/.test(t) && t.length >= 15) return true;               // 较长问句
+  /* E1 变聪明：阈值放宽（20 字/8 字问句即思考），闲聊仍走 flash 省钱 */
+  if (t.length >= 20) return true;                                  // 中长文本
+  if (/[？?]/.test(t) && t.length >= 8) return true;                // 稍长问句
   if (/(为什么|怎么|如何|帮我|分析|建议|解释|对比|区别|能不能|可不可以|是不是|该不该|哪个更好)/.test(t)) return true; // 复杂请求
   return false;
 }
+/* E1：连续浅聊轮数（第 3 轮强制思考一次，思考后清零；只影响思考开关不存盘） */
+const thinkStreak = new Map();
 /* R1 身份信封：所有聊天入口先归一为同一份信封，再交给唯一装配器。
  * env: { sender=说话的人, room=0私聊/群号, channel=private|group|proactive|pet }
  * opts 可覆盖：settings（如预算耗尽降 200）、taskCtx、messageId（群聊） */
@@ -811,8 +850,8 @@ function buildPersonContext(env, opts) {
   if (env.channel === "group") {
     const groupId = Number(env.room) || 0;
     settings.max_tokens = Math.min(settings.max_tokens || 2048, 250);
-    memories = host.apis.get("groupInfo").filterMemoriesForGroup(loadMemories(userId), groupId);
-    shortMemories = host.apis.get("groupInfo").filterMemoriesForGroup(pruneShortMemories(userId), groupId);
+    memories = apiOf("groupInfo").filterMemoriesForGroup(loadMemories(userId), groupId);
+    shortMemories = apiOf("groupInfo").filterMemoriesForGroup(pruneShortMemories(userId), groupId);
     summaryKey = "g" + groupId + "_" + userId;
     extraInfo = { groupId, messageId: o.messageId };
   } else if (env.channel === "pet") {
@@ -827,11 +866,31 @@ function buildPersonContext(env, opts) {
   }
   call = resolveCall(userId);
   persona = userPersona(userId, settings);
-  return { settings, memories, persona, call, userId, taskCtx, shortMemories, summaryKey, extraInfo };
+  /* E3 跨通道镜头：QQ 与桌宠互见最近 3 条（切换通道不失忆） */
+  let channelLens = "";
+  try {
+    if (env.channel === "pet") {
+      const _qq = loadSession(userId);
+      const _lens = _qq.filter((m) => m && (m.role === "user" || m.role === "assistant")).slice(-3)
+        .map((m) => (m.role === "user" ? "主人" : "你") + "：" + String(m.content || "").slice(0, 60)).join("\n");
+      if (_lens) channelLens = "【你们在 QQ 里最近聊的（刚刚的事，别当没发生过）】\n" + _lens;
+    } else if (env.channel === "private" || env.channel === "proactive") {
+      const _pet = loadSession("pet" + userId);
+      const _lens = _pet.filter((m) => m && (m.role === "user" || m.role === "assistant")).slice(-3)
+        .map((m) => (m.role === "user" ? "主人" : "你") + "：" + String(m.content || "").slice(0, 60)).join("\n");
+      if (_lens) channelLens = "【你们在桌宠窗口里最近聊的（刚刚的事，别当没发生过）】\n" + _lens;
+    }
+  } catch (e) {}
+  return { settings, memories, persona, call, userId, taskCtx, shortMemories, summaryKey, extraInfo, channelLens };
 }
 async function agentChatOnce(history, userText, pctx) {
-  const settings = pctx.settings, memories = pctx.memories, persona = pctx.persona, call = pctx.call, userId = pctx.userId, taskCtx = pctx.taskCtx, shortMemories = pctx.shortMemories;
-  const _think = shouldThinkChat(userText, false);
+  const settings = pctx.settings, memories = pctx.memories, persona = pctx.persona, call = pctx.call, userId = pctx.userId, taskCtx = pctx.taskCtx, shortMemories = pctx.shortMemories, channelLens = pctx.channelLens;
+  /* E1：连续第 3 轮还不思考 → 强制思考一次（防掉进浅聊惯性），思考过就清零 */
+  const _sk = String(userId);
+  const _consec = (thinkStreak.get(_sk) || 0) + 1;
+  let _think = shouldThinkChat(userText, false);
+  if (_think) thinkStreak.set(_sk, 0);
+  else { thinkStreak.set(_sk, _consec); if (_consec >= 3) _think = true; }
   const _extraInfo = pctx.extraInfo || null;
   /* 摘要键：私聊=userId，群聊=会话键（避免把私聊摘要带进群）；pet 传 null=不用摘要 */
   const _sumKey = (pctx.summaryKey === undefined) ? userId : pctx.summaryKey;
@@ -841,7 +900,7 @@ async function agentChatOnce(history, userText, pctx) {
   messages.push({ role: "system", content: situationDirective(_extraInfo && _extraInfo.petMode ? "desktop" : "qq") });
   messages.push({ role: "system", content: SELF_AWARENESS });
   messages.push({ role: "system", content: PRIVACY_DIRECTIVE });
-  const _capApi = host && host.apis.get("capability");
+  const _capApi = host && apiOf("capability");
   const _capCtx = _capApi ? _capApi.capabilityCtx(userId) : "";
   if (_capCtx) messages.push({ role: "system", content: _capCtx });
 
@@ -870,8 +929,13 @@ async function agentChatOnce(history, userText, pctx) {
     _dynLen += s.length;
   };
   /* —— 区一【此刻】必读：任何预算档都注入（她在"现在"这件事上不能撒谎）—— */
+  /* E2：主人纠正过的话置顶（在时间块之前，最高优先） */
+  const _prem = premiseReminders();
+  if (_prem) _dput("now", `【主人纠正过你的话（最高优先，别犯第二次）】\n${_prem}`);
   const _td = timeDirective();
   if (_td) _dput("now", _td);
+  /* E3：跨通道镜头（QQ↔桌宠最近对话）放【此刻】末尾 */
+  if (channelLens) _dput("now", channelLens);
   try {
     const upMs = Date.now() - BOOT_TS;
     const upTxt = upMs < 10 * 60000
@@ -886,7 +950,7 @@ async function agentChatOnce(history, userText, pctx) {
     _dput("now", `【生活费】${budgetLine()}，状态${lvName}。钱紧时就别做花钱的事，好好陪对方聊天。`);
   } catch (e) {}
   /* —— 区二【你记得的】按需：flash/minimal 档不注入，省 token —— */
-  const _mdHas = (() => { try { const a = host && host.apis.get("memoryDigest"); return a ? a.hasDigest(userId) : false; } catch (e) { return false; } })();
+  const _mdHas = (() => { try { const a = host && apiOf("memoryDigest"); return a ? a.hasDigest(userId) : false; } catch (e) { return false; } })();
   if (_tierLv >= 1) {
     if (memories && memories.length) {
       if (!_mdHas) _dput("mem", memoryIndexPrompt(memories, call));
@@ -899,7 +963,7 @@ async function agentChatOnce(history, userText, pctx) {
       if (_relS.length && _relS.length !== shortMemories.length) _dput("mem", shortMemoryPrompt(_relS, call));
     }
     try {
-      const _upa = host && host.apis.get("userProfile");
+      const _upa = host && apiOf("userProfile");
       const _up = _upa ? _upa.profileCtx(userId) : "";
       if (_up) _dput("mem", _up);
     } catch (e) {}
@@ -909,16 +973,16 @@ async function agentChatOnce(history, userText, pctx) {
   }
   /* —— 区三【要做的事】念头/任务：full/low 档 —— */
   if (_tierLv >= 1) {
-    const _pending = host.apis.get("mind").pendingNudgesText(3);
+    const _pending = apiOf("mind").pendingNudgesText(3);
     if (_pending) _dput("todo", `【你之前想过要做、但还没做完的事（只是想法，不是已经做成了；合适就自然提，不用全说）】\n${_pending}`);
     try {
-      const _loops = host.apis.get("mind").openLoopsText(host.apis.get("mind").loadMindState());
+      const _loops = apiOf("mind").openLoopsText(apiOf("mind").loadMindState());
       if (_loops) _dput("todo", _loops);
     } catch (e) {}
     if (taskCtx) _dput("todo", taskCtx);
     /* 时间感知方案 P2：主人最近的安排（带时间词，标注已到/没到）也进主聊天上下文 */
     try {
-      const _pa = host.apis.get("proactive");
+      const _pa = apiOf("proactive");
       const _plans = _pa && _pa.pendingPlanCtx ? _pa.pendingPlanCtx(userId) : "";
       if (_plans) _dput("todo", `【主人最近的安排（时间已换算；没到的别当进行中问）】\n${_plans}`);
     } catch (e) {}
@@ -953,7 +1017,7 @@ async function agentChatOnce(history, userText, pctx) {
   }
   if (_tierLv >= 2) {
     try {
-      const _mc = host && host.apis.get("metaCog");
+      const _mc = host && apiOf("metaCog");
       const _mctx = _mc && _mc.metaCtx ? _mc.metaCtx() : "";
       if (_mctx) _dput("extra", _mctx);
     } catch (e) {}
@@ -1009,10 +1073,10 @@ async function agentChatOnce(history, userText, pctx) {
             if (!q) { result = "（搜索不可用）"; }
             else if (engine === "bocha") {
               if (!bochaKey()) { result = "（博查未配置 API Key）"; }
-              else { const results = await host.apis.get("search").bochaSearch(q, 3, bochaKey()); result = results.length ? host.apis.get("search").formatResults(q, results) : "没有搜到结果"; }
+              else { const results = await apiOf("search").bochaSearch(q, 3, bochaKey()); result = results.length ? apiOf("search").formatResults(q, results) : "没有搜到结果"; }
             } else {
-              const results = await host.apis.get("search").baiduSearch(q, 3);
-              result = results.length ? host.apis.get("search").formatResults(q, results) : "没有搜到结果";
+              const results = await apiOf("search").baiduSearch(q, 3);
+              result = results.length ? apiOf("search").formatResults(q, results) : "没有搜到结果";
             }
           } else if (tc.function.name === "send_sticker") {
             const args = JSON.parse(tc.function.arguments || "{}");
@@ -1031,7 +1095,7 @@ async function agentChatOnce(history, userText, pctx) {
             result = usageLine();
           } else if (tc.function.name === "mind_history") {
             const histArgs = JSON.parse(tc.function.arguments || "{}");
-            result = host.apis.get("mind").mindHistoryText(Number(histArgs.limit) || 10);
+            result = apiOf("mind").mindHistoryText(Number(histArgs.limit) || 10);
           }
         } catch (e) { result = "工具执行失败: " + String(e.message).slice(0, 100); }
         const _rStr = String(result == null ? "" : result);
@@ -1057,6 +1121,16 @@ async function agentChatOnce(history, userText, pctx) {
  * 已迁移到框架服务 plugins/audit-service.js（骨骼方案 S3）：通过 before_send 钩子
  * 在所有私聊回话点统一拦截改写。规则不变：出现"做不到的能力"触发短语且本轮没有
  * 能兑现它的工具成功执行 → 拦下换成如实说明。开关：safety.audit.enabled（默认开）。 */
+/* E2 变聪明：主人纠正过的话（from:"premise"）单独置顶注入——同样的错不犯第二次 */
+function premiseReminders() {
+  try {
+    const p = path.join(SELF_DIR, "reflections.json");
+    const d = JSON.parse(fs.readFileSync(p, "utf8"));
+    if (!Array.isArray(d)) return "";
+    const items = d.filter((r) => r && r.from === "premise").slice(-3);
+    return items.map((r) => (r && r.text) || "").filter(Boolean).join("\n");
+  } catch (e) { return ""; }
+}
 /* R0-A3：对方纠正「没说过」→ 写反思（说对方的事前先确认） */
 function notePremiseCorrection(userId, saidText) {
   try {
@@ -1066,7 +1140,7 @@ function notePremiseCorrection(userId, saidText) {
     arr.push({ text: `我把「${String(saidText || "").slice(0, 30)}」当事实说出去，对方纠正说没这回事。以后说对方的事（输赢/去向/做过什么）前，要么对话里见过，要么先用疑问句问。`, from: "premise", ts: Date.now(), subject: "premise" });
     while (arr.length > 100) arr.shift();
     fs.mkdirSync(SELF_DIR, { recursive: true });
-    fs.writeFileSync(p, JSON.stringify(arr));
+    writeJsonAtomic(p, arr);
   } catch (e) {}
 }
 /* auditReply 已迁移到框架服务 audit（骨骼方案 S3）：
@@ -1110,7 +1184,7 @@ async function proactiveAgentTurn(userId, intentDesc) {
 
 /* ---------------- 联网搜索 ---------------- */
 /* v1.96.1 框架服务 time：以下函数降级为薄转发，真相在 plugins/time-service.js（骨骼方案 S2） */
-function _timeApi() { try { return (host && host.apis && host.apis.get("time")) || null; } catch (e) { return null; } }
+function _timeApi() { try { return (host && host.apis && apiOf("time")) || null; } catch (e) { return null; } }
 function todayText(d) { const t = _timeApi(); return t ? t.todayText(d) : ""; }
 /* 只到「日期 + 星期」，不含具体分钟——避免每分钟变化打断 prompt 缓存 */
 function dateText(d) { const t = _timeApi(); return t ? t.dateText(d) : ""; }
@@ -1121,7 +1195,7 @@ function timeAwarenessCtx(gapMs) { const t = _timeApi(); return t ? t.timeAwaren
 /* ---------------- 当前状态（进行态）+ 静默窗口 ---------------- */
 const CURRENT_STATUS_FILE = path.join(DATA_DIR, "current-status.json");
 function loadCurrentStatus() { try { return JSON.parse(fs.readFileSync(CURRENT_STATUS_FILE, "utf8")); } catch (e) { return {}; } }
-function saveCurrentStatus(st) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(CURRENT_STATUS_FILE, JSON.stringify(st)); } catch (e) {} }
+function saveCurrentStatus(st) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); writeJsonAtomic(CURRENT_STATUS_FILE, st); } catch (e) {} }
 function getCurrentStatus(userId) {
   const st = (loadCurrentStatus() || {})[String(userId)] || null;
   if (!st) return null;
@@ -1258,21 +1332,21 @@ function cleanText(s) {
 const QZONE_STATE_FILE = path.join(DATA_DIR, "qzone.json");
 /* qzone 状态存取已迁移到插件 */
 function dayStr(off) { const t = _timeApi(); return t ? t.dayStr(off) : ""; }
-function dailyQzoneCount() { try { const a = host && host.apis.get("qzone"); return a ? a.dailyQzoneCount() : 0; } catch (e) { return 0; } }
+function dailyQzoneCount() { try { const a = host && apiOf("qzone"); return a ? a.dailyQzoneCount() : 0; } catch (e) { return 0; } }
 /* 发说说：自动配图（插件内部按内容挑图），返回值带图片数便于日志 */
 async function publishQzone(content, by) {
-  const a = host && host.apis.get("qzone");
+  const a = host && apiOf("qzone");
   if (!a) throw new Error("空间插件未加载");
   const imgs = (a.pickQzoneImage ? a.pickQzoneImage(content) : []) || [];
   await a.publishQzone(content, imgs);
   return { images: imgs.length };
 }
-async function detectQzonePost(userText, replyText, settings, call) { try { const a = host && host.apis.get("qzone"); return a ? await a.detectQzonePost(userText, replyText, settings, call) : null; } catch (e) { return null; } }
-async function viewSpaces(settings) { try { const a = host && host.apis.get("qzone"); return a ? await a.viewSpaces(settings) : 0; } catch (e) { return 0; } }
-async function checkUserSpace(uin) { const a = host && host.apis.get("qzone"); if (!a) throw new Error("空间插件未加载"); return await a.checkUserSpace(uin); }
-function setQzoneComment(userId, on) { try { const a = host && host.apis.get("qzone"); if (a) a.setQzoneComment(userId, on); } catch (e) {} }
-async function generateQzoneComment(content, settings) { const a = host && host.apis.get("qzone"); if (!a) throw new Error("空间插件未加载"); return await a.generateQzoneComment(content, settings); }
-async function commentQzone(tid, content, targetUin) { const a = host && host.apis.get("qzone"); if (!a) throw new Error("空间插件未加载"); await a.commentQzone(tid, content, targetUin); }
+async function detectQzonePost(userText, replyText, settings, call) { try { const a = host && apiOf("qzone"); return a ? await a.detectQzonePost(userText, replyText, settings, call) : null; } catch (e) { return null; } }
+async function viewSpaces(settings) { try { const a = host && apiOf("qzone"); return a ? await a.viewSpaces(settings) : 0; } catch (e) { return 0; } }
+async function checkUserSpace(uin) { const a = host && apiOf("qzone"); if (!a) throw new Error("空间插件未加载"); return await a.checkUserSpace(uin); }
+function setQzoneComment(userId, on) { try { const a = host && apiOf("qzone"); if (a) a.setQzoneComment(userId, on); } catch (e) {} }
+async function generateQzoneComment(content, settings) { const a = host && apiOf("qzone"); if (!a) throw new Error("空间插件未加载"); return await a.generateQzoneComment(content, settings); }
+async function commentQzone(tid, content, targetUin) { const a = host && apiOf("qzone"); if (!a) throw new Error("空间插件未加载"); await a.commentQzone(tid, content, targetUin); }
 
 /* ---------------- 心智循环（持续思考） ---------------- */
 const FUN_STUFF_FILE = path.join(DATA_DIR, "fun-stuff.json");
@@ -1294,17 +1368,17 @@ const PULSE_FILE = path.join(DATA_DIR, "mind-pulse.json");
 const PULSE_MAX = 60;
 let pulseState = { last: null, ring: [] };
 try { const _p = JSON.parse(fs.readFileSync(PULSE_FILE, "utf8")); if (_p && typeof _p === "object") pulseState = Object.assign(pulseState, _p); } catch (e) {}
-function savePulse() { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(PULSE_FILE, JSON.stringify({ last: pulseState.last, ring: (pulseState.ring || []).slice(-PULSE_MAX) })); } catch (e) {} }
+function savePulse() { try { fs.mkdirSync(DATA_DIR, { recursive: true }); writeJsonAtomic(PULSE_FILE, { last: pulseState.last, ring: (pulseState.ring || []).slice(-PULSE_MAX) }); } catch (e) {} }
 function mindCfg(k, d) { try { const v = Number(cfg.mind && cfg.mind[k]); return Number.isFinite(v) && v > 0 ? v : d; } catch (e) { return d; } }
 
 function buildPulse() {
-  const st = host.apis.get("mind").loadMindState();
+  const st = apiOf("mind").loadMindState();
   const now = Date.now();
   return {
     ts: now,
     idleMin: lastInteractionTs ? Math.max(0, Math.round((now - lastInteractionTs) / 60000)) : null,
     thinkMin: st.last_think ? Math.max(0, Math.round((now - st.last_think) / 60000)) : null,
-    loops: host.apis.get("mind").loadOpenLoops(st).length,
+    loops: apiOf("mind").loadOpenLoops(st).length,
     mood: Math.round(getMood()),
   };
 }
@@ -1333,7 +1407,7 @@ function headpatCtx() {
     if (gap > 15 * 60000) return "";                                    // 超过 15 分钟就不提了
     if (Number(st.consumed_ts) >= ts) return "";                        // 这次摸头已经提过
     st.consumed_ts = Date.now();
-    try { fs.writeFileSync(fp, JSON.stringify(st)); } catch (e) {}
+    try { writeJsonAtomic(fp, st); } catch (e) {}
     return "【刚才的事】不久之前对方摸过你的头，你现在还有点软软的、心情比平时好一点。这次聊天如果自然，可以顺带带一句（比如说余韵还在、或者有点想再被摸），但不提也完全没关系——别硬提，也别每次都提。";
   } catch (e) { return ""; }
 }
@@ -1409,7 +1483,7 @@ function appendProactiveLog(userId, text) {
     const a = loadProactiveLog();
     a.push({ userId: Number(userId), text: String(text || "").slice(0, 200), ts: Date.now(), fp: hashString(`${userId}|${String(text || "")}`) });
     fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(PROACTIVE_LOG_FILE, JSON.stringify(a.slice(-60)));
+    writeJsonAtomic(PROACTIVE_LOG_FILE, a.slice(-60));
   } catch (e) {}
 }
 function proactiveLoggedDup(userId, text) {
@@ -1435,13 +1509,13 @@ async function fetchFunImage() {
     if (!resp.ok) return null;
     const buf = Buffer.from(await resp.arrayBuffer());
     if (!buf.length || buf.length < 1000) return null;
-    const ext = host.apis.get("vision").mimeOf(buf) === "image/gif" ? "gif" : (host.apis.get("vision").mimeOf(buf) === "image/png" ? "png" : "jpg");
+    const ext = apiOf("vision").mimeOf(buf) === "image/gif" ? "gif" : (apiOf("vision").mimeOf(buf) === "image/png" ? "png" : "jpg");
     const fp = path.join(DATA_DIR, "fun-img." + ext);
-    fs.writeFileSync(fp, buf);
+    writeFileAtomic(fp, buf);
     return fp;
   } catch (e) { return null; }
 }
-function setBoredom(v) { const nv = Math.max(0, Math.min(100, v)); try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(BOREDOM_FILE, JSON.stringify({ value: nv, updated: Date.now() })); } catch (e) {} }
+function setBoredom(v) { const nv = Math.max(0, Math.min(100, v)); try { fs.mkdirSync(DATA_DIR, { recursive: true }); writeJsonAtomic(BOREDOM_FILE, { value: nv, updated: Date.now() }); } catch (e) {} }
 /* 无聊度增减（娱乐活动会用到：填对数/读到东西 → 无聊度降；填错 → 升） */
 function addBoredom(d) { try { setBoredom(getBoredom() + Number(d || 0)); } catch (e) {} }
 
@@ -1485,14 +1559,14 @@ const SCORE_QUEUE = 0.40;               // 分数中等先攒着（静默准备�
 
 /* ---- 第一层：感知（flash，便宜，只更新念头与"想做事的程度"）---- */
 async function perceiveMind(settings, st, boredomV, masterStatusLine) {
-  const recentThoughts = host.apis.get("mind").thoughtTexts(st, 6).join("；") || "（还没有什么特别的念头）";
+  const recentThoughts = apiOf("mind").thoughtTexts(st, 6).join("；") || "（还没有什么特别的念头）";
   /* 想法流（A）：把上一条念头原文喂进去，让她接着往下想，而不是每次从零开始 */
-  const lastThought = String((host.apis.get("mind").thoughtList(st).slice(-1)[0] || {}).text || "").trim();
+  const lastThought = String((apiOf("mind").thoughtList(st).slice(-1)[0] || {}).text || "").trim();
   const flowLine = lastThought
     ? `你上一条念头是：「${lastThought}」。可以顺着它往下想，但如果最近几条已经在同一个话题上打转、没有新东西了，就主动换个新想法，别一条路走到黑。`
     : `你还没有明确的念头，起一个。`;
   const prompt = `你是 Momo（大肥鱼桌宠）。现在 ${todayText()}。你的情绪：${moodLabel()}（无聊度 ${Math.round(boredomV)}/100）。${budgetLevelText()}${flowLine}
-你最近在想：${recentThoughts}。${masterStatusLine}${host.apis.get("mind").openLoopsText(st) ? "\n" + host.apis.get("mind").openLoopsText(st) : ""}
+你最近在想：${recentThoughts}。${masterStatusLine}${apiOf("mind").openLoopsText(st) ? "\n" + apiOf("mind").openLoopsText(st) : ""}
 请用一句话说出你此刻的念头，并判断你有多想做点什么、这条念头让你的心情往哪边走。只输出 JSON（不要解释）：
 {"thought":"一句念头（10~30字）","urge":0到100的数字,"mood_delta":-10到10的数字,"open_loop":"如果这条念头里有个你还没想明白的点，写成一句；没有就省略这个字段"}
 urge 含义：0=只想安静待着，100=非常想找人说话或做点事。
@@ -1530,15 +1604,15 @@ function applyThoughtMood(percept) {
 function funCtx() {
   const parts = [];
   try {
-    const h = host && host.apis.get("hobby");
+    const h = host && apiOf("hobby");
     if (h && h.hobbyText) { const t = h.hobbyText(2); if (t) parts.push(t); }
   } catch (e) {}
   try {
-    const p = host && host.apis.get("puzzle");
+    const p = host && apiOf("puzzle");
     if (p && p.puzzleCtx) { const t = p.puzzleCtx(); if (t) parts.push(t); }
   } catch (e) {}
   try {
-    const c = host && host.apis.get("fun-core");
+    const c = host && apiOf("fun-core");
     if (c) {
       const used = c.todayTotal ? c.todayTotal() : 0;
       const max = c.dailyTotalMax ? c.dailyTotalMax() : 2;
@@ -1552,7 +1626,7 @@ function funCtx() {
 
 /* ---- 第二层：判断（生活费宽裕用 pro，否则 flash）---- */
 async function deliberateMind(settings, st, percept, ctxBits) {
-  const recentThoughts = host.apis.get("mind").thoughtTexts(st, 6).join("；") || "（无）";
+  const recentThoughts = apiOf("mind").thoughtTexts(st, 6).join("；") || "（无）";
   const fCtx = funCtx();
   const prompt = `你是 Momo（大肥鱼桌宠）。现在是「自己思考」的时间（不是在回消息）。${goalsCtx()}。当前时间：${todayText()}。${budgetLevelText()}你的念头：${percept.thought || "（无）"}，想做事的程度：${percept.urge}/100。你最近在想：${recentThoughts}。${ctxBits}${fCtx ? "\n" + fCtx : ""}
 请给出 1~3 个「现在可以考虑做的事」，每个都打分，只输出 JSON（不要解释）：
@@ -1574,7 +1648,7 @@ async function deliberateMind(settings, st, percept, ctxBits) {
 async function mindLoop() {
   if (!apiKey) return;
   if (Date.now() - lastInteractionTs < MIND_PAUSE_MS) return;
-  const st = host.apis.get("mind").loadMindState();
+  const st = apiOf("mind").loadMindState();
   const now = Date.now();
   const h = new Date().getHours();
   if (h < 7 && st.last_think && now - st.last_think < 3600e3) return;
@@ -1587,14 +1661,14 @@ async function mindLoop() {
   /* ===== 第一层：感知（flash，便宜，只更新念头和"想做事的程度"）===== */
   const percept = await perceiveMind(settings, st, boredomV, masterStatusLine);
   if (percept.thought) {
-    const recentT = host.apis.get("mind").thoughtList(st).slice(-3).map((x) => String((x && x.text) || ""));
-    if (!recentT.some((t) => nearDup(t, percept.thought))) host.apis.get("mind").pushThought(st, percept.thought);
+    const recentT = apiOf("mind").thoughtList(st).slice(-3).map((x) => String((x && x.text) || ""));
+    if (!recentT.some((t) => nearDup(t, percept.thought))) apiOf("mind").pushThought(st, percept.thought);
     applyThoughtMood(percept);   // 念头回流到情绪：真的会让她心情变好/变差
-    if (percept.openLoop) host.apis.get("mind").pushOpenLoop(st, percept.openLoop);   // 记下「还没想明白的事」
+    if (percept.openLoop) apiOf("mind").pushOpenLoop(st, percept.openLoop);   // 记下「还没想明白的事」
   }
   st.last_think = now;
   st.last_urge = percept.urge;
-  host.apis.get("mind").saveMindState(st);
+  apiOf("mind").saveMindState(st);
 
   /* ===== 第二层：判断（够想做 or 隔得够久才做，省调用）===== */
   const sinceDelib = now - (st.last_deliberate || 0);
@@ -1605,12 +1679,12 @@ async function mindLoop() {
   const shortMem = masterUin ? pruneShortMemories(masterUin).slice(-5).map((m) => m.content).join("；") : "";
   const funNotes = (() => { try { const f = JSON.parse(fs.readFileSync(FUN_STUFF_FILE, "utf8")); return (f[0] && f[0].notes || "").slice(0, 400); } catch (e) { return ""; } })();
   const qqChat = masterUin ? recentQqChat(masterUin) : "";
-  const pendingTxt = host.apis.get("mind").pendingNudgesText(3);
+  const pendingTxt = apiOf("mind").pendingNudgesText(3);
   const ctxBits = `今天已发空间 ${dailyQzoneCount()} 条。距上次主动找主人：${lastChatAgo} 分钟。${masterStatusLine}。你对主人的长期记忆：${mem || "（还没记住什么）"}。短期印象：${shortMem || "（无）"}。刚搜到的素材：${funNotes || "（无）"}。主人最近QQ说：${qqChat || "（无）"}。${pendingTxt ? "你之前攒着想说的：\n" + pendingTxt : ""}`;
 
   const intents = await deliberateMind(settings, st, percept, ctxBits);
   st.last_deliberate = now;
-  host.apis.get("mind").saveMindState(st);
+  apiOf("mind").saveMindState(st);
   if (!intents.length) return;
 
   /* ===== 第三层：执行（只做够分的；中等分进静默池；一次只做一件）===== */
@@ -1620,13 +1694,13 @@ async function mindLoop() {
     if (action === "nothing") continue;
     const costTier = ACTION_COST[action] || "low";
     if (!canAfford(costTier)) { log("info", `心智-跳过 ${action}：生活费不足`); continue; }
-    const score = host.apis.get("mind").scoreIntent(it);
+    const score = apiOf("mind").scoreIntent(it);
     if (score >= SCORE_PUSH) {
       await runMindAction(action, content, settings, masterUin, now);
       log("info", `心智-执行 ${action}（分 ${score.toFixed(2)}）`);
       break;
     } else if (score >= SCORE_QUEUE) {
-      if (host.apis.get("mind").addPendingNudge({ kind: action, content, score })) log("info", `心智-静默准备（分 ${score.toFixed(2)}）: ${content.slice(0, 30)}`);
+      if (apiOf("mind").addPendingNudge({ kind: action, content, score })) log("info", `心智-静默准备（分 ${score.toFixed(2)}）: ${content.slice(0, 30)}`);
     }
   }
 }
@@ -1649,7 +1723,7 @@ async function runMindAction(action, content, settings, masterUin, now) {
         } catch (e) {
           // 发失败要让她自己知道，否则下次会说「我发过说说」
           log("warn", "心智-发空间失败: " + e.message.slice(0, 100));
-          try { const st2 = host.apis.get("mind").loadMindState(); host.apis.get("mind").pushThought(st2, "刚才想发的说说没发出去，别当成已经发了"); host.apis.get("mind").saveMindState(st2); } catch (e2) {}
+          try { const st2 = apiOf("mind").loadMindState(); apiOf("mind").pushThought(st2, "刚才想发的说说没发出去，别当成已经发了"); apiOf("mind").saveMindState(st2); } catch (e2) {}
         }
       }
     } else if (action === "search" && content) {
@@ -1683,11 +1757,11 @@ async function runMindAction(action, content, settings, masterUin, now) {
       await evolveExplore(settings);
     } else if (action === "browse") {
       log("info", "心智-选择刷视频");
-      const _bApi = host && host.apis.get("browse");
+      const _bApi = host && apiOf("browse");
       if (_bApi) { try { await _bApi.browse(settings); recordAction({ action: "browse", ok: true }); setActivity("发呆"); } catch (e) { log("warn", "刷视频失败: " + e.message.slice(0, 120)); } }
     } else if (action === "read_article") {
       log("info", "心智-选择读一篇文章");
-      const _rApi = host && host.apis.get("read-article");
+      const _rApi = host && apiOf("read-article");
       if (_rApi) {
         try {
           const r = await _rApi.readArticle(settings);
@@ -1697,7 +1771,7 @@ async function runMindAction(action, content, settings, masterUin, now) {
       }
     } else if (action === "play_puzzle") {
       log("info", "心智-选择玩数独");
-      const _pApi = host && host.apis.get("puzzle");
+      const _pApi = host && apiOf("puzzle");
       if (_pApi) {
         try {
           const r = await _pApi.playPuzzle(settings);
@@ -1710,7 +1784,7 @@ async function runMindAction(action, content, settings, masterUin, now) {
       }
     } else if (action === "read_buzz") {
       log("info", "心智-选择刷热搜");
-      const _zApi = host && host.apis.get("buzz");
+      const _zApi = host && apiOf("buzz");
       if (_zApi) {
         try {
           const r = await _zApi.readBuzz(settings);
@@ -1734,11 +1808,11 @@ function funShareCountToday() {
 function queueFunShare(text) {
   try {
     if (funShareCountToday() >= 1) return false;
-    const ok = host.apis.get("mind").addPendingNudge({ kind: "fun", content: String(text || "").slice(0, 150), score: 0.6 });
+    const ok = apiOf("mind").addPendingNudge({ kind: "fun", content: String(text || "").slice(0, 150), score: 0.6 });
     if (ok) {
       const day = new Date().toDateString();
       fs.mkdirSync(DATA_DIR, { recursive: true });
-      fs.writeFileSync(FUN_SHARE_FILE, JSON.stringify({ day, count: funShareCountToday() + 1 }));
+      writeJsonAtomic(FUN_SHARE_FILE, { day, count: funShareCountToday() + 1 });
     }
     return ok;
   } catch (e) { return false; }
@@ -1747,7 +1821,7 @@ function queueFunShare(text) {
 /* ---------------- 主动聊天频率偏好（按用户） ---------------- */
 const PREF_FILE = path.join(DATA_DIR, "proactive-pref.json");
 function loadProactivePref() { try { return JSON.parse(fs.readFileSync(PREF_FILE, "utf8")); } catch (e) { return {}; } }
-function saveProactivePref(pf) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(PREF_FILE, JSON.stringify(pf)); } catch (e) {} }
+function saveProactivePref(pf) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); writeJsonAtomic(PREF_FILE, pf); } catch (e) {} }
 function getProactivePref(userId) { const pf = loadProactivePref(); return ["off", "low", "normal", "high"].includes(pf[userId]) ? pf[userId] : "normal"; }
 function setProactivePref(userId, pref) { const pf = loadProactivePref(); pf[userId] = pref; saveProactivePref(pf); }
 function proactiveIntervalMs(userId) {
@@ -1770,7 +1844,7 @@ async function qzoneHttp(action, params) {
   return j.data;
 }
 function recentSpaceContext(userId) {
-  const a = host && host.apis.get("qzone");
+  const a = host && apiOf("qzone");
   const st = a ? a.loadQzInfo() : {};
   const seen = (st.seen && st.seen[userId]) || {};
   const posts = seen.posts || [];
@@ -1782,7 +1856,7 @@ function recentSpaceContext(userId) {
 /* ---------------- 漏消息补回 ---------------- */
 const SEEN_MSG_FILE = path.join(DATA_DIR, "seen-msg.json");
 function loadSeenMsg() { try { return JSON.parse(fs.readFileSync(SEEN_MSG_FILE, "utf8")); } catch (e) { return {}; } }
-function saveSeenMsg(userId, ts) { const s = loadSeenMsg(); s[String(userId)] = ts; try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(SEEN_MSG_FILE, JSON.stringify(s)); } catch (e) {} }
+function saveSeenMsg(userId, ts) { const s = loadSeenMsg(); s[String(userId)] = ts; try { fs.mkdirSync(DATA_DIR, { recursive: true }); writeJsonAtomic(SEEN_MSG_FILE, s); } catch (e) {} }
 async function catchUpMissedMessages() {
   const users = (cfg.qq && cfg.qq.allowed_users) || [];
   for (const u of users) {
@@ -1811,14 +1885,14 @@ function saveShortMemories(userId, items) { const t = _memApi(); if (t) t.saveSh
 function pruneShortMemories(userId) { const t = _memApi(); return t ? t.pruneShortMemories(userId) : []; }
 
 function loadMsgTimes() { try { return JSON.parse(fs.readFileSync(MSG_TIMES_FILE, "utf8")); } catch (e) { return {}; } }
-function saveMsgTime(userId, ts) { const s = loadMsgTimes(); s[String(userId)] = ts; try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(MSG_TIMES_FILE, JSON.stringify(s)); } catch (e) {} }
+function saveMsgTime(userId, ts) { const s = loadMsgTimes(); s[String(userId)] = ts; try { fs.mkdirSync(DATA_DIR, { recursive: true }); writeJsonAtomic(MSG_TIMES_FILE, s); } catch (e) {} }
 /* 记忆固化已迁移到插件 memory（timer 钩子） */
 
 /* ---------------- 定时提醒 + 每日复盘 + 生日 ---------------- */
 const REMINDER_FILE = path.join(DATA_DIR, "reminders.json");
 const BIRTHDAY_FILE = path.join(DATA_DIR, "birthdays.json");
 function loadJson(f, def) { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch (e) { return def; } }
-function saveJson(f, v) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(f, JSON.stringify(v)); } catch (e) {} }
+function saveJson(f, v) { try { fs.mkdirSync(DATA_DIR, { recursive: true }); writeJsonAtomic(f, v); } catch (e) {} }
 /* 提醒/生日数据已随插件迁移 */
 function todayMMDD() { const n = new Date(); return `${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`; }
 /* parseReminder/parseBirthday/checkReminders/checkBirthdays 已迁移到插件 */
@@ -1828,7 +1902,7 @@ function todayMMDD() { const n = new Date(); return `${String(n.getMonth() + 1).
 const GOALS_FILE = path.join(DATA_DIR, "goals.json");
 const DEEP_STATE_FILE = path.join(DATA_DIR, "deep-state.json");
 /* loadGoals/saveGoals 已迁移到插件 goals */
-function goalsCtx() { try { const f = host && host.apis.get("goals"); return f ? f.goalsCtx() : ""; } catch (e) { return ""; } }
+function goalsCtx() { try { const f = host && apiOf("goals"); return f ? f.goalsCtx() : ""; } catch (e) { return ""; } }
 /* goalPlanDaily 已迁移到插件 goals */
 
 /* ---------------- 多智能体会诊 ---------------- */
@@ -1874,12 +1948,12 @@ async function multiAgentReply(userText, settings, persona, call, memories, shor
 
 /* 电脑助手（截图/找文件/开软件/系统信息/发文件）已迁移为插件 pc-tools */
 /* ---------------- 表情包（逻辑已迁移到插件 stickers，以下为代理） ---------------- */
-function stickerPrompt() { try { const a = host && host.apis.get("stickers"); return a ? a.stickerPrompt() : ""; } catch (e) { return ""; } }
-function parseStickerMarkers(text) { try { const a = host && host.apis.get("stickers"); return a ? a.parseStickerMarkers(text) : { cleanText: String(text || ""), indices: [] }; } catch (e) { return { cleanText: String(text || ""), indices: [] }; } }
-function pickStickerByEmotion(name) { try { const a = host && host.apis.get("stickers"); return a ? a.pickStickerByEmotion(name) : null; } catch (e) { return null; } }
+function stickerPrompt() { try { const a = host && apiOf("stickers"); return a ? a.stickerPrompt() : ""; } catch (e) { return ""; } }
+function parseStickerMarkers(text) { try { const a = host && apiOf("stickers"); return a ? a.parseStickerMarkers(text) : { cleanText: String(text || ""), indices: [] }; } catch (e) { return { cleanText: String(text || ""), indices: [] }; } }
+function pickStickerByEmotion(name) { try { const a = host && apiOf("stickers"); return a ? a.pickStickerByEmotion(name) : null; } catch (e) { return null; } }
 /* 智能挑选：结合上下文让模型从候选里选最贴切的一张（失败自动退回随机） */
 async function pickStickerSmart(name, contextText, opts) {
-  try { const a = host && host.apis.get("stickers"); return a ? await a.pickStickerSmart(name, contextText, opts) : null; }
+  try { const a = host && apiOf("stickers"); return a ? await a.pickStickerSmart(name, contextText, opts) : null; }
   catch (e) { return pickStickerByEmotion(name); }
 }
 /* ---------------- 最近发出的表情包（「这张」指代 + 下一轮注入余韵） ---------------- */
@@ -1900,7 +1974,7 @@ function noteStickerSent(sessionKey, sticker) {
     allowProactive: !!sticker.allowProactive,
     ts: Date.now(),
   });
-  try { const a = host && host.apis.get("stickers"); if (a && a.recordSent) a.recordSent(sticker, sessionKey); } catch (e) {}
+  try { const a = host && apiOf("stickers"); if (a && a.recordSent) a.recordSent(sticker, sessionKey); } catch (e) {}
   try { recordAction({ action: "sticker_sent", target: sticker.fname, by: null, publicId: sticker.publicId || "" }); } catch (e) {}
 }
 function getLastSentSticker(sessionKey) {
@@ -1916,11 +1990,11 @@ function stickerRefCtx(sessionKey) {
   return `【刚才发的表情包】你上一条发的是「${e.desc}」（编号 ${e.publicId || e.fname}）。${_m}对方说「这张 / 这个」时默认指它；要教它什么意思就直接用编号说。`;
 }
 function bumpStickerUsed(sticker) {
-  try { const a = host && host.apis.get("stickers"); if (a && a.bumpMeta && sticker && sticker.fname) a.bumpMeta(sticker.fname, "used"); } catch (e) {}
+  try { const a = host && apiOf("stickers"); if (a && a.bumpMeta && sticker && sticker.fname) a.bumpMeta(sticker.fname, "used"); } catch (e) {}
 }
-function maybeCollect(buf, desc) { try { const a = host && host.apis.get("stickers"); return a ? a.maybeCollect(buf, desc) : null; } catch (e) { return null; } }
-function generateStickerImage(prompt, outName) { try { const a = host && host.apis.get("stickers"); if (a) return a.generateStickerImage(prompt, outName); } catch (e) {} throw new Error("表情包插件未加载"); }
-function listStickers() { try { const a = host && host.apis.get("stickers"); return a ? a.listStickers() : []; } catch (e) { return []; } }
+function maybeCollect(buf, desc) { try { const a = host && apiOf("stickers"); return a ? a.maybeCollect(buf, desc) : null; } catch (e) { return null; } }
+function generateStickerImage(prompt, outName) { try { const a = host && apiOf("stickers"); if (a) return a.generateStickerImage(prompt, outName); } catch (e) {} throw new Error("表情包插件未加载"); }
+function listStickers() { try { const a = host && apiOf("stickers"); return a ? a.listStickers() : []; } catch (e) { return []; } }
 async function sendStickerImage(userId, sticker, channel, groupId) {
   const seg = [{ type: "image", data: { file: "file:///" + sticker.file.replace(/\\/g, "/") } }];
   if (channel === "group" && groupId) {
@@ -1931,18 +2005,18 @@ async function sendStickerImage(userId, sticker, channel, groupId) {
   bumpStickerUsed(sticker);
 }
 /* ---------------- 进化层技能规则解释器（数据驱动，规则来自 self/skills.json，基础层只管执行） ---------------- */
-function pickStickerByIds(ids) { try { const a = host && host.apis.get("stickers"); return a ? a.pickStickerByIds(ids) : null; } catch (e) { return null; } }
-function matchSkillRule(text, userId) { try { const a = host && host.apis.get("evolution"); return a ? a.matchSkillRule(text, userId) : null; } catch (e) { return null; } }
-async function runSkillRule(rule, userId, call) { const a = host && host.apis.get("evolution"); if (a) await a.runSkillRule(rule, userId, call); }
+function pickStickerByIds(ids) { try { const a = host && apiOf("stickers"); return a ? a.pickStickerByIds(ids) : null; } catch (e) { return null; } }
+function matchSkillRule(text, userId) { try { const a = host && apiOf("evolution"); return a ? a.matchSkillRule(text, userId) : null; } catch (e) { return null; } }
+async function runSkillRule(rule, userId, call) { const a = host && apiOf("evolution"); if (a) await a.runSkillRule(rule, userId, call); }
 
 /* 进化层逻辑已迁移到特权插件 evolution，以下为代理 */
-async function extractSelfIdentity(userText, replyText, settings, userId) { try { const a = host && host.apis.get("evolution"); if (a) await a.extractSelfIdentity(userText, replyText, settings, userId); } catch (e) {} }
-async function selfScoreReply(userText, replyText, settings) { try { const a = host && host.apis.get("evolution"); if (a) await a.selfScoreReply(userText, replyText, settings); } catch (e) {} }
-async function tunePrefFromScore(st) { try { const a = host && host.apis.get("evolution"); if (a) await a.tunePrefFromScore(st); } catch (e) {} }
-async function selfReflection(settings) { try { const a = host && host.apis.get("evolution"); if (a) await a.selfReflection(settings); } catch (e) {} }
-async function exploreFun(query, settings) { try { const a = host && host.apis.get("evolution"); if (a) await a.exploreFun(query, settings); } catch (e) {} }
-async function evolveExplore(settings) { try { const a = host && host.apis.get("evolution"); if (a) await a.evolveExplore(settings); } catch (e) {} }
-function loadProposals() { try { const a = host && host.apis.get("evolution"); return a ? a.loadProposals() : []; } catch (e) { return []; } }
+async function extractSelfIdentity(userText, replyText, settings, userId) { try { const a = host && apiOf("evolution"); if (a) await a.extractSelfIdentity(userText, replyText, settings, userId); } catch (e) {} }
+async function selfScoreReply(userText, replyText, settings) { try { const a = host && apiOf("evolution"); if (a) await a.selfScoreReply(userText, replyText, settings); } catch (e) {} }
+async function tunePrefFromScore(st) { try { const a = host && apiOf("evolution"); if (a) await a.tunePrefFromScore(st); } catch (e) {} }
+async function selfReflection(settings) { try { const a = host && apiOf("evolution"); if (a) await a.selfReflection(settings); } catch (e) {} }
+async function exploreFun(query, settings) { try { const a = host && apiOf("evolution"); if (a) await a.exploreFun(query, settings); } catch (e) {} }
+async function evolveExplore(settings) { try { const a = host && apiOf("evolution"); if (a) await a.evolveExplore(settings); } catch (e) {} }
+function loadProposals() { try { const a = host && apiOf("evolution"); return a ? a.loadProposals() : []; } catch (e) { return []; } }
 
 
 /* ---------------- 回复拆条 ---------------- */
@@ -2061,7 +2135,7 @@ function parseMessage(msg) {
   return { text: text.trim(), images, hasFace, faces, records, ats };
 }
 function textOfMessage(msg) { return parseMessage(msg).text; }
-async function transcribeRecords(messageId, records) { try { const a = host && host.apis.get("voice"); return a ? await a.transcribeRecords(messageId, records) : ""; } catch (e) { return ""; } }
+async function transcribeRecords(messageId, records) { try { const a = host && apiOf("voice"); return a ? await a.transcribeRecords(messageId, records) : ""; } catch (e) { return ""; } }
 
 /* ---------------- 图片识别（视觉） ---------------- */
 
@@ -2070,7 +2144,7 @@ async function handlePrivateMessage(event) {
   const userId = Number(event.user_id), selfId = Number(event.self_id);
   if (userId === selfId) return;
   const _allowed = (cfg.qq && cfg.qq.allowed_users) || [];
-  const _rolesApi = host && host.apis.get("roles");
+  const _rolesApi = host && apiOf("roles");
   const _role = _rolesApi
     ? _rolesApi.resolveRole(userId)
     : (_allowed.includes(userId) || isMaster(userId) ? "user" : "ignored");
@@ -2331,7 +2405,7 @@ async function processPrivateChat(userId, text, images, voiceRequested, msgTime)
     const shortMemories = pruneShortMemories(userId);
     const persona = userPersona(userId, settings);
     let taskCtx = "";
-    const pcApi = host && host.apis.get("pcTools");
+    const pcApi = host && apiOf("pcTools");
     if (master && !budgetOut && pcApi) {
       const _fq = pcApi.extractFileQuery(text);
       if (_fq) {
@@ -2374,14 +2448,14 @@ async function processPrivateChat(userId, text, images, voiceRequested, msgTime)
           /* 收图先反查表情包库：是库里的图就直接用标注，省一次视觉调用 */
           let _known = null;
           try {
-            const _stk = host && host.apis.get("stickers");
+            const _stk = host && apiOf("stickers");
             if (_stk && _stk.findByHash) {
-              const _buf = await host.apis.get("vision").imageBytes(img);
+              const _buf = await apiOf("vision").imageBytes(img);
               _known = _stk.findByHash(_buf);
             }
           } catch (e) {}
-          if (_known && _known.meaning) { descs.push("[表情包] " + host.apis.get("stickers").meaningText(_known)); continue; }
-          try { const d = await host.apis.get("vision").describeImage(img, settings); if (d) descs.push(d); } catch (e) { log("warn", "图片识别失败: " + e.message.slice(0, 120)); }
+          if (_known && _known.meaning) { descs.push("[表情包] " + apiOf("stickers").meaningText(_known)); continue; }
+          try { const d = await apiOf("vision").describeImage(img, settings); if (d) descs.push(d); } catch (e) { log("warn", "图片识别失败: " + e.message.slice(0, 120)); }
         }
         if (descs.length) text = text + (text ? "\n" : "") + "【图片内容】" + descs.join("；");
         else if (!text) text = "[对方发了一张图片，但我暂时看不清]";
@@ -2415,14 +2489,14 @@ async function processPrivateChat(userId, text, images, voiceRequested, msgTime)
     taskCtx = taskCtx ? timeCtx + "\n" + taskCtx : timeCtx;
     const statusCtx = currentStatusCtx(userId);
     if (statusCtx) taskCtx = statusCtx + "\n" + taskCtx;
-    const _lifeApi = host && host.apis.get("lifeLog");
+    const _lifeApi = host && apiOf("lifeLog");
     const _lifeCtx = _lifeApi ? _lifeApi.lifeCtx() : "";
     if (_lifeCtx) taskCtx = _lifeCtx + "\n" + taskCtx;
-    const _wApi = host && host.apis.get("weather");
+    const _wApi = host && apiOf("weather");
     if (_wApi) { try { const _wCtx = await _wApi.weatherCtx(); if (_wCtx) taskCtx = _wCtx + "\n" + taskCtx; } catch (e) {} }
-    const _crossCtx = host.apis.get("groupInfo").crossWindowCtx(userId);
+    const _crossCtx = apiOf("groupInfo").crossWindowCtx(userId);
     if (_crossCtx) taskCtx = _crossCtx + "\n" + taskCtx;
-    const _teachApi = host && host.apis.get("teach");
+    const _teachApi = host && apiOf("teach");
     const _teachCtx = _teachApi ? _teachApi.teachCtx(text) : "";
     if (_teachCtx) taskCtx = _teachCtx + "\n" + taskCtx;
     const spaceCtx = recentSpaceContext(userId);
@@ -2459,7 +2533,7 @@ async function processPrivateChat(userId, text, images, voiceRequested, msgTime)
     await maybeRollSummary(userId, history, settings);
     saveSession(userId, trimHistory(history, settings.history_limit, settings.history_chars));
     /* 只发语音模式：本回合有语音要发时不再发文字（避免“文字+语音”两条） */
-    const _voiceApi = host && host.apis.get("voice");
+    const _voiceApi = host && apiOf("voice");
     const _pendingVoice = !!(_voiceApi && _voiceApi.hasPendingVoice && _voiceApi.hasPendingVoice(userId));
     const _voiceOnly = !!(_voiceApi && _voiceApi.voiceOnlyReply && _voiceApi.voiceOnlyReply() && (voiceRequested || _pendingVoice));
     if (_voiceOnly) log("info", `只发语音（文字已抑制）user=${userId}${_pendingVoice ? "（工具触发）" : "（关键词触发）"}`);
@@ -2609,11 +2683,11 @@ async function processGroupChat(groupId, userId, text, images, msgTime, direct, 
           /* 群聊收图 */
           let _known = null;
           try {
-            const _stk = host && host.apis.get("stickers");
-            if (_stk && _stk.findByHash) _known = _stk.findByHash(await host.apis.get("vision").imageBytes(img));
+            const _stk = host && apiOf("stickers");
+            if (_stk && _stk.findByHash) _known = _stk.findByHash(await apiOf("vision").imageBytes(img));
           } catch (e) {}
-          if (_known && _known.meaning) { descs.push("[表情包] " + host.apis.get("stickers").meaningText(_known)); continue; }
-          try { const d = await host.apis.get("vision").describeImage(img, settings); if (d) descs.push(d); } catch (e) {}
+          if (_known && _known.meaning) { descs.push("[表情包] " + apiOf("stickers").meaningText(_known)); continue; }
+          try { const d = await apiOf("vision").describeImage(img, settings); if (d) descs.push(d); } catch (e) {}
         }
         if (descs.length) text = text + (text ? "\n" : "") + "【图片内容】" + descs.join("；");
         else if (!text) text = "[对方发了一张图片]";
@@ -2626,18 +2700,18 @@ async function processGroupChat(groupId, userId, text, images, msgTime, direct, 
     if (gapMs > 60000) log("info", `群时间差 ${gKey}: ${formatGap(gapMs)}`);
     if (msgTime) saveMsgTime(gKey, msgTime);
     const timeCtx = timeAwarenessCtx(gapMs);
-    const gMemberCtx = host.apis.get("groupInfo").groupMemberCtx(groupId, userId);
-    const gLogCtx = host.apis.get("groupInfo").groupLogCtx(groupId);
-    const gMemeCtx = host.apis.get("groupInfo").groupMemesCtx(groupId);
+    const gMemberCtx = apiOf("groupInfo").groupMemberCtx(groupId, userId);
+    const gLogCtx = apiOf("groupInfo").groupLogCtx(groupId);
+    const gMemeCtx = apiOf("groupInfo").groupMemesCtx(groupId);
     let gInfoCtx = "";
-    try { const _gi = host && host.apis.get("groupInfo"); if (_gi) gInfoCtx = await _gi.groupInfoCtx(groupId); } catch (e) {}
+    try { const _gi = host && apiOf("groupInfo"); if (_gi) gInfoCtx = await _gi.groupInfoCtx(groupId); } catch (e) {}
     /* 群聊也要有自己的真实状态、天气、教学（和私聊对齐） */
-    const _gLifeApi = host && host.apis.get("lifeLog");
+    const _gLifeApi = host && apiOf("lifeLog");
     const _gLifeCtx = _gLifeApi ? _gLifeApi.lifeCtx() : "";
-    const _gTeachApi = host && host.apis.get("teach");
+    const _gTeachApi = host && apiOf("teach");
     const _gTeachCtx = _gTeachApi ? _gTeachApi.teachCtx(text) : "";
     let _gWeatherCtx = "";
-    try { const _gW = host && host.apis.get("weather"); if (_gW) _gWeatherCtx = await _gW.weatherCtx(); } catch (e) {}
+    try { const _gW = host && apiOf("weather"); if (_gW) _gWeatherCtx = await _gW.weatherCtx(); } catch (e) {}
     const gCtx = [GROUP_DIRECTIVE, gInfoCtx, timeCtx, gMemberCtx, gLogCtx, gMemeCtx, _gLifeCtx, _gWeatherCtx, _gTeachCtx, "注意：有些事是对方在私聊里告诉你的，别在群里随便说。"].filter(Boolean).join("\n") || undefined;
     /* R1：群聊 max_tokens 上限由 buildPersonContext 统一处理 */
     setActivity("在群里陪" + gCall + "聊天");
@@ -2655,7 +2729,7 @@ async function processGroupChat(groupId, userId, text, images, msgTime, direct, 
       const segGap = evolvePref("reply_gap_ms", qq.reply_gap_ms || 1200);
       const segs = split ? splitReply(reply, evolvePref("split_cap", 150)) : [reply];
       /* @ 不 @ 由参数决定：always 总@ / on_at 只在被直接叫时@ / never 从不@ */
-      const _atApi = host && host.apis.get("groupChat");
+      const _atApi = host && apiOf("groupChat");
       const _atMode = _atApi ? _atApi.atMode() : "on_at";
       const _atFirst = _atMode === "always" ? true : (_atMode === "never" ? false : !!direct);
       for (let i = 0; i < segs.length; i++) {
@@ -2677,7 +2751,7 @@ async function processGroupChat(groupId, userId, text, images, msgTime, direct, 
         }
       } catch (e) { log("warn", "群表情包失败: " + String(e.message).slice(0, 100)); }
       if (host) host.runHook("reply", { userId, text, reply, channel: "group", groupId });
-      host.apis.get("groupInfo").recordCrossWindow(userId, groupId, text, reply);
+      apiOf("groupInfo").recordCrossWindow(userId, groupId, text, reply);
       /* 群聊记忆提炼已由插件 memory 的 reply 钩子接管 */
     }
     
@@ -2734,7 +2808,7 @@ async function handleGroupMessage(event) {
   const _uid = Number(event.user_id);
   /* 这条消息 @ 了哪些别人（不含她自己） */
   const _atOthers = (parsed.ats || []).filter((q) => q && String(q) !== String(event.self_id) && String(q) !== "all");
-  const _gApi = host && host.apis.get("groupChat");
+  const _gApi = host && apiOf("groupChat");
   const _atOthersMode = _gApi ? _gApi.atOthersMode() : "smart";
   const _dec = groupShouldReply(atSelf, mentioned, GROUP_LAST_AT.get(_gid), _uid, Date.now(), _atOthers, _atOthersMode);
   const _continued = _dec.continued;
@@ -2749,7 +2823,7 @@ async function handleGroupMessage(event) {
     log("info", `群对话延续-判定为跟她说 群${_gid} 用户${_uid}：${String(text).slice(0, 30)}`);
   }
   if (_dec.reply) {
-    const _gRoles = host && host.apis.get("roles");
+    const _gRoles = host && apiOf("roles");
     if (_gRoles && _gRoles.resolveRole(_uid) === "visitor" && !_gRoles.rateOk(_uid)) { log("info", `访客限速，忽略群消息 ${_uid}`); return; }
     GROUP_LAST_AT.set(_gid, { userId: _uid, ts: Date.now() });   // 续期
     if (_continued) log("info", `群对话延续 群${_gid} 用户${_uid}：${String(text).slice(0, 30)}`);
@@ -2772,10 +2846,10 @@ async function handleGroupMessage(event) {
   log("info", `收到群消息 群${event.group_id} 用户${userId}，文本 ${text.length} 字，图片 ${parsed.images.length} 张`);
   logJsonl("messages.jsonl", { userId, channel: "group", groupId: event.group_id, text: String(text || "").slice(0, 500), images: parsed.images.length });
   const _sn = event.sender ? String(event.sender.card || event.sender.nickname || "").slice(0, 20) : "";
-  if (_sn) host.apis.get("groupInfo").rememberGroupMember(event.group_id, userId, _sn, { images: parsed.images.length, role: event.sender && event.sender.role });
+  if (_sn) apiOf("groupInfo").rememberGroupMember(event.group_id, userId, _sn, { images: parsed.images.length, role: event.sender && event.sender.role });
   /* 自动学群梗：「X 的意思是 Y」这类说法 */
-  try { host.apis.get("groupInfo").detectGroupMeme(event.group_id, text, userId); } catch (e) {}
-  host.apis.get("groupInfo").recordGroupLog(event.group_id, userId, _sn, text);
+  try { apiOf("groupInfo").detectGroupMeme(event.group_id, text, userId); } catch (e) {}
+  apiOf("groupInfo").recordGroupLog(event.group_id, userId, _sn, text);
   enqueueGroupChat(Number(event.group_id), userId, text, parsed.images, Number(event.time) || 0, !!(atSelf || mentioned), _sn);
   if (event.message_id) GROUP_LAST_MSGID.set(Number(event.group_id) + "_" + userId, String(event.message_id));
 }
@@ -2808,28 +2882,33 @@ function seedActivity() {
 const PROACTIVE_STARTED_AT = Date.now();
 /* proactiveLoop 已迁移到插件 proactive */
 
+/* R2：WS 重连指数退避+抖动（5s 起步，翻倍到 60s 封顶；连上即复位） */
+let wsRetryDelay = 5000;
+function nextWsDelay() { const d = wsRetryDelay; wsRetryDelay = Math.min(wsRetryDelay * 2, 60000); return d + Math.floor(Math.random() * 1000); }
+function resetWsDelay() { wsRetryDelay = 5000; }
+
 function connect() {
   try { if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; } } catch (e) {}
   const url = cfg.onebot.ws_url;
   log("info", "连接 OneBot WS: " + url);
   try {
     ws = new WebSocket(url);
-    ws.onopen = () => log("info", "OneBot WS 已连接");
+    ws.onopen = () => { resetWsDelay(); log("info", "OneBot WS 已连接"); };
     ws.onerror = (e) => log("warn", "OneBot WS 错误: " + (e.message || e.type || "unknown"));
-    ws.onclose = () => { log("warn", "OneBot WS 断开，5 秒后重连"); reconnectTimer = setTimeout(connect, 5000); };
+    ws.onclose = () => { const d = nextWsDelay(); log("warn", `OneBot WS 断开，${Math.round(d / 1000)} 秒后重连`); reconnectTimer = setTimeout(connect, d); };
     ws.onmessage = (ev) => {
       try {
         const obj = JSON.parse(ev.data);
         if (obj.post_type === "message" && obj.message_type === "private") handlePrivateMessage(obj).catch((e) => log("error", "私聊处理异常: " + e.message));
         else if (obj.post_type === "message" && obj.message_type === "group") handleGroupMessage(obj).catch((e) => log("error", "群聊处理异常: " + e.message));
         else if (obj.post_type === "notice" && obj.notice_type === "notify" && obj.sub_type === "poke") {
-          const _ia = host && host.apis.get("interact");
+          const _ia = host && apiOf("interact");
           if (_ia && _ia.onPoke) _ia.onPoke(obj).catch((e) => log("warn", "拍一拍处理异常: " + e.message));
         }
         else if (obj.post_type === "meta_event" && obj.meta_event_type === "lifecycle") log("info", `Bot 上线 self_id=${obj.self_id}`);
       } catch (e) { log("error", "消息解析异常: " + e.message); }
     };
-  } catch (e) { log("error", "WS 建立失败: " + e.message); reconnectTimer = setTimeout(connect, 5000); }
+  } catch (e) { const d = nextWsDelay(); log("error", "WS 建立失败: " + e.message); reconnectTimer = setTimeout(connect, d); }
 }
 
 /* ================= 桌宠联脑：本地 OpenAI 兼容接口 =================
@@ -2863,6 +2942,13 @@ async function petChat(petMessages) {
   const res = await agentChatOnce(history, userText, buildPersonContext({ sender: master, room: 0, channel: "pet" }, { taskCtx: petCtx }));
   log("info", `桌宠联脑完成 耗时 ${Date.now() - _t0}ms（历史 ${history.length} 条）`);
   const reply = String((res && res.reply) || "").trim();
+  /* E3：把桌宠这轮对话落进 pet 会话文件，供 QQ 侧的跨通道镜头读取 */
+  try {
+    const _pHis = loadSession("pet" + master);
+    _pHis.push({ role: "user", content: userText.slice(0, 2000), ts: Date.now() });
+    _pHis.push({ role: "assistant", content: reply.slice(0, 2000), ts: Date.now() });
+    saveSession("pet" + master, trimHistory(_pHis, 40, 24000));
+  } catch (e) {}
   return reply || "（嗯……我在想）";
 }
 
@@ -2990,6 +3076,7 @@ host = createHost({
   log, cfg, get apiKey() { return apiKey; }, resolveChatSettings,
   sendPrivate, recordAndSend, onebotSend, sendStickerImage,
   loadMemories, saveMemories, loadShortMemories, saveShortMemories, loadSession, saveSession,
+  writeFileAtomic, writeJsonAtomic,
   isMaster, resolveCall, userPersona, isBudgetExhausted, budgetLevel, canAfford, ACTION_COST, getFavor,
   recordAction, loadActions,
   getCurrentStatus, setCurrentStatus, clearCurrentStatus, applyStatusRule, userQuietState, markProbed, loadActivityState,
@@ -2997,7 +3084,7 @@ host = createHost({
   loadAppellations, saveAppellations, loadMute, addMute, removeMute, resolveTargetId, loadWishes, addWish,
   completeOnce, reasonComplete, qzoneHttp, bochaKey,
   cleanText, UA, sleep, recordSpend, estimateTokens, maybeCollect,
-  getEmotion, getMood, addMood, setMood, getBoredom, addBoredom, loadBudget, budgetCfg, loadMindState: () => host.apis.get("mind").loadMindState(), textSimilar,
+  getEmotion, getMood, addMood, setMood, getBoredom, addBoredom, loadBudget, budgetCfg, loadMindState: () => apiOf("mind").loadMindState(), textSimilar,
   getLastSentSticker, stickerSessionKey, notePremiseCorrection,
   loadEvolution, reloadEvolution, pickStickerByIds, SELF_DIR, BASE_VERSION,
   proactive: {

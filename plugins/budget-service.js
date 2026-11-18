@@ -47,14 +47,14 @@ function loadBudget() {
       try {
         fs.appendFileSync(historyFile(), JSON.stringify(b) + "\n");
         const lines = fs.readFileSync(historyFile(), "utf8").split("\n").filter(Boolean);
-        if (lines.length > 400) fs.writeFileSync(historyFile(), lines.slice(-400).join("\n") + "\n");
+        if (lines.length > 400) _ctx.writeFileAtomic(historyFile(), lines.slice(-400).join("\n") + "\n");
       } catch (e) {}
       return fresh;
     }
     return Object.assign(fresh, b);
   } catch (e) { return fresh; }
 }
-function saveBudget(b) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); fs.writeFileSync(budgetFile(), JSON.stringify(b)); } catch (e) {} }
+function saveBudget(b) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(budgetFile(), b); } catch (e) {} }
 
 function recordSpend(kind, inTok, outTok, hitTok, flatCny, isPro) {
   const bc = budgetCfg();

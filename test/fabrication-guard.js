@@ -56,6 +56,8 @@ const capPlugin = require("E:/Learn/Momo/plugins/capability-index.js");
 capPlugin.init({
   DATA_DIR: DIR,
   log: () => {},
+  writeJsonAtomic: (f, o) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(o, null, 0)); } catch (e) {} },
+  writeFileAtomic: (f, t) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); } catch (e) {} },
   config: { qq: { master_user: 100000001, allowed_users: [100000001] } },
   registry: { tools: () => ["send_voice", "read_article"], commands: () => [] },
 });

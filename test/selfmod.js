@@ -21,6 +21,8 @@ plugin.init({
   DATA_DIR: DATA,
   BASE_VERSION: "test",
   log: () => {},
+  writeJsonAtomic: (f, o) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(o, null, 0)); } catch (e) {} },
+  writeFileAtomic: (f, t) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); } catch (e) {} },
   config: { qq: { master_user: 1000 } },
   sendPrivate: async () => {},
   getSetting: (k, d) => d,

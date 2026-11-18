@@ -16,6 +16,8 @@ const notes = [];
 mod.init({
   DATA_DIR: DIR,
   log: () => {},
+  writeJsonAtomic: (f, o) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(o, null, 0)); } catch (e) {} },
+  writeFileAtomic: (f, t) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); } catch (e) {} },
   loadActions: (n) => [{ action: "view_space", ts: Date.now() }],
   formatGap: (ms) => "刚才",
 });

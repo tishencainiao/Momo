@@ -22,7 +22,7 @@ function addOverclaimReflection(capability, saidText) {
     arr.push({ text: `我想说「${String(saidText || "").slice(0, 30)}」的时候其实做不到（${capability}），以后要先如实说做不了。`, from: "overclaim", ts: Date.now(), subject: "overclaim" });
     while (arr.length > 100) arr.shift();
     fs.mkdirSync(_ctx.SELF_DIR, { recursive: true });
-    fs.writeFileSync(p, JSON.stringify(arr));
+    _ctx.writeJsonAtomic(p, arr);
   } catch (e) {}
 }
 

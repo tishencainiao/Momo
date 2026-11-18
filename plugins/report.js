@@ -61,7 +61,7 @@ function windowStart(kind, now) {
 }
 
 function loadState() { return readJson(STATE(), { daily: "", weekly: "", monthly: "" }); }
-function saveState(s) { try { fs.mkdirSync(DATA(), { recursive: true }); fs.writeFileSync(STATE(), JSON.stringify(s)); } catch (e) {} }
+function saveState(s) { try { fs.mkdirSync(DATA(), { recursive: true }); _ctx.writeJsonAtomic(STATE(), s); } catch (e) {} }
 
 /* ---------------- 采集 ---------------- */
 function collect(kind, now) {
@@ -146,7 +146,7 @@ function rememberReport(text) {
     const arr = readJson(f, []);
     arr.push({ type: "report", ts: Date.now(), text: String(text).slice(0, 600) });
     while (arr.length > 200) arr.shift();
-    fs.writeFileSync(f, JSON.stringify(arr), "utf8");
+    _ctx.writeJsonAtomic(f, arr);
   } catch (e) {}
 }
 

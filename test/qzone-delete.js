@@ -13,6 +13,8 @@ const plugin = require(path.join(ROOT, "plugins/qzone.js"));
 plugin.init({
   DATA_DIR: tmp,
   log: () => {},
+  writeJsonAtomic: (f, o) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(o, null, 0)); } catch (e) {} },
+  writeFileAtomic: (f, t) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); } catch (e) {} },
   dayStr: () => "2026-11-02",
   getSetting: (k, d) => (k === "qzone.delete_self_window_min" ? 60 : d),
   recordAction: (e) => actions.push(e),

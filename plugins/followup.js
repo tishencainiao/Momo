@@ -5,7 +5,7 @@ const path = require("path");
 let _ctx = null;
 const file = () => path.join(_ctx.DATA_DIR, "followups.json");
 function load() { try { return JSON.parse(fs.readFileSync(file(), "utf8")); } catch (e) { return []; } }
-function save(a) { try { fs.writeFileSync(file(), JSON.stringify(a.slice(-40))); } catch (e) {} }
+function save(a) { try { _ctx.writeJsonAtomic(file(), a.slice(-40)); } catch (e) {} }
 
 function isQuestion(t) {
   const s = String(t || "").trim();

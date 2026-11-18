@@ -20,6 +20,8 @@ plugin.init({
   DATA_DIR: DIR,
   SELF_DIR: DIR,
   log: () => {},
+  writeJsonAtomic: (f, o) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(o, null, 0)); } catch (e) {} },
+  writeFileAtomic: (f, t) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); } catch (e) {} },
   formatGap: (ms) => Math.round(ms / 60000) + " 分钟",
   dayStr: () => new Date().toISOString().slice(0, 10),
   resolveCall: (u) => (String(u) === "100000001" ? "主人" : String(u) === "3550140293" ? "朋友" : "路人" + u),

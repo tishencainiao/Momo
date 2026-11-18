@@ -11,7 +11,7 @@ let _timer = null;
 
 const STATE_FILE = () => path.join(_ctx.DATA_DIR, "digest-state.json");
 function loadState() { try { return JSON.parse(fs.readFileSync(STATE_FILE(), "utf8")); } catch (e) { return {}; } }
-function saveState(st) { try { fs.writeFileSync(STATE_FILE(), JSON.stringify(st)); } catch (e) {} }
+function saveState(st) { try { _ctx.writeJsonAtomic(STATE_FILE(), st); } catch (e) {} }
 function dailyEnabled() { try { return _ctx.getSetting("mem.digest.daily", true) !== false; } catch (e) { return true; } }
 function dailyHour() {
   try {
@@ -138,6 +138,7 @@ module.exports = {
   permissions: ["DATA_DIR", "config", "getApi", "getSetting", "isMaster", "log", "recordAction", "setActivity"],
   version: "1.0.0",
   init(ctx) { _ctx = ctx; try { startTimer(); } catch (e) {} },
+  dispose() { try { if (_timer) { clearInterval(_timer); _timer = null; } } catch (e) {} },
   settings: [
     { key: "mem.digest.enabled", label: "注入消化后的认识", type: "boolean", default: true, desc: "打开后用「记忆消化」产出的认识替代流水账注入（需先跑一次 memory_digest）" },
     { key: "mem.digest.max_topics", label: "最多注入几条认识", type: "number", default: 20, min: 3, max: 40, desc: "本人桶和通用桶各自的上限" },

@@ -5,7 +5,7 @@ const path = require("path");
 let _dir = "", _ctx = null;
 const todoFile = () => path.join(_dir, "todos.json");
 function loadTodos() { try { return JSON.parse(fs.readFileSync(todoFile(), "utf8")); } catch (e) { return []; } }
-function saveTodos(t) { try { fs.mkdirSync(_dir, { recursive: true }); fs.writeFileSync(todoFile(), JSON.stringify(t)); } catch (e) {} }
+function saveTodos(t) { try { fs.mkdirSync(_dir, { recursive: true }); _ctx.writeJsonAtomic(todoFile(), t); } catch (e) {} }
 let lastCheck = 0;
 
 function parseDue(text) {

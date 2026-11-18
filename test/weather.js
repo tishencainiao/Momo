@@ -22,6 +22,8 @@ const plugin = require("E:/Learn/Momo/plugins/weather.js");
 plugin.init({
   DATA_DIR: DIR,
   log: () => {},
+  writeJsonAtomic: (f, o) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(o, null, 0)); } catch (e) {} },
+  writeFileAtomic: (f, t) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); } catch (e) {} },
   isMaster: (u) => Number(u) === 100000001,
 });
 const W = plugin.api.weather;

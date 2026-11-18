@@ -16,7 +16,7 @@ const BRIDGE_DIR = () => {
 function loadState() {
   try { return JSON.parse(fs.readFileSync(STATE_FILE(), "utf8")); } catch (e) { return { enabled: false, offsets: {}, lastNotify: {} }; }
 }
-function saveState(s) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); fs.writeFileSync(STATE_FILE(), JSON.stringify(s)); } catch (e) {} }
+function saveState(s) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(STATE_FILE(), s); } catch (e) {} }
 
 let lastScan = 0;
 

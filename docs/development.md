@@ -350,7 +350,7 @@ _ctx.recordAction({ action: "settings_set", by: info.userId, detail: `${k} = ${v
 | 文本切分 | 按标点断句但跳过引号/括号内部（`splitSafe` 这类） |
 
 - 抄完在函数上方写一行：`// 来源：<仓库或文章 URL>（许可证）`，作者与许可证要留。
-- 若会引入新依赖：**先问用户**（本项目是零 npm 依赖，加依赖要单独批准）。
+- 若会引入新依赖：**先问用户**（本项目主体零 npm 依赖（唯一例外：@huggingface/transformers 语义嵌入，v1.99.1 经用户批准），加新依赖要单独批准）。
 - **整段 / 大段移植**（超过一段函数、或移植了对方的数据结构）：除了文件头注释，还要在 `docs/credits.md` 登记，并把对方的许可证全文放进 `docs/licenses/`。
 - **只借鉴设计或思路**：在 `docs/credits.md` 登记「借鉴了什么 / 我们怎么做」，公开发布时保留原作者署名。
 - **直接运行别人的软件 / 模型**（如 GPT-SoVITS）：在 `docs/credits.md` 登记来源与许可证，许可证随仓库分发。
@@ -384,7 +384,7 @@ _ctx.recordAction({ action: "settings_set", by: info.userId, detail: `${k} = ${v
 │  自我内省5工具 + 愿望 + 反思/探索/评分调参       │
 │  + 技能规则 + 提案分级 + registry 元认知        │
 ├───────────────────────────────────────────────┤
-│ 功能层 plugins/*.js（47 个插件，以 check.js 为准）│
+│ 功能层 plugins/*.js（48 个插件，以 check.js 为准）│
 │  reminders birthdays goals appellations mute   │
 │  pc-tools stickers voice qzone memory emotion  │
 │  proactive                                    │
@@ -433,6 +433,12 @@ _ctx.recordAction({ action: "settings_set", by: info.userId, detail: `${k} = ${v
 - 红线：公开仓库永远不回拉覆盖本地；推送永远只从 Momo-public 出，本地 master 的完整历史绝不外推
 
 ---
+
+## 十一、发布闭环（强制）
+
+> 2026-11-15 发布分档（用户定，档 a）：
+> - **hotfix（z 位，如 v1.98.6→v1.98.7）**：只 commit + tag + 重启验证，**不做 sync-to-public 对外发布**；攒到下一个功能版（y 位）一起发布。
+> - **功能/里程碑（y 位，如 v1.99.0）**：走完整 release.ps1 闭环（含双平台发布）。
 
 ## 十一、发布闭环（强制）
 

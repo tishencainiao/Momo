@@ -40,7 +40,7 @@ const S = sandbox;
 
 // 待办池 + 评分 → mind.js 插件
 const mind = require("../plugins/mind.js");
-mind.init({ DATA_DIR: DIR, textSimilar: (a, b) => String(a) === String(b) });
+mind.init({ DATA_DIR: DIR, writeJsonAtomic: (f, o) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(o, null, 0)); } catch (e) {} }, writeFileAtomic: (f, t) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); } catch (e) {} }, textSimilar: (a, b) => String(a) === String(b) });
 const M = mind.api.mind;
 
 // 1. 常量

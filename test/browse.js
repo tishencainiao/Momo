@@ -42,6 +42,8 @@ const plugin = require("E:/Learn/Momo/plugins/browse.js");
 plugin.init({
   DATA_DIR: DIR,
   log: () => {},
+  writeJsonAtomic: (f, o) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(o, null, 0)); } catch (e) {} },
+  writeFileAtomic: (f, t) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); } catch (e) {} },
   isBudgetExhausted: () => budgetOut,
   completeOnce: async (messages) => {
     const p = String((messages && messages[0] && messages[0].content) || "");

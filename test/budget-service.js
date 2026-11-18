@@ -12,6 +12,8 @@ const ctx = {
   DATA_DIR: tmp,
   config: { budget: { daily_cny: 1 } },
   log: () => {},
+  writeJsonAtomic: (f, o) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(o, null, 0)); } catch (e) {} },
+  writeFileAtomic: (f, t) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); } catch (e) {} },
 };
 const mod = require("../plugins/budget-service.js");
 mod.init(ctx);
@@ -64,7 +66,7 @@ check("usageLine 含命中率", ul.includes("命中率"));
 
 /* ---- 薄转发接线（index.js） ---- */
 const IDX = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
-check("index.js 有 _budgetApi 薄转发", IDX.includes("function _budgetApi()") && IDX.includes('host.apis.get("budget")'));
+check("index.js 有 _budgetApi 薄转发", IDX.includes("function _budgetApi()") && IDX.includes('apiOf("budget")'));
 check("index.js 预算真相块已迁出（无计费实现）", !/function recordSpend\(kind, inTok, outTok, hitTok, flatCny, isPro\) \{\n  const bc = budgetCfg\(\);/.test(IDX));
 check("index.js 保留兜底 ACTION_COST", IDX.includes("const ACTION_COST = {"));
 

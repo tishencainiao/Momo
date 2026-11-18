@@ -58,17 +58,20 @@ function findLnk(dir, key) {
   return null;
 }
 function openApp(name) {
-  const key = String(name || "").trim().toLowerCase();
+  /* R3：命令注入防护——去掉 cmd 元字符（与 closeApp 同口径），只留安全字符 */
+  const raw = String(name || "").trim();
+  const key = raw.replace(/[\*?\[\]"'`$;&|<>^%!]/g, "").slice(0, 40);
+  const lower = key.toLowerCase();
   if (!key) return { ok: false, msg: "未指定要打开的应用" };
   const dirs = [
     path.join(process.env.APPDATA || "", "Microsoft", "Windows", "Start Menu", "Programs"),
     path.join(process.env.PROGRAMDATA || "C:\\ProgramData", "Microsoft", "Windows", "Start Menu", "Programs"),
   ];
   for (const d of dirs) {
-    const found = findLnk(d, key);
-    if (found) { try { spawn("cmd", ["/c", "start", "", found], { detached: true, windowsHide: true }).unref(); } catch (e) {} return { ok: true, msg: `已打开「${name}」` }; }
+    const found = findLnk(d, lower);
+    if (found) { try { spawn("cmd", ["/c", "start", "", found], { detached: true, windowsHide: true }).unref(); } catch (e) {} return { ok: true, msg: `已打开「${key}」` }; }
   }
-  try { spawn("cmd", ["/c", "start", "", name], { detached: true, windowsHide: true }).unref(); return { ok: true, msg: `已尝试打开「${name}」` }; }
+  try { spawn("cmd", ["/c", "start", "", key], { detached: true, windowsHide: true }).unref(); return { ok: true, msg: `已尝试打开「${key}」` }; }
   catch (e) { return { ok: false, msg: `打开失败: ${e.message}` }; }
 }
 function closeApp(name) {

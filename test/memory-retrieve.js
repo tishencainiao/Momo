@@ -48,4 +48,30 @@ if (levSrc) {
 }
 
 console.log(`\n${pass} 通过 / ${fail} 失败`);
+// ---------- E4 混合检索（RRF）源码级 + 行为级 ----------
+check("有 _mergeRrf RRF 融合", src.includes("function _mergeRrf"));
+check("机会式调用 embed（无硬依赖）", src.includes('getApi("embed")'));
+check("RRF K=60 常数", src.includes("const K = 60"));
+check("向量未就绪退化纯关键词（vec=null）", src.includes("vec = null"));
+
+const mergeSrc = extractFunc(src, "_mergeRrf");
+const synMapMatch = src.match(/const SYNONYM_MAP = \{[\s\S]*?\n\};/);
+const kwSrc = extractFunc(src, "simpleKeywords");
+const sandbox2 = {};
+vm.createContext(sandbox2);
+if (mergeSrc && kwSrc && levSrc) {
+  vm.runInContext((synMapMatch ? synMapMatch[0] : "") + levSrc + "\n" + kwSrc + "\n" + mergeSrc + "\nthis.merge = _mergeRrf;", sandbox2);
+  const cands = [
+    { content: "咖啡美式加冰", time: new Date().toISOString() },
+    { content: "咖啡", time: new Date().toISOString() },
+  ];
+  const vec = [{ m: cands[0] }, { m: cands[1] }];
+  const out = sandbox2.merge(cands, "咖啡", vec, 2);
+  check("RRF 把语义更近的「美式」排第一", out.length >= 1 && out[0] === cands[0], JSON.stringify((out[0] && out[0].content)));
+  const out2 = sandbox2.merge(cands, "咖啡", null, 2);
+  check("vec=null 退化纯关键词不抛", Array.isArray(out2) && out2.length === 2);
+} else {
+  check("能抽取 _mergeRrf/simpleKeywords", false, "extractFunc 返回 null");
+}
+
 process.exit(fail ? 1 : 0);

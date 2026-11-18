@@ -16,6 +16,8 @@ const core = {
   log: () => {},
   recordAction: () => {},
   resolveChatSettings: () => ({}),
+  writeJsonAtomic: (file, obj) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(obj)); },
+  writeFileAtomic: (file, text) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, text); },
   recordAndSend: () => {},
   onebotSend: () => {},
   sendPrivate: () => {},
@@ -127,6 +129,18 @@ check("重新启用 weather → 恢复 enabled=true", () => {
 check("未知名插件启用返回 true 但不崩溃", () => {
   const r = host.setPluginEnabled("no-such-plugin", false);
   assert.strictEqual(r, true);
+});
+
+check("内核依赖插件拒绝禁用（R1-3）", () => {
+  const r1 = host.setPluginEnabled("mind", false);
+  assert.strictEqual(r1, false, "mind 应拒绝禁用");
+  assert.ok(!host.pluginState().disabled.includes("mind"));
+  const r2 = host.setPluginEnabled("group-info", false);
+  assert.strictEqual(r2, false, "group-info 应拒绝禁用");
+  const r3 = host.setPluginEnabled("roles", false);
+  assert.strictEqual(r3, false, "roles 应拒绝禁用");
+  const r4 = host.setPluginEnabled("time-service", false);
+  assert.strictEqual(r4, false, "system 服务应拒绝禁用");
 });
 
 /* 清理：删临时 data 目录（避免残留） */

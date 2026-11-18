@@ -59,7 +59,9 @@ check("未知模式默认 QQ 版", ctx.f() === QQ);
 
 // 4. where_am_i 工具
 const cap = require("E:/Learn/Momo/plugins/capability-index.js");
-cap.init({ log: () => {}, config: { qq: { master_user: 1 } }, DATA_DIR: require("os").tmpdir() });
+cap.init({ log: () => {},
+  writeJsonAtomic: (f, o) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(o, null, 0)); } catch (e) {} },
+  writeFileAtomic: (f, t) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); } catch (e) {} }, config: { qq: { master_user: 1 } }, DATA_DIR: require("os").tmpdir() });
 const tool = (cap.tools || []).find((t) => t.def.function.name === "where_am_i");
 check("暴露 where_am_i 工具", !!tool);
 const rPet = tool.handler({}, { userId: 1, petMode: true });

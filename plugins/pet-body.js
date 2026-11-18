@@ -217,7 +217,7 @@ function appendEvent(obj) {
     try {
       if (fs.statSync(EVENTS_FILE()).size > 512 * 1024) {       // 半兆就截断重建，别无限长
         const keep = fs.readFileSync(EVENTS_FILE(), "utf8").trim().split("\n").slice(-200).join("\n") + "\n";
-        fs.writeFileSync(EVENTS_FILE(), keep);
+        _ctx.writeFileAtomic(EVENTS_FILE(), keep);
       }
     } catch (e) {}
   } catch (e) {}
@@ -274,23 +274,28 @@ let lastMorningKey = "";
 function stateFile() {
   return path.join(DATA_DIR(), "body-chime.json");
 }
-function loadChimeState() {
+function loadChimeStateRaw() {
   try {
-    const d = JSON.parse(fs.readFileSync(stateFile(), "utf8")) || {};
-    if (d.date === new Date().toDateString()) {
-      if (typeof d.hour === "number") lastChimeHour = d.hour;
-      if (d.morning === d.date) lastMorningKey = d.date;
-    }
-    return d;
+    return JSON.parse(fs.readFileSync(stateFile(), "utf8")) || {};
   } catch (e) {
     return {};
   }
 }
+function loadChimeState() {
+  const d = loadChimeStateRaw();
+  if (d.date === new Date().toDateString()) {
+    if (typeof d.hour === "number") lastChimeHour = d.hour;
+    if (d.morning === d.date) lastMorningKey = d.date;
+  }
+  return d;
+}
 function saveChimeState(patch) {
+  /* 用 Raw（无副作用）读合并：不能调 loadChimeState()——它会把内存 lastChimeHour
+     从旧文件读回来覆盖调用方刚赋的值，导致整点报时每秒重复触发 */
   try {
-    const d = Object.assign(loadChimeState(), { date: new Date().toDateString() }, patch || {});
+    const d = Object.assign(loadChimeStateRaw(), { date: new Date().toDateString() }, patch || {});
     fs.mkdirSync(DATA_DIR(), { recursive: true });
-    fs.writeFileSync(stateFile(), JSON.stringify(d));
+    _ctx.writeJsonAtomic(stateFile(), d);
   } catch (e) {}
 }
 async function startSse() {

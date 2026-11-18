@@ -24,7 +24,7 @@ function load() {
   } catch (e) {}
   return { interests: [], pending: [] };
 }
-function save(d) { try { fs.mkdirSync(_ctx.SELF_DIR, { recursive: true }); fs.writeFileSync(interestsFile(), JSON.stringify(d)); } catch (e) {} }
+function save(d) { try { fs.mkdirSync(_ctx.SELF_DIR, { recursive: true }); _ctx.writeJsonAtomic(interestsFile(), d); } catch (e) {} }
 
 function minEvidence() { return Number(_ctx.getSetting("interest.min_evidence", 3)) || 3; }
 function minDays() { return Number(_ctx.getSetting("interest.min_days", 2)) || 2; }
@@ -97,7 +97,7 @@ function hobbyText(limit) {
 
 /* ---------------- 收藏夹：只收她真的从接口拿到过的句子 ---------------- */
 function loadCollection() { try { const d = JSON.parse(fs.readFileSync(collectionFile(), "utf8")); return Array.isArray(d) ? d : []; } catch (e) { return []; } }
-function saveCollection(list) { try { fs.mkdirSync(_ctx.SELF_DIR, { recursive: true }); fs.writeFileSync(collectionFile(), JSON.stringify(list.slice(-300))); } catch (e) {} }
+function saveCollection(list) { try { fs.mkdirSync(_ctx.SELF_DIR, { recursive: true }); _ctx.writeJsonAtomic(collectionFile(), list.slice(-300)); } catch (e) {} }
 /* quote 必须能在 sourceText 里找到（防编造）；找不到直接丢 */
 function collect(quote, sourceUrl, sourceText, kind) {
   const q = String(quote || "").trim().replace(/\s+/g, " ").slice(0, 120);

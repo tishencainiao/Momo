@@ -12,7 +12,9 @@ for (const d of [PEND, CUR, TRASH]) fs.mkdirSync(d, { recursive: true });
 
 const plugin = require("E:/Learn/Momo/plugins/stickers.js");
 plugin.init({
-  log: () => {}, canAfford: () => false, settings: () => ({}), completeOnce: async () => "1",
+  log: () => {},
+  writeJsonAtomic: (f, o) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(o, null, 0)); } catch (e) {} },
+  writeFileAtomic: (f, t) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); } catch (e) {} }, canAfford: () => false, settings: () => ({}), completeOnce: async () => "1",
   getSetting: () => undefined, mimeOf: () => "image/png",
   STICKER_DB: path.join(ROOT, "stickers.db"), DATA_DIR: ROOT,
 });

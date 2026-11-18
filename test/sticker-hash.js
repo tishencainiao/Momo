@@ -8,6 +8,8 @@ const tmpDb = path.join(os.tmpdir(), "momo-sticker-hash-" + process.pid + ".db")
 const plugin = require(path.join(__dirname, "..", "plugins", "stickers.js"));
 plugin.init({
   log: () => {},
+  writeJsonAtomic: (f, o) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(o, null, 0)); } catch (e) {} },
+  writeFileAtomic: (f, t) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); } catch (e) {} },
   STICKER_DB: tmpDb,
   DATA_DIR: path.dirname(tmpDb),
   config: {},

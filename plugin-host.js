@@ -16,7 +16,7 @@ function createHost(core) {
    * 存储 data/settings.json，键形如 "weather.city" */
   const SETTINGS_FILE = path.join(core.DATA_DIR, "settings.json");
   function loadSettingsMap() { try { const d = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8")); return (d && typeof d === "object") ? d : {}; } catch (e) { return {}; } }
-  function saveSettingsMap(d) { try { fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true }); fs.writeFileSync(SETTINGS_FILE, JSON.stringify(d)); return true; } catch (e) { return false; } }
+  function saveSettingsMap(d) { try { fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true }); core.writeJsonAtomic(SETTINGS_FILE, d); return true; } catch (e) { return false; } }
   function getSetting(key, def) { const d = loadSettingsMap(); return Object.prototype.hasOwnProperty.call(d, key) ? d[key] : def; }
   function setSetting(key, val) { const d = loadSettingsMap(); d[key] = val; return saveSettingsMap(d); }
   function listSettings() {
@@ -33,8 +33,11 @@ function createHost(core) {
    * 禁用的插件：启动时跳过、热重载时跳过、面板不可见 */
   const PLUGINS_STATE_FILE = path.join(core.DATA_DIR, "plugins.json");
   let disabledSet = new Set();
+  const reloadTried = new Map();
+  /* 内核热路径依赖的插件：与 system 服务一样禁止被禁用（R1-3） */
+  const KERNEL_REQUIRED = new Set(["mind", "group-info", "roles"]);
   function loadDisabled() { try { const d = JSON.parse(fs.readFileSync(PLUGINS_STATE_FILE, "utf8")); if (d && Array.isArray(d.disabled)) disabledSet = new Set(d.disabled); } catch (e) {} }
-  function saveDisabled() { try { fs.mkdirSync(path.dirname(PLUGINS_STATE_FILE), { recursive: true }); fs.writeFileSync(PLUGINS_STATE_FILE, JSON.stringify({ disabled: Array.from(disabledSet) }, null, 2)); return true; } catch (e) { return false; } }
+  function saveDisabled() { try { fs.mkdirSync(path.dirname(PLUGINS_STATE_FILE), { recursive: true }); core.writeJsonAtomic(PLUGINS_STATE_FILE, { disabled: Array.from(disabledSet) }); return true; } catch (e) { return false; } }
   function findPluginFile(name) {
     const dir = path.join(__dirname, "plugins");
     if (!fs.existsSync(dir)) return null;
@@ -64,6 +67,14 @@ function createHost(core) {
   }
   /* 启用/禁用插件：更新禁用集 → 落盘 → 触发热重载（禁用=卸载，启用=重新加载） */
   function setPluginEnabled(name, enabled) {
+    if (!enabled) {
+      const file0 = findPluginFile(name);
+      const mod0 = file0 ? plugins.find((p) => p._file === file0) : null;
+      if (KERNEL_REQUIRED.has(name) || (mod0 && mod0.system === true)) {
+        core.log("warn", `拒绝禁用 ${name}（内核/框架服务依赖，不允许禁用）`);
+        return false;
+      }
+    }
     if (enabled) disabledSet.delete(name); else disabledSet.add(name);
     saveDisabled();
     const file = findPluginFile(name);
@@ -97,6 +108,8 @@ function createHost(core) {
     saveShortMemories: (u, i) => core.saveShortMemories(u, i),
     loadSession: (u) => core.loadSession(u),
     saveSession: (u, m) => core.saveSession(u, m),
+    writeFileAtomic: (f, t) => core.writeFileAtomic(f, t),
+    writeJsonAtomic: (f, o) => core.writeJsonAtomic(f, o),
     isMaster: (u) => core.isMaster(u),
     resolveCall: (u) => core.resolveCall(u),
     userPersona: (u, s) => core.userPersona(u, s),
@@ -189,6 +202,10 @@ function createHost(core) {
   function unregisterPlugin(file) {
     const rec = pluginRecords.get(file);
     if (!rec) return false;
+    /* R2：dispose 生命周期——卸载/热重载前让插件清理自己的定时器/监听 */
+    if (typeof rec.mod.dispose === "function") {
+      try { rec.mod.dispose(); } catch (e) { core.log("warn", `插件 ${rec.mod.name} dispose 失败: ${e.message.slice(0, 120)}`); }
+    }
     for (const t of rec.tools) toolRegistry.delete(t);
     for (const c of rec.commands) commandRegistry.delete(c);
     for (const k of Object.keys(rec.hooks)) {
@@ -266,6 +283,19 @@ function createHost(core) {
   }
 
   /* 热重载单个插件：摘掉旧注册 → 清 require 缓存 → 重新加载 */
+  /* 热重载失败通知：同一文件 10 分钟内只通知主人一次（R1-2） */
+  const reloadFailAt = new Map();
+  function notifyReloadFailure(file, msg) {
+    try {
+      const now = Date.now();
+      const last = reloadFailAt.get(file) || 0;
+      if (now - last < 10 * 60000) return;
+      reloadFailAt.set(file, now);
+      const master = core.cfg && core.cfg.qq && core.cfg.qq.master_user;
+      if (master && core.sendPrivate) core.sendPrivate(Number(master), `⚠️ ${file} 热重载失败，已保留旧版本：${String(msg).slice(0, 80)}`);
+    } catch (e) {}
+  }
+
   function reloadPlugin(file) {
     const dir = path.join(__dirname, "plugins");
     const full = path.join(dir, file);
@@ -273,13 +303,23 @@ function createHost(core) {
       if (unregisterPlugin(file)) core.log("info", `插件已移除: ${file}`);
       return;
     }
-    unregisterPlugin(file);
+    /* 先建后拆：新模块加载成功才摘旧注册；失败保留旧版本，1.5s 后自动重试一次（写盘抖动防护） */
+    let mod;
     try { delete require.cache[require.resolve(full)]; } catch (e) {}
     try {
-      const mod = require(full);
-      if (disabledSet.has(mod.name)) { core.log("info", `插件已禁用（不加载）: ${mod.name}`); return; }
-      if (registerPlugin(mod, file)) core.log("info", `插件已热重载: ${mod.name} v${mod.version || "1.0.0"}（当前 ${plugins.length} 个插件 / ${toolRegistry.size} 个工具 / ${commandRegistry.size} 个命令）`);
-    } catch (e) { core.log("error", `热重载失败 ${file}: ${e.message.slice(0, 200)}`); }
+      mod = require(full);
+    } catch (e) {
+      core.log("error", `热重载失败 ${file}（保留旧版本）: ${e.message.slice(0, 200)}`);
+      notifyReloadFailure(file, e.message);
+      const tried = reloadTried.get(file) || 0;
+      reloadTried.set(file, tried + 1);
+      if (tried < 1) setTimeout(() => { try { reloadTried.delete(file); reloadPlugin(file); } catch (e2) {} }, 1500);
+      return;
+    }
+    reloadTried.delete(file);
+    if (disabledSet.has(mod.name)) { core.log("info", `插件已禁用（卸载）: ${mod.name}`); unregisterPlugin(file); return; }
+    unregisterPlugin(file);
+    if (registerPlugin(mod, file)) core.log("info", `插件已热重载: ${mod.name} v${mod.version || "1.0.0"}（当前 ${plugins.length} 个插件 / ${toolRegistry.size} 个工具 / ${commandRegistry.size} 个命令）`);
   }
 
   /* 监听 plugins/ 目录，文件变动后 400ms 防抖重载 */

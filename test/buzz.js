@@ -31,10 +31,12 @@ global.fetch = async () => {
 };
 
 const corePlugin = require("E:/Learn/Momo/plugins/fun-core.js");
-corePlugin.init({ DATA_DIR: DIR, log: () => {}, dayStr, getSetting: (k, d) => (k === "entertainment.daily_self_max" ? 2 : d), isBudgetExhausted: () => false });
+corePlugin.init({ DATA_DIR: DIR, log: () => {},
+  writeJsonAtomic: (f, o) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(o, null, 0)); } catch (e) {} },
+  writeFileAtomic: (f, t) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); } catch (e) {} }, dayStr, getSetting: (k, d) => (k === "entertainment.daily_self_max" ? 2 : d), isBudgetExhausted: () => false });
 const CORE = corePlugin.api["fun-core"];
 const hobbyPlugin = require("E:/Learn/Momo/plugins/hobby.js");
-hobbyPlugin.init({ DATA_DIR: DIR, SELF_DIR: DIR, log: () => {}, getSetting: (k, d) => d });
+hobbyPlugin.init({ DATA_DIR: DIR, SELF_DIR: DIR, log: () => {}, writeJsonAtomic: (f, o) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(o, null, 0)); } catch (e) {} }, writeFileAtomic: (f, t) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); } catch (e) {} }, getSetting: (k, d) => d });
 const HOBBY = hobbyPlugin.api.hobby;
 
 let prompts = [];

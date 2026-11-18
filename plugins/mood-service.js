@@ -14,7 +14,7 @@ function moodFile() { return path.join(_ctx.DATA_DIR, "mood.json"); }
 function loadMood() {
   try { const d = JSON.parse(fs.readFileSync(moodFile(), "utf8")); mood.value = Number(d.value) || 0; mood.updated = Number(d.updated) || Date.now(); } catch (e) {}
 }
-function saveMood() { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); fs.writeFileSync(moodFile(), JSON.stringify(mood)); } catch (e) {} }
+function saveMood() { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(moodFile(), mood); } catch (e) {} }
 function getMood() { return mood.value; }
 function setMood(v) { mood.value = Math.max(-100, Math.min(100, v)); mood.updated = Date.now(); saveMood(); }
 function addMood(d) { try { setMood(getMood() + Number(d || 0)); } catch (e) {} }
@@ -36,7 +36,7 @@ const EMOTION_VAL = {
 };
 function emotionFile() { return path.join(_ctx.DATA_DIR, "emotion.json"); }
 function loadEmotion() { try { const d = JSON.parse(fs.readFileSync(emotionFile(), "utf8")); emotion.name = d.name || "平静"; emotion.intensity = Number(d.intensity) || 0; emotion.updated = Number(d.updated) || Date.now(); emotion.cooling = Number(d.cooling) || 0; } catch (e) {} }
-function saveEmotion() { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); fs.writeFileSync(emotionFile(), JSON.stringify(emotion)); } catch (e) {} }
+function saveEmotion() { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(emotionFile(), emotion); } catch (e) {} }
 function getEmotion() { return emotion; }
 function setEmotion(name, intensity) { if (EMOTION_VAL[name] === undefined) name = "平静"; emotion.name = name; emotion.intensity = Math.max(0, Math.min(1, Number(intensity) || 0.5)); emotion.updated = Date.now(); saveEmotion(); }
 function emotionVal(name) { return EMOTION_VAL[name] != null ? EMOTION_VAL[name] : 0; }
@@ -100,7 +100,7 @@ function moodPrompt() {
 /* ---------------- Momo 自己的当前活动（在干嘛） ---------------- */
 function activityFile() { return path.join(_ctx.DATA_DIR, "current-activity.json"); }
 function loadActivityState() { try { return JSON.parse(fs.readFileSync(activityFile(), "utf8")); } catch (e) { return { text: "发呆", since: Date.now() }; } }
-function saveActivityState(a) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); fs.writeFileSync(activityFile(), JSON.stringify(a)); } catch (e) {} }
+function saveActivityState(a) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(activityFile(), a); } catch (e) {} }
 function setActivity(text) { saveActivityState({ text: String(text).slice(0, 30), since: Date.now() }); }
 /* 真实动作 → 人话（供 activityCtx 兜底；只反映 actions.jsonl 里真实发生过的，不演没做过的事） */
 const ACTION_LABEL = {

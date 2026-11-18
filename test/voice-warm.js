@@ -6,7 +6,9 @@ const path = require("path");
 
 const plugin = require(path.join(__dirname, "..", "plugins", "voice.js"));
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "momo-voice-"));
-plugin.init({ log: () => {}, DATA_DIR: tmp, config: { pet: {} } });
+plugin.init({ log: () => {},
+  writeJsonAtomic: (f, o) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(o, null, 0)); } catch (e) {} },
+  writeFileAtomic: (f, t) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); } catch (e) {} }, DATA_DIR: tmp, config: { pet: {} } });
 const api = plugin.api.voice;
 
 let n = 0;

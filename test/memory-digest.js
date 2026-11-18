@@ -21,6 +21,8 @@ function makeCtx(settings) {
     config: { pet: {} },
     DATA_DIR,
     log: () => {},
+  writeJsonAtomic: (f, o) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(o, null, 0)); } catch (e) {} },
+  writeFileAtomic: (f, t) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); } catch (e) {} },
     getSetting: (k, d) => (Object.prototype.hasOwnProperty.call(settings, k) ? settings[k] : d),
     getApi: (ns) => (ns === "time" ? require(path.join(__dirname, "..", "plugins", "time-service.js")).api.time : null),
   };

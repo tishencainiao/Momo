@@ -37,7 +37,7 @@ async function transcribeViaRecord(file) {
   if (!b64) return "";
   const buf = Buffer.from(b64, "base64");
   const fp = path.join(_ctx.DATA_DIR, "ptt-" + Date.now() + ".wav");
-  fs.writeFileSync(fp, buf);
+  _ctx.writeFileAtomic(fp, buf);
   const text = sapiTranscribe(fp);
   try { fs.unlinkSync(fp); } catch (e) {}
   return text;
@@ -110,7 +110,7 @@ function loadVoiceStats() {
 function saveVoiceStats() {
   try {
     fs.mkdirSync(_ctx.DATA_DIR, { recursive: true });
-    fs.writeFileSync(path.join(_ctx.DATA_DIR, "voice-rate.json"), JSON.stringify(voiceStats));
+    _ctx.writeJsonAtomic(path.join(_ctx.DATA_DIR, "voice-rate.json"), voiceStats);
   } catch (e) {}
 }
 /* 频率：每会话 3 条/小时、全局 5 条/小时、每人每天 20 条 */

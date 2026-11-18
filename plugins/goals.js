@@ -9,7 +9,7 @@ function loadGoals() {
     return { goals: (d.goals && d.goals.length) ? d.goals : ["让主人开心，做一只贴心的桌宠"], plan: d.plan || {} };
   } catch (e) { return { goals: ["让主人开心，做一只贴心的桌宠"], plan: {} }; }
 }
-function saveGoals(g) { try { fs.mkdirSync(_dir, { recursive: true }); fs.writeFileSync(goalsFile(), JSON.stringify(g)); } catch (e) {} }
+function saveGoals(g) { try { fs.mkdirSync(_dir, { recursive: true }); _ctx.writeJsonAtomic(goalsFile(), g); } catch (e) {} }
 function goalsCtx() {
   const g = loadGoals();
   const plan = (g.plan && g.plan.date === _ctx.dayStr(0) && g.plan.items && g.plan.items.length)

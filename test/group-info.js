@@ -38,7 +38,9 @@ async function fakeSend(action, params) {
 }
 
 const plugin = require("E:/Learn/Momo/plugins/group-info.js");
-plugin.init({ DATA_DIR: DIR, log: () => {}, onebotSend: fakeSend, isMaster: (u) => Number(u) === 100000001, config: { qq: { self_id: 100000004 } } });
+plugin.init({ DATA_DIR: DIR, log: () => {},
+  writeJsonAtomic: (f, o) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(o, null, 0)); } catch (e) {} },
+  writeFileAtomic: (f, t) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); } catch (e) {} }, onebotSend: fakeSend, isMaster: (u) => Number(u) === 100000001, config: { qq: { self_id: 100000004 } } });
 const G = plugin.api.groupInfo;
 
 let pass = 0, fail = 0;

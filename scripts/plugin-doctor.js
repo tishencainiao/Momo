@@ -51,7 +51,7 @@ const KEBAB = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const SEMVER = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
 
 /* 框架服务命名空间（骨架铁律：业务插件只许消费、不许手搓；黄牌检查用） */
-const FRAMEWORK_NS = ["time", "identity", "memory", "budget", "mood", "audit", "log"];
+const FRAMEWORK_NS = ["time", "identity", "memory", "budget", "mood", "audit", "log", "embed"];
 
 /* ---------------- 主诊断 ---------------- */
 function diagnose(opts) {

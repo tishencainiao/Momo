@@ -15,7 +15,7 @@ const DIMS = { 4: { boxR: 2, boxC: 2 }, 6: { boxR: 2, boxC: 3 } };
 
 const stateFile = () => path.join(_ctx.DATA_DIR, "puzzle.json");
 function loadState() { try { return JSON.parse(fs.readFileSync(stateFile(), "utf8")) || null; } catch (e) { return null; } }
-function saveState(s) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); fs.writeFileSync(stateFile(), JSON.stringify(s)); } catch (e) {} }
+function saveState(s) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(stateFile(), s); } catch (e) {} }
 
 function movesPerDay() { return Number(_ctx.getSetting("puzzle.moves_per_day", 3)) || 3; }
 function newPuzzleMaxPerDay() { return Number(_ctx.getSetting("puzzle.new_per_day", 1)) || 1; }
@@ -196,7 +196,7 @@ function journalAppend(entry) {
     arr.push(Object.assign({ ts: Date.now(), from: "puzzle" }, entry));
     while (arr.length > 200) arr.shift();
     fs.mkdirSync(_ctx.SELF_DIR, { recursive: true });
-    fs.writeFileSync(p, JSON.stringify(arr));
+    _ctx.writeJsonAtomic(p, arr);
   } catch (e) {}
 }
 

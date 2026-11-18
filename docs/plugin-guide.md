@@ -82,6 +82,8 @@ apiSpec: {
 4. **timer 每秒触发**，做每日/定期任务必须自己节流 + 记「今天已跑」状态（参考 report.js / plugin-doctor.js）。
 5. **主人专属**：handler 里 `if (!_ctx.isMaster(userId)) return "..."`，没有自动的 masterOnly 字段。
 6. **权限与代码一致**：`permissions` 写你真实用到的 `_ctx.xxx`，体检会扫描源码交叉核对。
+7. **自己起的定时器要配 `dispose`**：`module.exports` 里加 `dispose() { clearInterval(_timer); }`——热重载/禁用时会先调 dispose 再卸载（v1.98.7 起），不清理会留幽灵定时器。
+8. **状态落盘一律 `_ctx.writeJsonAtomic`**：不要裸 `fs.writeFileSync` 写状态文件（断电/崩溃会写坏半个 JSON）；原子写先写临时文件再 rename，失败保留旧文件。
 
 ## 4. 体检规则（plugin-doctor.js 判定口径）
 

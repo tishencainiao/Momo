@@ -52,6 +52,8 @@ const evoCtx = {
     DATA_DIR: tmp,
     addMood: (d) => moodCalls.push(d),
     recordAction: (e) => actionCalls.push(e),
+    writeJsonAtomic: (f, o) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(o, null, 0)); } catch (e) {} }, 
+    writeFileAtomic: (f, t) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); } catch (e) {} }, 
   },
 };
 vm.createContext(evoCtx);
@@ -87,6 +89,8 @@ check("冷却过后再摸：心情再 +2", JSON.stringify(moodCalls) === "[2,2]"
 const hCtx = {
   fs, path, Date, Number, JSON, Object, String,
   DATA_DIR: tmp,
+  writeJsonAtomic: (f, o) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(o, null, 0)); } catch (e) {} },
+  writeFileAtomic: (f, t) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); } catch (e) {} },
 };
 vm.createContext(hCtx);
 vm.runInContext(extractFunc(srcIndex, "headpatCtx") + "\nthis.hp = function () { return headpatCtx(); };", hCtx);

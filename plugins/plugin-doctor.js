@@ -20,10 +20,10 @@ function check() {
   const report = diagnose({ kernelVersion: _ctx.BASE_VERSION || "0.0.0" });
   try {
     fs.mkdirSync(DATA(), { recursive: true });
-    fs.writeFileSync(HEALTH_FILE(), JSON.stringify({
+    _ctx.writeJsonAtomic(HEALTH_FILE(), {
       at: Date.now(), kernelVersion: report.kernelVersion, summary: report.summary,
       plugins: report.plugins.map((p) => ({ name: p.name, displayName: p.displayName, version: p.version, enabled: p.enabled, level: p.level })),
-    }, null, 2));
+    });
   } catch (e) {}
   return report;
 }
@@ -49,7 +49,7 @@ function rememberIssue(text) {
     const arr = readJson(f, []);
     arr.push({ type: "plugin_issue", ts: Date.now(), text: String(text).slice(0, 400) });
     while (arr.length > 200) arr.shift();
-    fs.writeFileSync(f, JSON.stringify(arr), "utf8");
+    _ctx.writeJsonAtomic(f, arr);
   } catch (e) {}
 }
 
@@ -123,7 +123,7 @@ module.exports = {
         rememberIssue(brief);
         _ctx.log("info", "插件巡检发现问题：" + report.summary.red + " 红 / " + report.summary.yellow + " 黄");
       }
-      try { fs.writeFileSync(PATROL_FILE(), JSON.stringify({ last: today })); } catch (e) {}
+      try { _ctx.writeJsonAtomic(PATROL_FILE(), { last: today }); } catch (e) {}
     },
   },
   __test: { check, issueBrief, rememberIssue },

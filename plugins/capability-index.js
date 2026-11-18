@@ -128,9 +128,9 @@ function limitTriggers() {
 /* 命中计数：同一能力被拦/被纠正 2 次 → 生成一条"建议写进负清单"的提案（主人确认才生效） */
 function proposalsFile() { return require("path").join(_ctx.DATA_DIR, "capability-proposals.json"); }
 function loadHits() { try { return JSON.parse(require("fs").readFileSync(require("path").join(_ctx.DATA_DIR, "capability-hits.json"), "utf8")) || {}; } catch (e) { return {}; } }
-function saveHits(h) { try { require("fs").mkdirSync(_ctx.DATA_DIR, { recursive: true }); require("fs").writeFileSync(require("path").join(_ctx.DATA_DIR, "capability-hits.json"), JSON.stringify(h)); } catch (e) {} }
+function saveHits(h) { try { require("fs").mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(require("path").join(_ctx.DATA_DIR, "capability-hits.json"), h); } catch (e) {} }
 function loadProposals() { try { const a = JSON.parse(require("fs").readFileSync(proposalsFile(), "utf8")); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
-function saveProposals(a) { try { require("fs").mkdirSync(_ctx.DATA_DIR, { recursive: true }); require("fs").writeFileSync(proposalsFile(), JSON.stringify(a.slice(-20))); } catch (e) {} }
+function saveProposals(a) { try { require("fs").mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(proposalsFile(), a.slice(-20)); } catch (e) {} }
 /* 记一次"超出能力的声称"（审计拦截或主人纠正时调） */
 function noteOverclaim(capabilityLabel, sample) {
   const key = String(capabilityLabel || "unknown").slice(0, 40);

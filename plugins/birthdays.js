@@ -4,7 +4,7 @@ const path = require("path");
 let _dir = "", _ctx = null;
 const bdFile = () => path.join(_dir, "birthdays.json");
 function loadBirthdays() { try { return JSON.parse(fs.readFileSync(bdFile(), "utf8")); } catch (e) { return {}; } }
-function saveBirthdays(b) { try { fs.mkdirSync(_dir, { recursive: true }); fs.writeFileSync(bdFile(), JSON.stringify(b)); } catch (e) {} }
+function saveBirthdays(b) { try { fs.mkdirSync(_dir, { recursive: true }); _ctx.writeJsonAtomic(bdFile(), b); } catch (e) {} }
 function parseBirthday(text) {
   const m = String(text).match(/生日(?:是|在)?\s*(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]?/);
   if (m) return `${String(m[1]).padStart(2, "0")}-${String(m[2]).padStart(2, "0")}`;

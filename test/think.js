@@ -33,12 +33,19 @@ const think = ctx.shouldThinkChat;
 check(think("在干嘛", false) === false, "短闲聊「在干嘛」→ 不思考");
 check(think("哈哈", false) === false, "短叹词 → 不思考");
 check(think("", false) === false, "空消息 → 不思考");
-check(think("你在干嘛呀？", false) === false, "短问句（<15字）→ 不思考");
+check(think("你在干嘛呀？", false) === false, "短问句（<8字）→ 不思考");
 check(think("今天天气怎么样啊，适合出门吗？", false) === true, "较长问句 → 思考");
 check(think("帮我分析一下这个方案的优缺点", false) === true, "含「帮我/分析」→ 思考");
 check(think("为什么天空是蓝色的？", false) === true, "含「为什么」→ 思考");
 check(think("这两个有什么区别", false) === true, "含「区别」→ 思考");
-check(think("x".repeat(80), false) === true, "长文本（≥60字）→ 思考");
+check(think("x".repeat(80), false) === true, "长文本（≥20字）→ 思考");
+check(think("x".repeat(19), false) === false, "19 字（<20）且无问号无复杂词 → 不思考");
+check(think("x".repeat(20), false) === true, "恰好 20 字 → 思考");
+check(think("明天下午有空吗？", false) === true, "8 字带问号 → 思考");
+check(think("明天有空吗？", false) === false, "6 字带问号（<8）→ 不思考");
+/* E1：连续第 3 轮强制思考（静态断言 agentChatOnce 里有 streak 逻辑） */
+const onceSrc = fs.readFileSync(path.join(ROOT, "index.js"), "utf8");
+check(/thinkStreak/.test(onceSrc) && /_consec >= 3/.test(onceSrc), "agentChatOnce 连续 3 轮强制思考逻辑存在");
 check(think("看图", true) === true, "带图片 → 思考");
 check(think("嗯", true) === true, "哪怕带图短句也思考");
 

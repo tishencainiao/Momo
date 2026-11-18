@@ -10,7 +10,7 @@ const INFO_TTL = 30 * 60000;
 const MEMBER_TTL = 10 * 60000;
 const file = () => path.join(_ctx.DATA_DIR, "group-info.json");
 function load() { try { const d = JSON.parse(fs.readFileSync(file(), "utf8")); return (d && typeof d === "object") ? d : {}; } catch (e) { return {}; } }
-function save(d) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); fs.writeFileSync(file(), JSON.stringify(d)); } catch (e) {} }
+function save(d) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(file(), d); } catch (e) {} }
 
 /* ---------- 拉取 + 缓存 ---------- */
 async function fetchGroupInfo(groupId, force) {
@@ -219,7 +219,7 @@ async function setSelfProfile(nickname, note, by) {
 /* ---------- 群成员/群日志/跨窗口（从 index.js 迁入 M8） ---------- */
 const groupMemFile = () => path.join(_ctx.DATA_DIR, "group-members.json");
 function loadGroupMembers() { try { return JSON.parse(fs.readFileSync(groupMemFile(), "utf8")); } catch (e) { return {}; } }
-function saveGroupMembers(m) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); fs.writeFileSync(groupMemFile(), JSON.stringify(m)); } catch (e) {} }
+function saveGroupMembers(m) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(groupMemFile(), m); } catch (e) {} }
 function rememberGroupMember(groupId, userId, name, extra) {
   const m = loadGroupMembers();
   const g = m[String(groupId)] = m[String(groupId)] || {};
@@ -272,7 +272,7 @@ function filterMemoriesForGroup(items, groupId) {
 const groupLogFile = () => path.join(_ctx.DATA_DIR, "group-log.json");
 const crossFile = () => path.join(_ctx.DATA_DIR, "cross-window.json");
 function _loadJ(f, def) { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch (e) { return def; } }
-function _saveJ(f, v) { try { fs.writeFileSync(f, JSON.stringify(v)); } catch (e) {} }
+function _saveJ(f, v) { try { _ctx.writeJsonAtomic(f, v); } catch (e) {} }
 function recordGroupLog(groupId, userId, name, text) {
   if (!text) return;
   const all = _loadJ(groupLogFile(), {});

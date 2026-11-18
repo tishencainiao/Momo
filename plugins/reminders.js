@@ -7,7 +7,7 @@ const { spawn } = require("child_process");
 let _dir = "", _ctx = null;
 const remFile = () => path.join(_dir, "reminders.json");
 function loadReminders() { try { return JSON.parse(fs.readFileSync(remFile(), "utf8")); } catch (e) { return []; } }
-function saveReminders(r) { try { fs.mkdirSync(_dir, { recursive: true }); fs.writeFileSync(remFile(), JSON.stringify(r)); } catch (e) {} }
+function saveReminders(r) { try { fs.mkdirSync(_dir, { recursive: true }); _ctx.writeJsonAtomic(remFile(), r); } catch (e) {} }
 function cfgBool(k, d) { try { const v = _ctx.getSetting(k, d); return v === false ? false : (v === true ? true : d); } catch (e) { return d; } }
 
 /* v1.96.1 框架服务 time：中文时间词解析真相在 time 服务，这里只留薄转发 */

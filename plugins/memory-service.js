@@ -37,7 +37,12 @@ function saveMemories(userId, items) {
         if (outItems.length > cap) outItems = outItems.slice(outItems.length - cap);
       }
     } catch (e) {}
-    fs.writeFileSync(memPath(userId), JSON.stringify({ updated: Date.now(), items: outItems }));
+    _ctx.writeJsonAtomic(memPath(userId), { updated: Date.now(), items: outItems });
+    /* E4：保存后后台预热向量（fire-and-forget） */
+    try {
+      const emb = _ctx.getApi ? _ctx.getApi("embed") : null;
+      if (emb && emb.refresh) emb.refresh(outItems.slice(-20).map((m) => String(m.content || ""))).catch(() => {});
+    } catch (e) {}
   } catch (e) {}
 }
 function memoryPrompt(items, call) {
@@ -106,8 +111,19 @@ function lev(a, b) {
   return prev[n];
 }
 function retrieveMemories(memories, userText, limit) {
+  /* E4 混合检索：向量通道（语义，同步缓存查）+ 关键词通道，RRF 融合；向量不可用/未就绪则纯关键词 */
+  let vec = null;
+  try {
+    const emb = _ctx.getApi && _ctx.getApi("embed");
+    if (emb && emb.searchSync) vec = emb.searchSync(userText, memories, 20);
+  } catch (e) {}
+  return _mergeRrf(memories || [], userText, vec, limit || 8);
+}
+/* 关键词打分（旧算法）+ RRF 融合；vec 为 null 时退化为纯关键词排序 */
+function _mergeRrf(arr, userText, vec, limit) {
+  const K = 60;
   const qk = new Set(simpleKeywords(userText));
-  const scored = (memories || []).map((m) => {
+  const scored = arr.map((m) => {
     const mk = new Set(simpleKeywords(String(m.content || "")));
     let overlap = 0, fuzzy = 0;
     for (const k of qk) {
@@ -126,7 +142,18 @@ function retrieveMemories(memories, userText, limit) {
     return { m, score };
   });
   scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, limit || 8).map((s) => s.m);
+  const keyRank = new Map();
+  scored.forEach((s, i) => { if (!keyRank.has(s.m)) keyRank.set(s.m, i + 1); });
+  const vecRank = new Map();
+  (vec || []).forEach((s, i) => { if (!vecRank.has(s.m)) vecRank.set(s.m, i + 1); });
+  const merged = arr.map((m) => {
+    let rrf = 0;
+    if (keyRank.has(m)) rrf += 1 / (K + keyRank.get(m));
+    if (vecRank.has(m)) rrf += 1 / (K + vecRank.get(m));
+    return { m, rrf };
+  });
+  merged.sort((a, b) => b.rrf - a.rrf);
+  return merged.slice(0, limit).map((s) => s.m);
 }
 function parseMemoryJson(raw) {
   try {
@@ -155,13 +182,25 @@ function loadShortMemories(userId) {
   return [];
 }
 function saveShortMemories(userId, items) {
-  try { fs.mkdirSync(SHORT_MEM_DIR(), { recursive: true }); fs.writeFileSync(shortMemFile(userId), JSON.stringify({ updated: Date.now(), items })); }
+  try { fs.mkdirSync(SHORT_MEM_DIR(), { recursive: true }); _ctx.writeJsonAtomic(shortMemFile(userId), { updated: Date.now(), items }); }
   catch (e) { try { _ctx.log("warn", "短期记忆保存失败: " + e.message.slice(0, 160)); } catch (e2) {} }
 }
 function pruneShortMemories(userId) {
   const items = loadShortMemories(userId);
   const nowSec = Date.now() / 1000;
-  const fresh = items.filter((m) => nowSec - (Number(m.created) || nowSec) < SHORT_MEM_TTL_SEC);
+  const fresh = items.filter((m) => {
+    const age = nowSec - (Number(m.created) || nowSec);
+    if (age < SHORT_MEM_TTL_SEC) return true;
+    /* E5 计划保鲜：过期但带时间词且还没过的计划 → 豁免不删（「下周三交作业」不能被 7 天 TTL 误杀） */
+    try {
+      const tApi = _ctx.getApi && _ctx.getApi("time");
+      if (tApi && tApi.annotatePlan) {
+        const st = tApi.annotatePlan(String(m.content || ""), new Date());
+        if (st && st.status && st.status !== "已过") return true;
+      }
+    } catch (e) {}
+    return false;
+  });
   if (fresh.length !== items.length) saveShortMemories(userId, fresh);
   return fresh;
 }

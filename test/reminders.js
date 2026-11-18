@@ -9,6 +9,8 @@ const plugin = require("E:/Learn/Momo/plugins/reminders.js");
 plugin.init({
   DATA_DIR: DIR,
   log: () => {},
+  writeJsonAtomic: (f, o) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(o, null, 0)); } catch (e) {} },
+  writeFileAtomic: (f, t) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); } catch (e) {} },
   getSetting: (k, d) => d,
   getApi: (ns) => (ns === "time" ? require("E:/Learn/Momo/plugins/time-service.js").api.time : null),
   formatGap: (ms) => Math.round(ms / 60000) + " 分钟",

@@ -26,14 +26,14 @@ check("情绪回流：幅度阈值 6 才改情绪标签", src.includes("Math.abs
 check("可回溯：暴露 mind_history 工具", src.includes('name: "mind_history"'));
 check("可回溯：有处理器分支", src.includes('tc.function.name === "mind_history"'));
 check("未解决的事：有 open_loops 存储", mindSrc.includes("st.open_loops"));
-check("未解决的事：注入到感知提示词", src.includes('host.apis.get("mind").openLoopsText(st)'));
-check("未解决的事：注入到聊天上下文", src.includes('host.apis.get("mind").openLoopsText(host.apis.get("mind").loadMindState())'));
+check("未解决的事：注入到感知提示词", src.includes('apiOf("mind").openLoopsText(st)'));
+check("未解决的事：注入到聊天上下文", src.includes('apiOf("mind").openLoopsText(apiOf("mind").loadMindState())'));
 
 // ---------- 行为级（mind.js 插件） ----------
 const DIR = path.join(os.tmpdir(), "momo-thinking-test-" + Date.now());
 fs.mkdirSync(DIR, { recursive: true });
 const mind = require("../plugins/mind.js");
-mind.init({ DATA_DIR: DIR, textSimilar: (a, b) => String(a).slice(0, 8) === String(b).slice(0, 8) });
+mind.init({ DATA_DIR: DIR, writeJsonAtomic: (f, o) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(o, null, 0)); } catch (e) {} }, writeFileAtomic: (f, t) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); } catch (e) {} }, textSimilar: (a, b) => String(a).slice(0, 8) === String(b).slice(0, 8) });
 const M = mind.api.mind;
 
 const st = {};

@@ -36,7 +36,7 @@ function trim() {
   try {
     const lines = fs.readFileSync(actFile(), "utf8").split("\n").filter(Boolean);
     if (lines.length <= MAX_LINES_KEEP) return;
-    fs.writeFileSync(actFile(), lines.slice(-MAX_LINES_KEEP).join("\n") + "\n");
+    _ctx.writeFileAtomic(actFile(), lines.slice(-MAX_LINES_KEEP).join("\n") + "\n");
   } catch (e) {}
 }
 
@@ -66,7 +66,7 @@ function addFunSpent(cny) {
     const day = _ctx.dayStr ? _ctx.dayStr(0) : new Date().toDateString();
     const cur = funSpentToday();
     fs.mkdirSync(_ctx.DATA_DIR, { recursive: true });
-    fs.writeFileSync(budgetFile(), JSON.stringify({ day, spent: cur + (Number(cny) || 0) }));
+    _ctx.writeJsonAtomic(budgetFile(), { day, spent: cur + (Number(cny) || 0) });
   } catch (e) {}
 }
 

@@ -11,7 +11,7 @@ function load() {
   try { const d = JSON.parse(fs.readFileSync(file(), "utf8")); return Array.isArray(d.items) ? d : { items: [] }; }
   catch (e) { return { items: [] }; }
 }
-function save(d) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); fs.writeFileSync(file(), JSON.stringify(d)); } catch (e) {} }
+function save(d) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(file(), d); } catch (e) {} }
 
 const KINDS = ["sticker", "word", "preference", "fact", "behavior"];
 const LABEL = { sticker: "表情包", word: "词汇", preference: "偏好", fact: "事实", behavior: "行为规则" };

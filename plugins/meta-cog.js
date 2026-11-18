@@ -14,7 +14,7 @@ const MAX_ISSUES = 3;
 function loadState() {
   try { return JSON.parse(fs.readFileSync(STATE(), "utf8")); } catch (e) { return {}; }
 }
-function saveState(s) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); fs.writeFileSync(STATE(), JSON.stringify(s)); } catch (e) {} }
+function saveState(s) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(STATE(), s); } catch (e) {} }
 
 const CLICHE = /作为(一个)?(AI|人工智能|语言模型|助手)|我是(AI|人工智能|语言模型)|综上所述|让我来为你|以下是[我你]?为|当然可以[，,]?让我/;
 

@@ -45,12 +45,15 @@ const ctx = {
   getMood: () => mood,
   savePulse: () => {},
   log: () => {},
+  writeJsonAtomic: (f, o) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(o, null, 0)); } catch (e) {} },
+  writeFileAtomic: (f, t) => { try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, t); } catch (e) {} },
   mindLoop: () => { woke++; return Promise.resolve(); },
 };
 vm.createContext(ctx);
 const code = ["pulseLine", "buildPulse", "mindPulseTick"].map((n) => extractFunc(src, n)).filter(Boolean).join("\n");
 vm.runInContext(
   "var PULSE_MAX = 60; var pulseWakeAt = 0; var pulseState = { last: null, ring: [] };\n" +
+  "var apiOf = function (ns) { return host && host.apis && host.apis.get(ns); };\n" +
   "function mindCfg(k, d) { try { const v = Number(cfg.mind && cfg.mind[k]); return Number.isFinite(v) && v > 0 ? v : d; } catch (e) { return d; } }\n" +
   code + "\nthis.tick = function () { mindPulseTick(); };",
   ctx

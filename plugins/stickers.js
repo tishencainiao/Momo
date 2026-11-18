@@ -346,7 +346,7 @@ function isStickerLike(buf) {
   if (buf.length >= 6) { const h = buf.slice(0, 6).toString("latin1"); if (h === "GIF87a" || h === "GIF89a") return true; }
   return buf.length < 200 * 1024;
 }
-function saveLastCollected(fname) { try { fs.writeFileSync(LAST_COLLECTED_FILE, JSON.stringify({ fname, ts: Date.now() })); } catch (e) {} }
+function saveLastCollected(fname) { try { _ctx.writeJsonAtomic(LAST_COLLECTED_FILE, { fname, ts: Date.now() }); } catch (e) {} }
 function getLastCollected() { try { const d = JSON.parse(fs.readFileSync(LAST_COLLECTED_FILE, "utf8")); return d && d.fname ? d.fname : ""; } catch (e) { return ""; } }
 
 function maybeCollect(buf, desc) {
@@ -364,7 +364,7 @@ function maybeCollect(buf, desc) {
     fs.mkdirSync(STICKER_COLLECT_DIR, { recursive: true });
     const existing = fs.readdirSync(STICKER_COLLECT_DIR).filter((f) => IMG_RE.test(f));
     if (existing.length >= STICKER_MAX_COLLECT) return { ok: false, reason: "图库满了" };
-    fs.writeFileSync(path.join(STICKER_COLLECT_DIR, fname), buf);
+    _ctx.writeFileAtomic(path.join(STICKER_COLLECT_DIR, fname), buf);
     store.addAuto(fname, { tier: "collected", desc: String(desc || "").slice(0, 100) });
     saveLastCollected(fname);
     _ctx.log("info", `已收藏表情包（待整理）${fname}`);
@@ -480,7 +480,7 @@ async function generateStickerImage(prompt, outName) {
   if (!buf.length || buf.length < 500) throw new Error("生图返回为空");
   fs.mkdirSync(STICKER_COLLECT_DIR, { recursive: true });
   const fp = path.join(STICKER_COLLECT_DIR, outName + ".jpg");
-  fs.writeFileSync(fp, buf);
+  _ctx.writeFileAtomic(fp, buf);
   store.addAuto(outName + ".jpg", { tier: "collected", desc: "" });
   return fp;
 }
@@ -524,7 +524,7 @@ function maintain(opts) {
     }
   }
   if (promoted || demoted || purged) {
-    try { fs.writeFileSync(o.maintainFile || MAINTAIN_LOG_FILE, JSON.stringify({ ts: now, promoted, demoted, purged })); } catch (e) {}
+    try { _ctx.writeJsonAtomic(o.maintainFile || MAINTAIN_LOG_FILE, { ts: now, promoted, demoted, purged }); } catch (e) {}
     if (_ctx && _ctx.log) _ctx.log("info", `表情包维护：升级 ${promoted} / 下沉 ${demoted} / 清理 ${purged}`);
   }
   return { promoted, demoted, purged };
