@@ -49,6 +49,24 @@ function timePlanLine(userId) {
     return `现在的时间是 ${nowTxt}。\n主人最近的安排：${plans || "（没有带时间词的安排）"}\n搭话前先判断：主人说的那个计划到点了没？如果还没到（比如说的是「下午」而现在是中午），就不要问进度、不要假装他已经在做了；可以问候、分享小想法、或问点别的轻松的事。`;
   } catch (e) { return ""; }
 }
+/* M1-A：开场白钩子三式——类型库 + 语境变量（只喂事实：时间、对方最后一句原文） */
+const HOOK_RULES = "开场必须从下面四种钩子里挑一种落地，禁止「在干嘛呀」「想我了没」这类空问候：\n①问句钩子：问一件具体的、和对方相关的小事（拿开场素材里的事实当由头）\n②分享钩子：说一件你这边刚发生/刚想到的小事（要具体）\n③邀请钩子：邀请对方一起做点什么（看屏幕/拼图/歇会儿）\n④反差钩子：先立个反差再自己圆回来（可以嘴硬）\n要像你自己的话，别像客服的关怀；可以嘴硬、可以顶嘴，别端着。";
+function hookLine(userId, call) {
+  try {
+    const T = (_ctx.getApi && _ctx.getApi("time")) || null;
+    const nowTxt = T ? `${T.todayText()}（${T.periodOfDay()}）` : "";
+    const his = _ctx.loadSession ? _ctx.loadSession(userId) : [];
+    let lastUser = "";
+    for (let i = his.length - 1; i >= 0; i--) {
+      if (his[i] && his[i].role === "user" && typeof his[i].content === "string") { lastUser = his[i].content; break; }
+    }
+    if (lastUser.length > 60) lastUser = lastUser.slice(0, 60) + "…";
+    const parts = [];
+    if (nowTxt) parts.push(`现在是 ${nowTxt}`);
+    if (lastUser) parts.push(`${call} 最后说的是：「${lastUser}」`);
+    return parts.length ? "\n（开场素材，都是事实）" + parts.join("；") : "";
+  } catch (e) { return ""; }
+}
 function proactiveLoop() {
   const P = _ctx.proactive;
   const pr = _ctx.config.proactive || {};
@@ -119,15 +137,16 @@ function proactiveLoop() {
         /* P1-a：意图文案按人称呼（主人还是主人；朋友用昵称，不再写死「主人」） */
         const _call = (_ctx.resolveCall ? _ctx.resolveCall(u) : null) || "主人";
         const _intents = {
-          morning: `给${_call}发一条早安问候，可爱一点，可顺带提一句今天的日期或一句俏皮话`,
-          night: `夜深了，给${_call}发一条晚安问候，温柔提醒早点休息`,
-          schedule: `你刚做完「${planEvent ? planEvent.act : ""}」，自然地跟${_call}提一句（像随口分享，不要像汇报）`,
-          followup: `你之前问过${_call}「${followQ || ""}」。如果有真实的话头就自然提一下；如果没有，就正常打个招呼，不要编造新话题或假经历。`,
-          silence: `${_call}已经约 ${minutes} 分钟没和你说话了，自然搭话（问候、分享一个可爱的小想法、或问一个轻松的小问题）`,
+          morning: `给${_call}发一条早安。${HOOK_RULES}`,
+          night: `夜深了，给${_call}发一条晚安。${HOOK_RULES}`,
+          schedule: `你刚做完「${planEvent ? planEvent.act : ""}」，自然地跟${_call}提一句（像随口分享，不要像汇报）。${HOOK_RULES}`,
+          followup: `你之前问过${_call}「${followQ || ""}」。如果有真实的话头就自然提一下；如果没有，就正常打个招呼，不要编造新话题或假经历。${HOOK_RULES}`,
+          silence: `${_call}已经约 ${minutes} 分钟没和你说话了。${HOOK_RULES}`,
         };
         /* R0-A1：所有主动搭话统一加「只提已确认事实」硬规则（防「你游戏输了」式未证实前提） */
         const _intentText = (_intents[kind] || `主动和${_call}说点什么（自然、像平时聊天）`) + "（硬规则：只提对话里实际说过、对方确认过的事；对方没确认过结果的事——输赢、去向、成败、成绩——一律用疑问句轻轻重问，禁止用陈述句断言。）"
-          + ((kind === "silence" || kind === "followup") ? "\n" + timePlanLine(u) : "");
+          + ((kind === "silence" || kind === "followup") ? "\n" + timePlanLine(u) : "")
+          + hookLine(u, _call);
         // ③ 日程/未完话头候选 → 先让大脑决定「该不该发」，再决定「说什么」
         if ((kind === "schedule" || kind === "followup") && P.shouldSendNow) {
           const _ok = await P.shouldSendNow(u, _intentText);

@@ -140,7 +140,7 @@ const { STYLE_DIRECTIVE, GROUP_DIRECTIVE, SITUATION_QQ, SITUATION_DESKTOP, situa
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.99.4";
+const BASE_VERSION = "1.99.6";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -967,6 +967,12 @@ async function agentChatOnce(history, userText, pctx) {
     const _esp = moodPrompt();
     if (_esp) _dput("mem", _esp);
     if (userId != null) _dput("mem", favorPrompt(userId));
+    /* M2-C：世界书（聊到的话题背景，关键词触发；机会式调用，缺失不影响主链路） */
+    try {
+      const _lore = host && apiOf("lore");
+      const _lc = _lore && _lore.loreCtx ? _lore.loreCtx(String(userText || "")) : "";
+      if (_lc) _dput("mem", _lc);
+    } catch (e) {}
   }
   /* —— 区三【要做的事】念头/任务：full/low 档 —— */
   if (_tierLv >= 1) {
@@ -1018,6 +1024,8 @@ async function agentChatOnce(history, userText, pctx) {
       const _mctx = _mc && _mc.metaCtx ? _mc.metaCtx() : "";
       if (_mctx) _dput("extra", _mctx);
     } catch (e) {}
+    /* M1-B：风格参照放动态尾部（对话历史之后，权重更高——Character Card V2 post-history 结论） */
+    _dput("extra", "【说话参照】短句、口语、有情绪；别客服腔、别书面腔、别义正辞严；可以嘴硬、可以顶嘴，但别端着。");
   }
   /* P1-a/P2-b：复杂消息走推理模型时，加隐藏式内心戏 + 回答前逻辑自检（只对开思考的消息注入） */
   if (_think) {

@@ -1,6 +1,6 @@
 # Momo 架构说明
 
-> 版本：v1.99.4 · 更新：2026-11-20
+> 版本：v1.99.6 · 更新：2026-11-20
 > 路径：`E:\Learn\Momo\`
 > 这份文档必须和代码同步。改了架构就改这里，别让它比代码旧。
 
@@ -19,7 +19,7 @@
 
 ```
 QQ ──WS──> SnowLuma ──WS(3001)──> 桥接 index.js
-                                   ├─ 插件平台（48 个插件 / 72 个工具 / 28 个命令，以 check.js/运行日志为准）
+                                   ├─ 插件平台（49 个插件 / 75 个工具 / 29 个命令，以 check.js/运行日志为准）
                                    ├─ Agent 循环（最多 6 步 工具调用）
                                    ├─ 本地状态（data/ JSON + stickers.db）
                                    └─ DeepSeek API
@@ -42,12 +42,12 @@ E:\Learn\Momo\
 ├── plugin-host.js           # 插件宿主：加载器 / ctx / 钩子 / 工具与命令注册表
 ├── sticker-store.js         # 表情包语义库（node:sqlite，非插件）
 ├── config.json              # 配置
-├── plugins/                 # 48 个功能插件
+├── plugins/                 # 49 个功能插件
 ├── body/                    # 自建身体（Python/PySide6，v0.1 起；见 body-architecture.md）
 ├── self/                    # 自我进化层（identity / reflections / skills / journal / pref）
 ├── data/                    # 运行时数据（不进版本库）
 ├── stickers/                # 表情包文件 + stickers.db 语义库
-├── test/                    # 71 个测试文件，纯 node 断言
+├── test/                    # 72 个测试文件，纯 node 断言
 ├── docs/                    # 文档（本文件、development.md、changelog/、decisions/）
 ├── archive/                 # 历史补丁脚本与旧文档
 ├── supervise.ps1            # 守护进程（崩溃自动重启）
@@ -79,6 +79,8 @@ E:\Learn\Momo\
 | 审计 | `audit` | `plugins/audit-service.js` | S3 / v1.97.0 ✅ |
 | 感知 | `sense` | `plugins/pet-body.js`（已是服务） | 已框架化 |
 | 日志/流水 | `log` | `index.js` recordAction/journal | S4 顺带收口 |
+| 世界书 | `lore` | `plugins/lore-service.js`（话题背景关键词注入） | 对话自然感 M2 / v1.99.6 ✅ |
+| 语义嵌入 | `embed` | `plugins/embed-service.js`（bge-small-zh 本地向量） | 变聪明 M2 / v1.99.1 ✅ |
 
 铁律（完整版见 `docs/plugin-guide.md` §10）：①服务只搬不重写（旧函数保留薄转发，插件零改动）；②一个横切面只有一个真相；③业务插件 `requires` 声明所依赖的框架服务；④医生黄牌兜底（手搓 `getHours`/`daily_cny`、直调框架服务不声明依赖 → 🟡）。
 
@@ -157,7 +159,7 @@ E:\Learn\Momo\
 - 提示词地图（`docs/prompt-map.md`，v1.72.0）：一轮请求的提示词分层与动态块清单
 - 主动性调参（v1.72.0）：沉默 60 分钟主动搭话、身体自娱概率 ×2、每日生活费上限 1 元
 
-## 6. 插件清单（48 个）
+## 6. 插件清单（49 个）
 
 `appellations` `birthdays` `browse` `budget-report` `buzz` `capability-index` `dsh-link` `emotion`
 `evolution` `followup` `fun-core` `goals` `group-chat` `group-info` `group-memes` `hobby`
@@ -195,7 +197,7 @@ E:\Learn\Momo\
 - 重启：`taskkill /PID <node> /F` → supervisor 自动拉起（约 15 秒）
 - 自检：`node check.js`（语法 + 配置 + 插件结构）
 - 测试：`node test/<名字>.js`，全部跑一遍约 10 秒
-- 健康：日志出现 `插件平台就绪：48 个插件（工具 72 / 命令 28）` + `Bot 上线`
+- 健康：日志出现 `插件平台就绪：49 个插件（工具 75 / 命令 29）` + `Bot 上线`
 
 ## 10. 已知限制
 

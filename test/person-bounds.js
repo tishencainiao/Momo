@@ -14,7 +14,7 @@ const pro = fs.readFileSync(path.join(__dirname, "..", "plugins", "proactive.js"
 
 // 1. proactive 去主人化
 check("proactive 意图文案不再写死「给主人」", !pro.includes("给主人发一条早安") && !pro.includes("主动和主人说点什么"), pro.slice(pro.indexOf("_intents"), pro.indexOf("_intents") + 500));
-check("proactive 用 _call 称呼", pro.includes("给${_call}发一条早安问候") && pro.includes("主动和${_call}说点什么"));
+check("proactive 用 _call 称呼", pro.includes("给${_call}发一条早安。") && pro.includes("主动和${_call}说点什么"));
 check("proactive recentQqChat 不再标「主人：」", !pro.includes('role === "user" ? "主人"'), pro.includes("resolveCall") ? "" : "无 resolveCall");
 
 // 2. 反思按人过滤
