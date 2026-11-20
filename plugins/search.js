@@ -1,6 +1,6 @@
-/* 插件：搜索 —— 百度网页搜索 + 博查 API 搜索（从内核下沉的能力，M7/B1阶段2）
+/* 插件：搜索 —— 必应国内版网页搜索（cn.bing.com 抓取，零 key 零成本）+ 百度解析（备用，M7/B1阶段2）
  * 供 web_search 工具、进化探索等经 ctx/api 调用。
- * 依赖（经 ctx 注入）：cleanText、UA、sleep、recordSpend、budgetCfg、log、bochaKey（调用方传 key）。 */
+ * 依赖（经 ctx 注入）：cleanText、UA、sleep、log。 */
 const https = require("https");
 let _ctx = null;
 
@@ -25,6 +25,29 @@ function parseBaiduHtml(html, limit) {
   }
   return results;
 }
+
+/* 必应国内版（cn.bing.com）结果块：<li class="b_algo"> 内 <h2><a href>标题</a></h2> + <p>摘要</p> */
+function parseBingHtml(html, limit) {
+  const results = [];
+  const seen = new Set();
+  const blocks = html.split('<li class="b_algo"').slice(1);
+  for (const block of blocks) {
+    const a = block.match(/<h2[^>]*>[\s\S]*?<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/);
+    if (!a) continue;
+    let url = a[1].replace(/&amp;/g, "&").trim();
+    if (!url.startsWith("http") || seen.has(url)) continue;
+    const title = _ctx.cleanText(a[2]);
+    if (!title) continue;
+    let snippet = "";
+    const p = block.match(/<p[^>]*>([\s\S]*?)<\/p>/);
+    if (p) snippet = _ctx.cleanText(p[1]).trim().slice(0, 300);
+    seen.add(url);
+    results.push({ title, url, snippet });
+    if (results.length >= limit) break;
+  }
+  return results;
+}
+
 function formatResults(query, results) {
   if (!results.length) return `搜索「${query}」没有找到结果。`;
   const lines = [`搜索「${query}」的结果：`];
@@ -37,59 +60,47 @@ async function baiduSearch(query, limit) {
   if (html.includes("wappass.baidu.com") || html.includes("百度安全验证")) throw new Error("百度要求人机验证，请稍后重试");
   return parseBaiduHtml(html, limit);
 }
+async function bingSearch(query, limit) {
+  const qs = (q) => "https://cn.bing.com/search?q=" + encodeURIComponent(q) + "&setlang=zh-CN&count=" + (limit || 10);
+  let results = parseBingHtml(await httpsGet(qs(query), 15000), limit);
+  /* 兜底：必应对「王洋律师 离谱案件」这类多词查询偶尔退化成单字字典页（结果全是「拼音/汉字」词条）。
+     检测到整体是字典词条时，改用查询里最长的一段重试一次（多词查询里最长段通常是核心词）。 */
+  const allDict = results.length > 0 && results.every((r) => (r.snippet || r.title).slice(0, 40).includes("拼音"));
+  if (allDict) {
+    const parts = String(query).split(/\s+/).filter(Boolean);
+    const best = parts.reduce((a, b) => (b.length > a.length ? b : a), "");
+    if (best && best !== query) {
+      const r2 = parseBingHtml(await httpsGet(qs(best), 15000), limit);
+      if (r2.length) results = r2;
+    }
+  }
+  return results;
+}
 function httpsGet(url, timeoutMs) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, {
       headers: { "User-Agent": _ctx.UA, "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "Accept-Language": "zh-CN,zh;q=0.9" },
       timeout: timeoutMs,
     }, (res) => {
-      if (res.statusCode !== 200) { res.resume(); reject(new Error(`百度 HTTP ${res.statusCode}`)); return; }
+      if (res.statusCode !== 200) { res.resume(); reject(new Error(`HTTP ${res.statusCode}`)); return; }
       const chunks = [];
       res.on("data", (c) => chunks.push(c));
       res.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     });
-    req.on("timeout", () => req.destroy(new Error("百度连接超时")));
+    req.on("timeout", () => req.destroy(new Error("搜索连接超时")));
     req.on("error", reject);
   });
-}
-async function bochaSearch(query, limit, key) {
-  const url = "https://api.bochaai.com/v1/web-search";
-  let lastErr = null;
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 20000);
-    try {
-      const resp = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: "Bearer " + key },
-        body: JSON.stringify({ query, summary: true, count: limit, freshness: "noLimit" }),
-        signal: controller.signal,
-      });
-      if (!resp.ok) { let d = ""; try { d = (await resp.text()).slice(0, 200); } catch (e) {} throw new Error(`博查 HTTP ${resp.status}: ${d}`); }
-      const data = await resp.json();
-      const pages = ((((data || {}).data || {}).webPages || {}).value || []);
-      _ctx.recordSpend("search", 0, 0, 0, _ctx.budgetCfg().search_cny);
-      return pages
-        .filter((p) => p && typeof p === "object")
-        .map((p) => ({ title: String(p.name || ""), url: String(p.url || ""), snippet: String(p.summary || p.snippet || "").slice(0, 600) }))
-        .slice(0, limit);
-    } catch (e) {
-      lastErr = e;
-      if (attempt < 3) { await _ctx.sleep(1500 * attempt); continue; }
-    } finally { clearTimeout(timer); }
-  }
-  throw lastErr || new Error("fetch failed");
 }
 
 module.exports = {
   name: "search",
   displayName: "搜索",
-  version: "1.0.0",
-  description: "百度网页搜索 + 博查 API 搜索（M7 下沉）",
+  version: "1.1.0",
+  description: "必应国内版网页搜索（cn.bing.com 抓取，零 key 零成本）+ 百度解析（备用）",
   userScoped: false,
-  permissions: ["UA", "budgetCfg", "cleanText", "recordSpend", "sleep"],
+  permissions: ["UA", "cleanText", "sleep"],
   init(ctx) { _ctx = ctx; },
-  apiSpec: {"search":{"parseBaiduHtml":{"input":"html","output":"[{title,url,snippet}]","sideEffect":"无"},"formatResults":{"input":"results, n","output":"string","sideEffect":"无"},"baiduSearch":{"input":"q, n","output":"[result]","sideEffect":"联网"},"httpsGet":{"input":"url, opt","output":"text","sideEffect":"联网"},"bochaSearch":{"input":"q, n","output":"[result]","sideEffect":"联网(花钱)"}}},
+  apiSpec: {"search":{"parseBaiduHtml":{"input":"html","output":"[{title,url,snippet}]","sideEffect":"无"},"parseBingHtml":{"input":"html","output":"[{title,url,snippet}]","sideEffect":"无"},"formatResults":{"input":"results, n","output":"string","sideEffect":"无"},"baiduSearch":{"input":"q, n","output":"[result]","sideEffect":"联网"},"bingSearch":{"input":"q, n","output":"[result]","sideEffect":"联网(免费)"},"httpsGet":{"input":"url, opt","output":"text","sideEffect":"联网"}}},
 
-  api: { search: { parseBaiduHtml, formatResults, baiduSearch, httpsGet, bochaSearch } },
+  api: { search: { parseBaiduHtml, parseBingHtml, formatResults, baiduSearch, bingSearch, httpsGet } },
 };

@@ -48,6 +48,8 @@ function addWish(text, source) {
   if (!t) return;
   const w = loadWishes();
   if (w.some((x) => x.text === t)) return;
+  /* P1-d：同源去重——与最近 5 条愿望撞车（改写了也算）就不重复记 */
+  if (w.slice(-5).some((x) => nearDupSelf(x.text, t))) return;
   w.push({ ts: Date.now(), text: t, source: source || "user", attempts: 0 });
   while (w.length > 100) w.shift();
   saveWishes(w);
@@ -321,9 +323,7 @@ function evolveCfg() {
 function loadEvolveState() { try { return JSON.parse(fs.readFileSync(path.join(_ctx.DATA_DIR, "evolve-state.json"), "utf8")); } catch (e) { return {}; } }
 function saveEvolveState(s) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(path.join(_ctx.DATA_DIR, "evolve-state.json"), s); } catch (e) {} }
 async function exploreFun(query, settings) {
-  const key = _ctx.bochaKey();
-  if (!key) { _ctx.log("warn", "探索：未配置博查 key（.env 的 BOCHA_API_KEY）"); return; }
-  const results = await _ctx.bochaSearch(query, 3, key);
+  const results = await _ctx.bingSearch(query, 3);
   if (!results.length) return;
   let fun = [];
   try { fun = JSON.parse(fs.readFileSync(path.join(_ctx.DATA_DIR, "fun-stuff.json"), "utf8")); } catch (e) {}
@@ -359,13 +359,12 @@ async function githubExplore(settings) {
   return out;
 }
 async function webExplore(settings) {
-  const key = _ctx.bochaKey();
-  if (!key) { _ctx.log("warn", "探索(web)：未配置博查 key（.env 的 BOCHA_API_KEY）"); return []; }
+  if (!_ctx.bingSearch) { _ctx.log("warn", "探索(web)：搜索服务未加载"); return []; }
   const out = [];
   const queries = ["AI桌面宠物 新功能 玩法", "QQ机器人 AI人格 记忆 进化"];
   for (const q of queries) {
     try {
-      const results = await _ctx.bochaSearch(q, 3, key);
+      const results = await _ctx.bingSearch(q, 3);
       for (const it of results) out.push({ source: "web", title: String(it.title || "").slice(0, 100), desc: String(it.snippet || "").slice(0, 200), url: String(it.url || "") });
     } catch (e) { _ctx.log("warn", `探索(web)失败「${q}」: ${e.message.slice(0, 120)}`); }
   }
@@ -501,13 +500,70 @@ function notifyMaster(text) {
     if (master) _ctx.sendPrivate(master, text).catch(() => {});
   } catch (e) {}
 }
+/* P1-a：五段人话 summary 转文本；没有 summary 就回退 goal 原文 */
+function summaryText(p) {
+  const s = p && p.summary;
+  if (!s || typeof s !== "object" || !Object.keys(s).length) return "";
+  return ["想干什么", "为什么", "怎么改", "影响", "代价"]
+    .map((k) => (s[k] ? k + "：" + s[k] : null)).filter(Boolean).join("\n");
+}
+/* P1-b：/提案 <id> 查技术细节 */
+function proposalDetail(id) {
+  const arr = loadSelfProposals();
+  const p = arr.find((x) => x.id === String(id || "").trim());
+  if (!p) return "（没找到这个提案，可能已清理）";
+  const stText = p.status === "pending" ? "待批准" : (p.status === "approved" ? "已批准" : (p.status === "rejected" ? "已拒绝" : "已过期"));
+  const s = summaryText(p);
+  const hoursLeft = Math.max(0, Math.ceil((p.ts + 24 * 3600e3 - Date.now()) / 3600e3));
+  return "【提案 " + p.id + "】" + stText + "\n" +
+    (s ? s + "\n" : "目标：" + p.goal + "\n") +
+    "插件名：" + p.name + "；代码 " + String(p.code || "").length + " 字；能力：" + (p.caps && p.caps.length ? p.caps.join("、") : "无") +
+    (p.status === "pending" ? "\n创建于 " + new Date(p.ts).toLocaleString("zh-CN") + "，还剩 " + hoursLeft + " 小时作废" : "") +
+    (p.source ? "\n来源：" + p.source : "");
+}
+/* P1-d：同源去重（textSimilar + 二元组） */
+function nearDupSelf(a, b) {
+  const sa = String(a || ""), sb = String(b || "");
+  if (!sa || !sb) return false;
+  if (_ctx.textSimilar && _ctx.textSimilar(sa, sb)) return true;
+  const gram = (s) => { const g = new Set(); for (let i = 0; i < s.length - 1; i++) g.add(s.slice(i, i + 2)); return g; };
+  const ga = gram(sa), gb = gram(sb);
+  if (!ga.size || !gb.size) return false;
+  let c = 0; for (const x of ga) if (gb.has(x)) c++;
+  return c / Math.min(ga.size, gb.size) > 0.5;
+}
+/* P1-e：过期提案主动清理（1 小时节流） */
+let lastProposalClean = 0;
+function cleanExpiredProposals(now) {
+  if (now - lastProposalClean < 3600e3) return false;
+  lastProposalClean = now;
+  try {
+    const arr = loadSelfProposals();
+    let changed = false;
+    for (const p of arr) {
+      if (p.status === "pending" && Date.now() - p.ts > 24 * 3600e3) { p.status = "expired"; changed = true; }
+    }
+    if (changed) saveSelfProposals(arr);
+    return changed;
+  } catch (e) { return false; }
+}
 const CTX_CHEATSHEET = `ctx 可用：log(level,msg)、config、apiKey、settings()、sendPrivate(u,t)、sendGroup(g,t)、recordAndSend(u,t)（先记会话再发）、onebotSend(action,params)、sendStickerImage(u,s)、loadMemories(u)、saveMemories(u,items)、loadShortMemories(u)、saveShortMemories(u,items)、loadSession(u)、saveSession(u,msgs)、isMaster(u)、resolveCall(u)、userPersona(u,s)、isBudgetExhausted()、getEmotion()、getMood()、getBoredom()、getFavor(u)、todayText()、periodOfDay()、nowHM()、formatGap(ms)、dayStr(off)、todayMMDD()、parseMemoryJson(raw)、completeOnce(msgs,settings,max,temp)、reasonComplete(msgs,settings,max)、textSimilar(a,b)、DATA_DIR、registry.list()`;
 async function generatePluginCode(goalDesc) {
-  const prompt = `你是 Momo（大肥鱼桌宠）的代码生成器。请为下面的目标写一个**完整可运行**的 Node.js 插件文件（CommonJS）。\n\n目标：${goalDesc}\n\n插件格式（必须严格遵循）：\n\`\`\`javascript\nmodule.exports = {\n  name: "self-英文小写单词",\n  displayName: "中文显示名",\n  description: "一句话说清做什么、何时用",\n  version: "1.0.0",\n  engines: { kernel: ">=${_ctx.BASE_VERSION}" },\n  requires: [],\n  permissions: ["DATA_DIR", "log"],\n  attribution: { source: "self-generated by Momo", license: "self-generated", note: "Momo 自改进化层生成（selfModify）" },\n  init(ctx) { _ctx = ctx; },\n  tools: [{ def: {type:"function",function:{name:"工具名",description:"何时调用",parameters:{type:"object",properties:{}}}}, handler(args, info) { return "结果文本"; } }],\n  commands: [{ key: "/命令", regex: /^\\/命令/, handler(msg) { /* 用 _ctx.sendPrivate(msg.userId, "回复") */ } }],\n  hooks: { timer(payload) { const now = payload && payload.now || Date.now(); /* 自行节流 */ } },\n};\n\`\`\`\n\n可用 API（只能调用这些 + Node 内置模块 fs/path）：\n${CTX_CHEATSHEET}\n\n硬性规则：\n1. name 必须匹配 /^self-[a-z0-9-]{1,30}$/\n2. 不能修改、读取或启动任何外部进程以外的核心文件；不要 require 网络依赖\n3. 所有可能抛错的地方都要 try-catch，绝不能 process.exit\n4. 只输出一个 javascript 代码块（\`\`\`javascript ... \`\`\`），不要任何解释文字`;
+  const prompt = `你是 Momo（大肥鱼桌宠）的代码生成器。请为下面的目标写一个**完整可运行**的 Node.js 插件文件（CommonJS）。\n\n目标：${goalDesc}\n\n插件格式（必须严格遵循）：\n\`\`\`javascript\nmodule.exports = {\n  name: "self-英文小写单词",\n  displayName: "中文显示名",\n  description: "一句话说清做什么、何时用",\n  version: "1.0.0",\n  engines: { kernel: ">=${_ctx.BASE_VERSION}" },\n  requires: [],\n  permissions: ["DATA_DIR", "log"],\n  attribution: { source: "self-generated by Momo", license: "self-generated", note: "Momo 自改进化层生成（selfModify）" },\n  init(ctx) { _ctx = ctx; },\n  tools: [{ def: {type:"function",function:{name:"工具名",description:"何时调用",parameters:{type:"object",properties:{}}}}, handler(args, info) { return "结果文本"; } }],\n  commands: [{ key: "/命令", regex: /^\\/命令/, handler(msg) { /* 用 _ctx.sendPrivate(msg.userId, "回复") */ } }],\n  hooks: { timer(payload) { const now = payload && payload.now || Date.now(); /* 自行节流 */ } },\n};\n\`\`\`\n\n可用 API（只能调用这些 + Node 内置模块 fs/path）：\n${CTX_CHEATSHEET}\n\n硬性规则：\n1. name 必须匹配 /^self-[a-z0-9-]{1,30}$/\n2. 不能修改、读取或启动任何外部进程以外的核心文件；不要 require 网络依赖\n3. 所有可能抛错的地方都要 try-catch，绝不能 process.exit\n4. 只输出两个代码块，不要任何其它解释文字：\n第一个是 javascript 代码块（\`\`\`javascript ... \`\`\`）；\n第二个是 summary 块，用五行人话说明这个插件（每行 ≤25 字）：\n\`\`\`summary\n想干什么：<一句人话>\n为什么：<主人为什么可能想要它>\n怎么改：<一行技术说明>\n影响：<会影响什么>\n代价：<成本或风险>\n\`\`\``;
   const raw = await _ctx.reasonComplete([{ role: "user", content: prompt }], _ctx.settings(), 3000);
   const m = String(raw || "").match(/```(?:javascript|js)?\s*([\s\S]*?)```/);
   if (!m) return null;
-  return String(m[1]).trim();
+  const code = String(m[1]).trim();
+  /* P1：解析五段人话 summary（没产出就用空对象，通知文案回退到 goal 原文） */
+  const summary = {};
+  const ms = String(raw || "").match(/```summary\s*([\s\S]*?)```/);
+  if (ms) {
+    for (const line of String(ms[1]).split("\n")) {
+      const mm = line.match(/^(想干什么|为什么|怎么改|影响|代价)[：:]\s*(.+)$/);
+      if (mm) summary[mm[1]] = String(mm[2]).trim().slice(0, 40);
+    }
+  }
+  return { code, summary };
 }
 function validatePluginCode(code, name) {
   if (!/^self-[a-z0-9-]{1,30}$/.test(name)) return { ok: false, msg: "插件名不合法（必须 self-小写单词）" };
@@ -538,6 +594,51 @@ function scanCapabilities(code) {
   return hits;
 }
 
+/* P2-c：失败记录（回滚时沉淀，供 doctor 护栏循环） */
+function recordSelfFailure(name, goal, reason) {
+  try {
+    const f = path.join(_ctx.DATA_DIR, "selfmod-failures.json");
+    let arr = [];
+    try { arr = JSON.parse(fs.readFileSync(f, "utf8")); } catch (e) {}
+    arr.push({ ts: Date.now(), name: String(name || ""), goal: String(goal || "").slice(0, 60), reason: String(reason || "").slice(0, 120) });
+    _ctx.writeJsonAtomic(f, arr.slice(-50));
+  } catch (e) {}
+}
+/* P2-b：sunset 检查（每 24h 一次）——30 天没用过的 self-* 插件，生成下架提醒 */
+const SUNSET_DAYS = 30;
+let lastSunsetCheck = 0;
+function checkSelfSunset(now) {
+  if (now - lastSunsetCheck < 24 * 3600e3) return;
+  lastSunsetCheck = now;
+  try {
+    const usageFile = path.join(_ctx.DATA_DIR, "self-plugin-usage.json");
+    let usage = {};
+    try { usage = JSON.parse(fs.readFileSync(usageFile, "utf8")); } catch (e) {}
+    const pluginsDir = path.join(_ctx.DATA_DIR, "..", "plugins");
+    const files = fs.existsSync(pluginsDir) ? fs.readdirSync(pluginsDir).filter((f) => f.startsWith("self-") && f.endsWith(".js")) : [];
+    const stale = [];
+    for (const f of files) {
+      const name = f.replace(/\.js$/, "");
+      const rec = usage[name];
+      const lastUsed = rec ? rec.lastUsed : 0;
+      if (now - lastUsed > SUNSET_DAYS * 24 * 3600e3) stale.push(name);
+    }
+    if (stale.length) {
+      notifyMaster(`主人～我自查了一下，有 ${stale.length} 个自建能力超过 30 天没被用过啦：${stale.join("、")}。\n还要不要留着？不要的话发「/回滚self <插件名>」我就下架它～`);
+      _ctx.log("info", "自建插件 sunset 提醒: " + stale.join(","));
+    }
+  } catch (e) {}
+}
+/* P2-c：月度配额——每月最多 5 条自改进化提案 */
+const MONTHLY_PROPOSAL_CAP = 5;
+function monthKeyOf(ts) { const d = new Date(ts); return d.getFullYear() + "-" + (d.getMonth() + 1); }
+function proposalCountThisMonth() {
+  try {
+    const mk = monthKeyOf(Date.now());
+    return loadSelfProposals().filter((p) => p.ts && monthKeyOf(p.ts) === mk).length;
+  } catch (e) { return 0; }
+}
+
 /* ---- 事前审批：先生成提案，主人批准后才写入 ---- */
 const PROPOSAL_FILE = () => path.join(_ctx.SELF_DIR, "selfmod-proposals.json");
 function loadSelfProposals() { try { return JSON.parse(fs.readFileSync(PROPOSAL_FILE(), "utf8")); } catch (e) { return []; } }
@@ -547,11 +648,24 @@ function requireApproval() { try { const v = _ctx.getSetting ? _ctx.getSetting("
 async function selfModify(goalDesc, source) {
   if (isFrozen()) return { ok: false, msg: "自我进化已冻结" };
   if (_ctx.isBudgetExhausted()) return { ok: false, msg: "预算不足，先不折腾自己" };
+  /* P2-c：月度配额 */
+  if (proposalCountThisMonth() >= MONTHLY_PROPOSAL_CAP) {
+    _ctx.log("info", `自修改-配额拦截: ${String(goalDesc).slice(0, 60)}`);
+    return { ok: false, msg: `这个月的自改进化配额（${MONTHLY_PROPOSAL_CAP} 条）用完了，下个月再来吧` };
+  }
   if (loadSmWatch()) return { ok: false, msg: "上一个修改还没验证完，稍后再试" };
   _ctx.log("info", `自修改-开始: ${String(goalDesc).slice(0, 60)}`);
-  let code = null;
+  /* P1-d：同源去重——和待批提案撞了就不重复生成 */
+  try {
+    const pending = loadSelfProposals().filter((p) => p.status === "pending");
+    if (pending.some((p) => nearDupSelf(p.goal, goalDesc))) {
+      _ctx.log("info", `自修改-去重跳过: ${String(goalDesc).slice(0, 60)}`);
+      return { ok: false, msg: "这个愿望已经提过类似的提案了，先不重复生成" };
+    }
+  } catch (e) {}
+  let code = null, summary = {};
   for (let attempt = 1; attempt <= 3 && !code; attempt++) {
-    try { code = await generatePluginCode(goalDesc); } catch (e) { _ctx.log("warn", `自修改生成失败(第${attempt}次): ${e.message.slice(0, 120)}`); }
+    try { const gen = await generatePluginCode(goalDesc); if (gen) { code = gen.code || null; summary = gen.summary || {}; } } catch (e) { _ctx.log("warn", `自修改生成失败(第${attempt}次): ${e.message.slice(0, 120)}`); }
   }
   if (!code) return { ok: false, msg: "代码生成失败" };
   let name = "";
@@ -571,9 +685,11 @@ async function selfModify(goalDesc, source) {
       id: "sm" + Date.now().toString(36),
       ts: Date.now(),
       goal: String(goalDesc).slice(0, 80),
+      summary,
       name,
       code,
       caps,
+      risk: caps.length ? "high" : "low",
       allow_send: false,
       status: "pending",
       source: source || "auto",
@@ -583,7 +699,10 @@ async function selfModify(goalDesc, source) {
     journalAppend({ type: "selfmodify", goal: p.goal, status: "awaiting-approval", plugin: name, caps });
     _ctx.log("info", `自修改待审批：${name}（能力：${caps.join(",") || "无"}）`);
     const capText = caps.length ? `会用到的能力：${caps.join("、")}（**默认禁止发消息**）` : "不需要任何敏感能力";
-    notifyMaster(`主人～我想给自己加个能力「${p.goal}」。\n插件名：${name}\n${capText}\n\n代码 ${code.length} 字，已通过语法和加载校验。\n\n批准请发「/批准self ${p.id}」，不要就发「/拒绝self ${p.id}」（24 小时后自动作废）。`);
+    const riskText = p.risk === "high" ? "风险：较高（用到发消息类能力）" : "风险：低（不主动发消息）";
+    const s = summaryText(p);
+    const head = s ? `主人～我想给自己加个新能力：\n${s}\n` : `主人～我想给自己加个能力「${p.goal}」。\n`;
+    notifyMaster(`${head}（插件名 ${name}；${capText}；${riskText}；代码 ${code.length} 字已通过校验）\n\n批准发「/批准self ${p.id}」，不要就发「/拒绝self ${p.id}」（24 小时后作废）；想看技术细节发「/提案 ${p.id}」。`);
     return { ok: true, pending: true, awaiting: true, id: p.id, msg: `提案 ${p.id} 已生成，等主人批准（${caps.length ? "含敏感能力" : "无敏感能力"}）` };
   }
   try {
@@ -598,6 +717,13 @@ async function selfModify(goalDesc, source) {
 
 /* 批准 / 拒绝 / 回滚 */
 function approveSelfMod(id) {
+  /* P2-a：支持批量批准（空格/逗号分隔） */
+  const ids = String(id || "").split(/[\s,，]+/).map((x) => x.trim()).filter(Boolean);
+  if (!ids.length) return "（用法：/批准self <提案ID>，多个用空格隔开）";
+  const results = ids.map(approveOneSelfMod);
+  return results.join("\n");
+}
+function approveOneSelfMod(id) {
   const arr = loadSelfProposals();
   const p = arr.find((x) => x.id === String(id).trim());
   if (!p) return "（没找到这个提案，可能已过期）";
@@ -648,6 +774,7 @@ function rollbackSelf(name) {
   try {
     fs.unlinkSync(dest);
     journalAppend({ type: "selfmodify", goal: "手动回滚", status: "rolled-back-manual", plugin: n });
+    recordSelfFailure(n, "手动回滚", "主人手动下架");
     _ctx.log("info", `手动回滚自建插件：${n}`);
     setTimeout(() => { try { spawnSync("taskkill", ["/PID", String(process.pid), "/F"], { windowsHide: true }); } catch (e) {} }, 800);
     return `已删除 ${n}，马上重启`;
@@ -662,6 +789,7 @@ function startupWatchRecovery() {
     try { if (fs.existsSync(w.file)) fs.unlinkSync(w.file); } catch (e) {}
     clearSmWatch();
     journalAppend({ type: "selfmodify", goal: w.goal, status: "rolled-back", plugin: w.name });
+    recordSelfFailure(w.name, w.goal, "启动加载失败，自动回滚");
     _ctx.log("warn", `自修改验证失败，已自动回滚：${w.name}`);
     notifyMaster(`主人～我刚才想给自己加「${w.goal}」的能力，但代码没通过启动验证，已经自动回滚啦，其他功能没受影响～`);
     return;
@@ -677,6 +805,7 @@ function startupWatchRecovery() {
         try { if (fs.existsSync(w.file)) fs.unlinkSync(w.file); } catch (e) {}
         clearSmWatch();
         journalAppend({ type: "selfmodify", goal: w.goal, status: "rolled-back", plugin: w.name });
+        recordSelfFailure(w.name, w.goal, "5 分钟快速验证加载失败，自动回滚");
         notifyMaster(`主人～新插件「${w.name}」观察期出问题了，已自动回滚～`);
         return;
       }
@@ -714,6 +843,7 @@ function checkSelfModWatch() {
       try { if (fs.existsSync(w.file)) fs.unlinkSync(w.file); } catch (e) {}
       clearSmWatch();
       journalAppend({ type: "selfmodify", goal: w.goal, status: "rolled-back-error", plugin: w.name });
+      recordSelfFailure(w.name, w.goal, "24 小时观察期出现 error 日志，自动回滚");
       _ctx.log("warn", `自修改观察期出现错误，已回滚：${w.name}`);
       notifyMaster(`主人～新插件「${w.name}」在观察期里报错了，我已经把它删掉回滚啦～`);
     }
@@ -740,7 +870,7 @@ module.exports = {
   description: "自我内省、愿望、反思/探索、评分调参、技能规则、插件元认知（特权）",
   userScoped: true,
   requires: ["budget"],
-  permissions: ["BASE_VERSION", "DATA_DIR", "SELF_DIR", "addMood", "bochaKey", "bochaSearch", "budgetCfg", "canAfford", "completeOnce", "config", "formatResults", "getBoredom", "getEmotion", "getFavor", "getMood", "getSetting", "isBudgetExhausted", "isMaster", "loadBudget", "loadEvolution", "loadMemories", "loadMindState", "loadSession", "loadShortMemories", "log", "pickStickerByIds", "reasonComplete", "recordAction", "recordAndSend", "registry", "reloadEvolution", "resolveTargetId", "sendPrivate", "sendStickerImage", "settings", "textSimilar"],
+  permissions: ["BASE_VERSION", "DATA_DIR", "SELF_DIR", "addMood", "bingSearch", "budgetCfg", "canAfford", "completeOnce", "config", "formatResults", "getBoredom", "getEmotion", "getFavor", "getMood", "getSetting", "isBudgetExhausted", "isMaster", "loadBudget", "loadEvolution", "loadMemories", "loadMindState", "loadSession", "loadShortMemories", "log", "pickStickerByIds", "reasonComplete", "recordAction", "recordAndSend", "registry", "reloadEvolution", "resolveTargetId", "sendPrivate", "sendStickerImage", "settings", "textSimilar"],
   version: "1.1.0",
   settings: [
     { key: "evolve.require_approval", label: "自我改代码需要我批准", type: "boolean", default: true, desc: "开启后，她写的新插件要先给你看、你批准才生效" },
@@ -751,6 +881,10 @@ module.exports = {
     timer(payload) {
       const now = (payload && payload.now) || Date.now();
       wishAttemptLoop(now);
+      /* P1-e：过期提案主动清理（1 小时节流） */
+      try { cleanExpiredProposals(now); } catch (e) {}
+      /* P2-b：自建插件 sunset 检查（24 小时节流） */
+      try { checkSelfSunset(now); } catch (e) {}
       // 每天一次自我反思（selfReflection 内部已做「当天已跑过」和预算检查；这里只做 30 分钟节流防止失败重试太频繁）
       if (now - lastReflectTs >= 30 * 60000) {
         lastReflectTs = now;
@@ -760,13 +894,15 @@ module.exports = {
       try { checkSelfModWatch(); } catch (e) {}
     },
   },
-  apiSpec: {"evolution":{"selfReflection":{"input":"","output":"","sideEffect":""},"evolveExplore":{"input":"","output":"","sideEffect":""},"tunePrefFromScore":{"input":"","output":"","sideEffect":""},"extractSelfIdentity":{"input":"","output":"","sideEffect":""},"selfScoreReply":{"input":"","output":"","sideEffect":""},"matchSkillRule":{"input":"","output":"","sideEffect":""},"runSkillRule":{"input":"","output":"","sideEffect":""},"addWish":{"input":"","output":"","sideEffect":"写盘"},"loadWishes":{"input":"","output":"","sideEffect":"只读"},"loadProposals":{"input":"","output":"","sideEffect":"只读"},"exploreFun":{"input":"","output":"","sideEffect":""},"addIdentityItem":{"input":"","output":"","sideEffect":"写盘"},"selfModify":{"input":"","output":"","sideEffect":""},"approveSelfMod":{"input":"","output":"","sideEffect":""},"rejectSelfMod":{"input":"","output":"","sideEffect":""},"listSelfMods":{"input":"","output":"","sideEffect":"只读"},"rollbackSelf":{"input":"","output":"","sideEffect":""},"scanCapabilities":{"input":"","output":"","sideEffect":"只读"},"looksLikeUnverifiedDeed":{"input":"","output":"","sideEffect":""}}},
+  apiSpec: {"evolution":{"selfReflection":{"input":"","output":"","sideEffect":""},"evolveExplore":{"input":"","output":"","sideEffect":""},"tunePrefFromScore":{"input":"","output":"","sideEffect":""},"extractSelfIdentity":{"input":"","output":"","sideEffect":""},"selfScoreReply":{"input":"","output":"","sideEffect":""},"matchSkillRule":{"input":"","output":"","sideEffect":""},"runSkillRule":{"input":"","output":"","sideEffect":""},"addWish":{"input":"","output":"","sideEffect":"写盘"},"loadWishes":{"input":"","output":"","sideEffect":"只读"},"loadProposals":{"input":"","output":"","sideEffect":"只读"},"exploreFun":{"input":"","output":"","sideEffect":""},"addIdentityItem":{"input":"","output":"","sideEffect":"写盘"},"selfModify":{"input":"","output":"","sideEffect":""},"approveSelfMod":{"input":"","output":"","sideEffect":""},"rejectSelfMod":{"input":"","output":"","sideEffect":""},"listSelfMods":{"input":"","output":"","sideEffect":"只读"},"rollbackSelf":{"input":"","output":"","sideEffect":""},"scanCapabilities":{"input":"","output":"","sideEffect":"只读"},"proposalDetail":{"input":"","output":"","sideEffect":"只读"},"summaryText":{"input":"","output":"","sideEffect":"只读"},"nearDupSelf":{"input":"","output":"","sideEffect":"只读"},"cleanExpiredProposals":{"input":"","output":"","sideEffect":"写盘"},"recordSelfFailure":{"input":"","output":"","sideEffect":"写盘"},"checkSelfSunset":{"input":"","output":"","sideEffect":""},"proposalCountThisMonth":{"input":"","output":"","sideEffect":"只读"},"approveOneSelfMod":{"input":"","output":"","sideEffect":"写盘"},"looksLikeUnverifiedDeed":{"input":"","output":"","sideEffect":""}}},
 
   api: {
     evolution: {
       selfReflection, evolveExplore, tunePrefFromScore, extractSelfIdentity, selfScoreReply,
       matchSkillRule, runSkillRule, addWish, loadWishes, loadProposals, exploreFun, addIdentityItem,
       selfModify, approveSelfMod, rejectSelfMod, listSelfMods, rollbackSelf, scanCapabilities,
+      proposalDetail, summaryText, nearDupSelf, cleanExpiredProposals,
+      recordSelfFailure, checkSelfSunset, proposalCountThisMonth, approveOneSelfMod,
       looksLikeUnverifiedDeed,
     },
   },
@@ -781,7 +917,10 @@ module.exports = {
     { def: toolDef("self_memory", "查询 Momo 对某人的记忆。用户只能查自己和 Momo 的记忆；主人可查任何人的。", { type: "object", properties: { target: { type: "string", description: "查谁：留空查当前对方；填 QQ号/称呼（仅主人可查别人）" } } }), handler: (args, info) => selfMemoryText(info.userId, args.target) },
     { def: toolDef("self_info", "查看 Momo 自己的身份信息（叫什么、会什么、当前插件器官）。", { type: "object", properties: {} }), handler: () => selfInfoText() },
     { def: toolDef("self_history", "查询聊天记录。用户只能查自己和 Momo 的聊天；主人可查任何人的。", { type: "object", properties: { target: { type: "string", description: "查谁：留空查当前对方；填 QQ号/称呼（仅主人可查别人）" } } }), handler: (args, info) => selfHistoryText(info.userId, args.target) },
-    { def: toolDef("add_wish", "记录一个用户想要但目前做不到的功能/愿望（作为进化材料）。当对方说「记一下：我想要XX」时调用。", { type: "object", properties: { content: { type: "string", description: "对方原话" } }, required: ["content"] }), handler: (args) => {
+    { def: toolDef("add_wish", "记录一个用户想要但目前做不到的功能/愿望（作为进化材料）。当对方说「记一下：我想要XX」时调用。", { type: "object", properties: { content: { type: "string", description: "对方原话" } }, required: ["content"] }), handler: (args, info) => {
+      /* P1-c：愿望质量门——只有主人的愿望才进进化材料 */
+      const _uid = info && info.userId;
+      if (_uid != null && !_ctx.isMaster(_uid)) return "（不是主人的愿望，我不记进化材料哦～）";
       const wm = String(args.content || "").match(/^(?:记一下|记录|记下|备注)[:：]?\s*(.+)/);
       if (wm && wm[1].trim()) { addWish(wm[1].trim(), "user-explicit"); return "已记录愿望，作为未来进化的材料"; }
       return "（没听懂要记什么）";
@@ -794,6 +933,16 @@ module.exports = {
       handler(msg) {
         if (!_ctx.isMaster(msg.userId)) { _ctx.sendPrivate(msg.userId, "只有主人能看哦～"); return; }
         _ctx.sendPrivate(msg.userId, listSelfMods());
+      },
+    },
+    {
+      key: "/提案",
+      regex: /^\/提案/,
+      handler(msg) {
+        if (!_ctx.isMaster(msg.userId)) { _ctx.sendPrivate(msg.userId, "只有主人能看哦～"); return; }
+        const id = String(msg.text || "").replace(/^\/提案\s*/, "").trim();
+        if (!id) { _ctx.sendPrivate(msg.userId, "用法：/提案 <提案ID>（先发 /self提案 看有哪些）"); return; }
+        _ctx.sendPrivate(msg.userId, proposalDetail(id));
       },
     },
     {

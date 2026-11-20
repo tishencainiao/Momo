@@ -100,17 +100,14 @@ function validateConfig(c) {
   // chat.model 允许留空（会回退到桌宠 provider 的模型），故不校验
   need("budget.daily_cny", c.budget && Number(c.budget.daily_cny) > 0, "必须大于 0");
   if (c.chat && c.chat.web_search && c.chat.web_search.enabled !== false) {
-    const eng = String((c.chat.web_search.engine) || "baidu").toLowerCase();
-    if (eng === "bocha" && !process.env.BOCHA_API_KEY) need("chat.web_search.bocha_api_key", false, "engine=bocha 但 .env 里没有 BOCHA_API_KEY");
+    const eng = String((c.chat.web_search.engine) || "bing").toLowerCase();
+    if (eng !== "bing" && eng !== "baidu") log("warn", `web_search.engine=${eng} 未知，将按 bing 处理`);
   }
   for (const e of errs) log("error", `配置校验失败 → ${e}`);
   if (!errs.length) log("info", "配置校验通过");
   return errs.length;
 }
 validateConfig(cfg);
-function bochaKey() {
-  return process.env.BOCHA_API_KEY || ((cfg.chat && cfg.chat.web_search && cfg.chat.web_search.bocha_api_key) || "");
-}
 
 process.on("uncaughtException", (e) => {
   try { log("error", "未捕获异常（进程将退出，由 supervisor 自动拉起）: " + (e && e.stack || e)); } catch (e2) {}
@@ -143,7 +140,7 @@ const { STYLE_DIRECTIVE, GROUP_DIRECTIVE, SITUATION_QQ, SITUATION_DESKTOP, situa
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.99.1";
+const BASE_VERSION = "1.99.4";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -1067,16 +1064,16 @@ async function agentChatOnce(history, userText, pctx) {
             result = String(r == null ? "（已完成）" : r);
           } else if (tc.function.name === "web_search") {
             const args = JSON.parse(tc.function.arguments || "{}");
-            const wcfg = (cfg.chat && cfg.chat.web_search) || {};
-            const engine = (wcfg.engine || "baidu").toLowerCase();
             const q = String(args.query || "").slice(0, 80);
             if (!q) { result = "（搜索不可用）"; }
-            else if (engine === "bocha") {
-              if (!bochaKey()) { result = "（博查未配置 API Key）"; }
-              else { const results = await apiOf("search").bochaSearch(q, 3, bochaKey()); result = results.length ? apiOf("search").formatResults(q, results) : "没有搜到结果"; }
-            } else {
-              const results = await apiOf("search").baiduSearch(q, 3);
-              result = results.length ? apiOf("search").formatResults(q, results) : "没有搜到结果";
+            else {
+              try {
+                const results = await apiOf("search").bingSearch(q, 3);
+                result = results.length ? apiOf("search").formatResults(q, results) : "没有搜到结果";
+              } catch (e) {
+                log("warn", `必应搜索失败「${q.slice(0, 20)}」: ${String(e && e.message || e).slice(0, 120)}`);
+                result = "（搜索服务暂时不可用，稍后再试）";
+              }
             }
           } else if (tc.function.name === "send_sticker") {
             const args = JSON.parse(tc.function.arguments || "{}");
@@ -2268,7 +2265,7 @@ async function handlePrivateMessage(event) {
       return sendPrivate(userId, `我现在称呼你为「${call}」\n对你的好感度：${Math.round(fv)}/100\n${prefLine}`);
     }
     const s = resolveChatSettings();
-    const ws = (cfg.chat && cfg.chat.web_search && cfg.chat.web_search.enabled) ? "开启（" + ((cfg.chat.web_search.engine || "baidu") === "bocha" ? "博查" : "百度") + "）" : "关闭";
+    const ws = (cfg.chat && cfg.chat.web_search && cfg.chat.web_search.enabled) ? "开启（" + ((cfg.chat.web_search.engine || "bing") === "baidu" ? "百度" : "必应") + "）" : "关闭";
     const keyState = apiKey ? `已连接（Key 长度 ${apiKey.length}）` : "未配置 API Key";
     const pr = (cfg.proactive && cfg.proactive.enabled) ? `开启（沉默${cfg.proactive.silence_minutes || 120}分 + ${cfg.proactive.morning_greet || "08:00"}/${cfg.proactive.night_greet || "23:00"}）` : "关闭";
     return sendPrivate(userId, `角色：大肥鱼（女仆）\n模型：${s.model}\n联网搜索：${ws}\n主动搭话：${pr}\n当前情绪：${moodLabel()}\n对${call}的好感度：${Math.round(fv)}/100\n${prefLine}\n${budgetLine()}\n密钥：${keyState}`);
@@ -2526,7 +2523,9 @@ async function processPrivateChat(userId, text, images, voiceRequested, msgTime)
     if (!rawReply) throw new Error("模型未返回内容");
     const marked = parseStickerMarkers(rawReply);
     const reply = stripStageDirections(marked.cleanText) || marked.cleanText;
-    if (/做不到|不能|不会|没有这个功能|不支持|办不到|做不了|没这个权限/.test(reply) && String(text).length >= 6) {
+    /* P1-c 愿望质量门：只有主人 + 带显式信号词的「做不到」回复才记成进化愿望 */
+    const _wishSignal = /(帮我|给我|想要|加个|做个|能不能|可以帮我|我想要|给我加|希望.{0,8}(有|能|会)|要是有|要能)/.test(text);
+    if (_wishSignal && isMaster(userId) && /做不到|不能|不会|没有这个功能|不支持|办不到|做不了|没这个权限/.test(reply) && String(text).length >= 6) {
       addWish(text, "user-request-unmet");
     }
     history.push({ role: "user", content: text, ts: Date.now() }, { role: "assistant", content: reply, ts: Date.now() });
@@ -3044,7 +3043,7 @@ loadProactiveState();
 seedActivity();
 /* 情绪/心情状态由框架服务 mood 在插件加载时自行读盘，衰减由 mood-service 的 timer 钩子驱动（骨骼方案 S3） */
 const s0 = resolveChatSettings();
-const ws0 = (cfg.chat && cfg.chat.web_search && cfg.chat.web_search.enabled) ? "开(" + ((cfg.chat.web_search.engine || "baidu") === "bocha" ? "博查" : "百度") + ")" : "关";
+const ws0 = (cfg.chat && cfg.chat.web_search && cfg.chat.web_search.enabled) ? "开(" + ((cfg.chat.web_search.engine || "bing") === "baidu" ? "百度" : "必应") + ")" : "关";
 const split0 = (cfg.qq && cfg.qq.split_reply) ? `拆条≤${cfg.qq.split_max_chars || 25}字/${cfg.qq.reply_gap_ms || 1200}ms` : "单条";
 const pr0 = (cfg.proactive && cfg.proactive.enabled) ? `主动搭话(沉默${cfg.proactive.silence_minutes || 120}分+${cfg.proactive.morning_greet || "08:00"}/${cfg.proactive.night_greet || "23:00"})` : "主动搭话关";
 const vis0 = (cfg.chat && cfg.chat.vision && cfg.chat.vision.enabled === false) ? "关" : "开";
@@ -3082,7 +3081,7 @@ host = createHost({
   getCurrentStatus, setCurrentStatus, clearCurrentStatus, applyStatusRule, userQuietState, markProbed, loadActivityState,
   todayText, periodOfDay, nowHM, formatGap, dayStr, todayMMDD, parseMemoryJson,
   loadAppellations, saveAppellations, loadMute, addMute, removeMute, resolveTargetId, loadWishes, addWish,
-  completeOnce, reasonComplete, qzoneHttp, bochaKey,
+  completeOnce, reasonComplete, qzoneHttp,
   cleanText, UA, sleep, recordSpend, estimateTokens, maybeCollect,
   getEmotion, getMood, addMood, setMood, getBoredom, addBoredom, loadBudget, budgetCfg, loadMindState: () => apiOf("mind").loadMindState(), textSimilar,
   getLastSentSticker, stickerSessionKey, notePremiseCorrection,

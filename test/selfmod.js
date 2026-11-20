@@ -101,12 +101,73 @@ check("暴露审批开关", (plugin.settings || []).some((s) => s.key === "evolv
 
 // 7. 命令
 const cmds = plugin.commands || [];
-for (const k of ["/self提案", "/批准self", "/拒绝self", "/回滚self"]) {
+for (const k of ["/self提案", "/提案", "/批准self", "/拒绝self", "/回滚self"]) {
   check("有命令 " + k, cmds.some((c) => c.key === k));
 }
 
 // 8. 能力扫描不会误报（字符串里提到但没调用）
 check("只是提到不算调用", A.scanCapabilities('// sendPrivate 是敏感能力').length === 0);
+
+// 9. P1：五段人话 summary
+const sm1 = A.summaryText({ summary: { "想干什么": "记住你爱吃火锅", "为什么": "你说过想我提醒", "影响": "只存文字" } });
+check("summary 有人话四行", sm1.includes("想干什么：") && sm1.includes("为什么：") && sm1.includes("影响：") && !sm1.includes("怎么改："), sm1);
+check("无 summary 回退空串", A.summaryText({ goal: "x" }) === "");
+
+// 10. P1：/提案 细节（用前文已作废的 sm_old）
+const det = A.proposalDetail("sm_old");
+check("提案细节含插件名与状态", det.includes("插件名：self") && det.includes("已过期"), det.slice(0, 60));
+check("提案细节查无此人", A.proposalDetail("nope").includes("没找到"));
+
+// 11. P1：同源去重
+check("nearDup 近义判重", A.nearDupSelf("帮我加个提醒功能", "帮我加一个提醒功能") === true);
+check("nearDup 无关不误伤", A.nearDupSelf("帮我加个提醒功能", "今天天气怎么样") === false);
+
+// 12. P1：过期主动清理
+{
+  // 直接往提案文件塞一条 30 小时前的 pending
+  const propFile = path.join(SELF, "selfmod-proposals.json");
+  let cur = [];
+  try { cur = JSON.parse(fs.readFileSync(propFile, "utf8")); } catch (e) {}
+  cur.push({ id: "sm_stale", ts: Date.now() - 30 * 3600e3, status: "pending", goal: "旧提案", name: "self-stale", code: "", caps: [], source: "auto" });
+  fs.writeFileSync(propFile, JSON.stringify(cur));
+  const changed = A.cleanExpiredProposals(Date.now() + 3600e3);
+  const after2 = JSON.parse(fs.readFileSync(propFile, "utf8"));
+  const st = after2.find((p) => p.id === "sm_stale");
+  check("过期提案被清理为 expired", changed === true && st.status === "expired", String(st && st.status));
+  // 节流：紧接着再跑不重复写
+  check("清理有节流", A.cleanExpiredProposals(Date.now() + 7200e3) === false);
+}
+
+// 13. P2：提案带 summary 的详情优先显示五段人话
+writeProposal({ id: "sm_sum", goal: "带说明的提案", name: "self-sum", summary: { "想干什么": "记住火锅", "为什么": "主人提过", "影响": "只存文字" } });
+const det2 = A.proposalDetail("sm_sum");
+check("详情优先显示五段", det2.includes("想干什么：记住火锅") && det2.includes("影响：只存文字"), det2.slice(0, 80));
+
+// 14. P2：批量批准（空格分隔两个 id）
+{
+  const two = [
+    { id: "sm_b1", ts: Date.now(), goal: "批量一", name: "self-batch1", code: codeSafe, caps: [], risk: "low", allow_send: false, status: "pending" },
+    { id: "sm_b2", ts: Date.now(), goal: "批量二", name: "self-batch2", code: codeSafe, caps: [], risk: "low", allow_send: false, status: "pending" },
+  ];
+  fs.writeFileSync(propFile, JSON.stringify(two));
+  const r = A.approveSelfMod("sm_b1 sm_b2");
+  check("批量批准返回两行", r.includes("已批准") && r.trim().split("\n").length === 2, r.slice(0, 80));
+  const after3 = JSON.parse(fs.readFileSync(propFile, "utf8"));
+  check("批量后两个都 approved", after3.every((p) => p.status === "approved"), after3.map((p) => p.status).join(","));
+}
+
+// 15. P2：月度配额计数
+check("本月提案计数 ≥1", A.proposalCountThisMonth() >= 1, String(A.proposalCountThisMonth()));
+
+// 16. P2：失败记录落盘（doctor 护栏循环的数据源）
+A.recordSelfFailure("self-broken", "测试目标", "测试原因");
+{
+  const ff = JSON.parse(fs.readFileSync(path.join(DATA, "selfmod-failures.json"), "utf8"));
+  check("失败记录写入", Array.isArray(ff) && ff.some((x) => x.name === "self-broken"), JSON.stringify(ff).slice(0, 80));
+}
+
+// 17. P2：sunset 检查不崩（30 天没用过的 self-* 会提醒）
+check("sunset 检查不崩", (A.checkSelfSunset(Date.now() + 25 * 3600e3), true));
 
 console.log(`\n通过 ${pass} / 失败 ${fail}`);
 try { fs.rmSync(SELF, { recursive: true, force: true }); } catch (e) {}

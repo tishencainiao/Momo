@@ -68,7 +68,7 @@ const core = {
   estimateTokens: () => 0,
   maybeCollect: () => {},
   qzoneHttp: async () => ({}),
-  bochaKey: () => "",
+  
   loadAppellations: () => ({}),
   saveAppellations: () => {},
   loadMute: () => ({}),

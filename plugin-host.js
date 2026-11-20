@@ -153,8 +153,7 @@ function createHost(core) {
     maybeCollect: (buf, desc) => core.maybeCollect(buf, desc),
     mimeOf: (buf) => { const v = apis.get("vision"); return v ? v.mimeOf(buf) : "image/png"; },
     qzoneHttp: (a, p) => core.qzoneHttp(a, p),
-    bochaSearch: (q, n, k) => { const s = apis.get("search"); if (!s) throw new Error("搜索插件未加载"); return s.bochaSearch(q, n, k); },
-    bochaKey: () => core.bochaKey(),
+    bingSearch: (q, n) => { const s = apis.get("search"); if (!s) throw new Error("搜索插件未加载"); return s.bingSearch(q, n); },
     formatResults: (q, rs) => { const s = apis.get("search"); if (!s) throw new Error("搜索插件未加载"); return s.formatResults(q, rs); },
     // 数据层（基础层）服务：内核保存状态，插件只管逻辑
     loadAppellations: () => core.loadAppellations(),
@@ -198,6 +197,22 @@ function createHost(core) {
 
   const pluginRecords = new Map();   // file -> { mod, tools:[], commands:[], hooks:{}, ctxProviders:[], apis:[] }
 
+  /* P2-b：self-* 插件用量计数落盘（sunset 下架的判据） */
+  function selfUsageFile() { return path.join(core.DATA_DIR, "self-plugin-usage.json"); }
+  function bumpSelfUsage(name, aliveOnly) {
+    try {
+      const f = selfUsageFile();
+      let u = {};
+      try { u = JSON.parse(fs.readFileSync(f, "utf8")); } catch (e) {}
+      const rec = u[name] || { calls: 0, lastUsed: 0 };
+      if (!aliveOnly) rec.calls = (rec.calls || 0) + 1;
+      rec.lastUsed = Date.now();
+      u[name] = rec;
+      fs.mkdirSync(path.dirname(f), { recursive: true });
+      fs.writeFileSync(f, JSON.stringify(u));
+    } catch (e) {}
+  }
+
   /* 卸载一个插件：把它注册过的工具/命令/钩子/上下文/能力全部摘掉 */
   function unregisterPlugin(file) {
     const rec = pluginRecords.get(file);
@@ -230,6 +245,19 @@ function createHost(core) {
     mod._file = file;
     const rec = { mod, tools: [], commands: [], hooks: {}, ctxProviders: [], apis: [] };
     plugins.push(mod);
+    /* P2-b：self-* 自建插件的用量计数（sunset 下架的判据）：工具被调就记一次 */
+    if (/^self-/.test(String(mod.name || ""))) {
+      for (const t of (mod.tools || [])) {
+        if (t && typeof t.handler === "function") {
+          const orig = t.handler;
+          t.handler = function (...args) {
+            try { bumpSelfUsage(mod.name); } catch (e) {}
+            return orig.apply(this, args);
+          };
+        }
+      }
+      try { bumpSelfUsage(mod.name, true); } catch (e) {}
+    }
     for (const t of (mod.tools || [])) {
       if (t && t.def && t.def.function && t.def.function.name) { toolRegistry.set(t.def.function.name, t); rec.tools.push(t.def.function.name); }
     }

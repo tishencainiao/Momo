@@ -182,6 +182,27 @@ function diagnose(opts) {
     if (level === "yellow") report.summary.yellowList.push(name || file);
   }
 
+  /* P2-c：失败→doctor 护栏循环——近 7 天有自改回滚就给进化层记黄牌（报警 SLO：不能攒着不看） */
+  try {
+    const failFile = path.join(pluginsDir, "..", "data", "selfmod-failures.json");
+    if (fs.existsSync(failFile)) {
+      const fails = JSON.parse(fs.readFileSync(failFile, "utf8"));
+      const weekAgo = Date.now() - 7 * 24 * 3600e3;
+      const recent = (Array.isArray(fails) ? fails : []).filter((x) => x && x.ts > weekAgo);
+      if (recent.length) {
+        const names = recent.map((x) => x.name).filter(Boolean);
+        report.plugins.push({
+          file: "(自改失败记录)", name: "（进化层自改）", version: "", displayName: "近期回滚记录",
+          enabled: true, level: "yellow",
+          issues: [{ level: "yellow", msg: `近 7 天有 ${recent.length} 次自建插件回滚：${names.slice(0, 5).join("、")}${names.length > 5 ? " 等" : ""}——失败在沉淀为护栏，别攒着（/提案 或 /回滚self 处理）` }],
+        });
+        report.summary.total++;
+        report.summary.yellow++;
+        report.summary.yellowList.push("（进化层自改）");
+      }
+    }
+  } catch (e) {}
+
   report.ok = report.summary.red === 0;
   return report;
 }
