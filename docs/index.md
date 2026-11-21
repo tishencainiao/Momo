@@ -24,6 +24,7 @@
 | [body-roadmap.md](body-roadmap.md) | 身体分批计划 + 未实现功能清单（防「还没做」当「做到了」） | 🤖 | 每批落地时 |
 | [report-center.md](report-center.md) | 「给主人的报告」怎么生成、发什么、何时发 | 🤖 | 改 report.js 时 |
 | [stability-baseline.md](stability-baseline.md) | 稳定性基线：8 项安全指标口径 + 24h 模拟时钟测试说明 | 🤖 | 改稳定性护栏/监测时 |
+| [v2.0.0-validation.md](v2.0.0-validation.md) | v2.0.0「事实与稳定性底座」验收矩阵（A01–A24）与交付状态 | 🤖 | 版本大里程碑验收时 |
 | [roles-and-permissions.md](roles-and-permissions.md) | 角色/权限/参数级权限约定 | 🤖 | 改权限判断时 |
 
 ### 指南（怎么做 · 流程/规范）

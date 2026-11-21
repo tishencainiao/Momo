@@ -43,30 +43,67 @@ const CLAIM_VERB_ACTIONS = {
   "删": ["todo_del", "reminder_del", "memory_forget"],
   "订": ["reminder_add", "todo_add"],
 };
-function verifyClaim(text, usedTools, outcomes) {
+/* WP3（v2.0.0）：凭据必须按作用域匹配——同一用户同一上下文才背书；
+ * 副作用动词（存/记/发/加/改/关/开/删/订）的中凭据还要求 ToolOutcome 带有效 action_key（最小接线）；
+ * 只读动词（搜/查）的 succeeded ToolOutcome 可支持只读自述。 */
+const SIDE_EFFECT_VERBS = new Set(["存", "记", "发", "加", "改", "关", "开", "删", "订"]);
+function scopeMatch(a, s) {
+  const u = Number((a && a.userId) || 0);
+  const t = Number((s && s.userId) || 0);
+  if (!t) return false;   // A12：缺少当前用户作用域（如直发载荷漏 userId）时，任何旧凭据都不得为具体用户背书
+  if (u !== t) return false;
+  if ((s && s.channel) === "group") {
+    return (a && a.channel) === "group" && Number((a && a.groupId) || 0) === Number((s && s.groupId) || 0);
+  }
+  /* 私聊上下文：只认「同人 + 非群内动作 + 非群作用域」的凭据（群里的动作不能为私聊自述背书） */
+  return (a && a.channel) !== "group" && (Number((a && a.groupId) || 0) === 0);
+}
+/* A13：成功判定 status 优先——succeeded 直接算成功；verified 必须 ok===true；
+ * 只有完全没有 status 的旧格式行才允许单独用 ok:true；
+ * failed/unknown/proposed/cancelled 即使带 ok:true 也一律拒绝。 */
+function isSuccessRow(a) {
+  if (!a) return false;
+  if (a.status === "succeeded") return true;
+  if (a.status === "verified") return a.ok === true;
+  if (a.status === undefined || a.status === null || a.status === "") return a.ok === true;
+  return false;
+}
+/* A14：副作用自述的 action_key 必须在行动流水中找到「同 key + 同作用域 + 成功状态」的闭环节点，
+ * 随机非空字符串不得放行。 */
+function validActionKey(key, scope) {
+  const k = String(key || "");
+  if (!k) return false;
+  let acts = [];
+  try { acts = (_ctx && _ctx.loadActions ? _ctx.loadActions(200) : []) || []; } catch (e) { return false; }
+  const cutoff = Date.now() - 60 * 60000;
+  return acts.some((a) => a && a.ts >= cutoff && String(a.key || "") === k && isSuccessRow(a) && scopeMatch(a, scope));
+}
+function verifyClaim(text, usedTools, outcomes, scope) {
   const m = String(text || "").match(CLAIM_RE);
   if (!m) return { ok: true, text };
   const verb = m[1];
   const want = CLAIM_VERB_ACTIONS[verb] || [];
   const wantL = want.map((w) => w.toLowerCase());
   const tools = (usedTools || []).map((t) => String(t).toLowerCase());
-  /* 强凭据：行动流水里 60 分钟内真有 succeeded/verified 记录（proposed/cancelled/failed/unknown 不算） */
+  const s = scope || {};
+  /* 强凭据：行动流水里 60 分钟内真有 succeeded/verified(ok:true)/ok:true，且作用域匹配当前用户+当前上下文 */
   let acts = [];
   try { acts = (_ctx.loadActions ? _ctx.loadActions(40) : []) || []; } catch (e) {}
   const cutoff = Date.now() - 60 * 60000;
-  const hit = acts.find((a) => a && a.ts >= cutoff && (a.status === "succeeded" || a.status === "verified" || a.ok === true) && wantL.some((w) => String(a.action || "").toLowerCase().includes(w)));
+  const hit = acts.find((a) => a && a.ts >= cutoff && isSuccessRow(a) && wantL.some((w) => String(a.action || "").toLowerCase().includes(w)) && scopeMatch(a, s));
   if (hit) return { ok: true, text };
-  /* 中凭据：本轮结构化 ToolOutcome 明确 succeeded（工具真的返回了成功） */
-  const oHit = (outcomes || []).find((o) => o && o.status === "succeeded" && wantL.some((w) => String(o.tool || "").toLowerCase().includes(w)));
+  /* 中凭据：本轮结构化 ToolOutcome 明确 succeeded，作用域匹配；副作用自述还要求 action_key 能在账本闭环 */
+  const isSideEffect = SIDE_EFFECT_VERBS.has(verb);
+  const oHit = (outcomes || []).find((o) => o && o.status === "succeeded" && wantL.some((w) => String(o.tool || "").toLowerCase().includes(w)) && scopeMatch(o, s) && (!isSideEffect || validActionKey(o.action_key, s)));
   if (oHit) return { ok: true, text };
   /* 弱凭据：usedTools 只说明「工具被叫过」，不知道成败 → 不再单独充当成功凭据 */
   const weak = wantL.some((w) => tools.includes(w));
   const fix = "（我先翻了自己的记录——刚才这句先收回，我好像还没真正做成这件事，别算我的功劳）";
-  _ctx.log("warn", `行动自述校验：声称「${m[0]}」但行动流水与 ToolOutcome 都无成功凭据（工具台账${weak ? "仅弱匹配" : "无匹配"}）→ 已附自我纠正`);
+  _ctx.log("warn", `行动自述校验：声称「${m[0]}」但行动流水与 ToolOutcome 都无作用域匹配的成功凭据（工具台账${weak ? "仅弱匹配" : "无匹配"}）→ 已附自我纠正`);
   return { ok: false, text: String(text).replace(m[0], m[0] + fix) };
 }
 
-function auditReply(text, usedTools, outcomes) {
+function auditReply(text, usedTools, outcomes, scope) {
   const src = String(text || "");
   if (!src) return { text: src, blocked: false };
   try {
@@ -79,8 +116,8 @@ function auditReply(text, usedTools, outcomes) {
       enabled: enabledFlag(),
     });
     if (!res.blocked) {
-      /* 阶段一：吹牛表没命中时，再做「动作自述 ↔ 行动凭据」校验 */
-      const v = verifyClaim(src, usedTools, outcomes);
+      /* 阶段一：吹牛表没命中时，再做「动作自述 ↔ 行动凭据（按作用域）」校验 */
+      const v = verifyClaim(src, usedTools, outcomes, scope);
       return { text: v.text, blocked: false };
     }
     _ctx.log("warn", `审计拦截：声称「${res.hit.phrase}」（${res.hit.label}），本轮工具台账=[${(usedTools || []).join(",")}] → 已替换成如实说明`);
@@ -93,8 +130,8 @@ function auditReply(text, usedTools, outcomes) {
 module.exports = {
   name: "audit-service",
   displayName: "审计服务（框架）",
-  version: "1.0.0",
-  description: "输出前吹牛审计：把「做不到的能力」说法改写成如实说明（before_send 钩子）",
+  version: "1.2.0",
+  description: "输出前吹牛审计：把「做不到的能力」说法改写成如实说明（before_send 钩子）；动作自述按作用域+状态优先级校验行动凭据（A12-A14）",
   system: true,
   userScoped: false,
   engines: { kernel: ">=1.96.1" },
@@ -107,15 +144,16 @@ module.exports = {
   },
   apiSpec: {
     audit: {
-      auditReply: { input: "text, usedTools[]", output: "{text, blocked, label?}", sideEffect: "可能写反思（拦下时）" },
+      auditReply: { input: "text, usedTools[], outcomes[], scope{userId,channel,groupId}", output: "{text, blocked, label?}", sideEffect: "可能写反思（拦下时）" },
     },
   },
   hooks: {
     before_send: (p) => {
       /* private=私聊回话；proactive=主动搭话（也是私聊发送）；group/pet 不在审计范围 */
       if (!p || (p.channel !== "private" && p.channel !== "proactive")) return;
-      const r = auditReply(p.text, p.usedTools || [], p.outcomes || []);
+      const r = auditReply(p.text, p.usedTools || [], p.outcomes || [], { userId: p.userId || 0, channel: p.channel, groupId: p.groupId || 0 });
       p.text = r.text;
     },
   },
+  __test: { verifyClaim, auditReply, scopeMatch, isSuccessRow, validActionKey, CLAIM_RE, SIDE_EFFECT_VERBS },
 };

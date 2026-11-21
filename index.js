@@ -77,6 +77,7 @@ function tryBeginAction(meta) {
       status: "running",
       channel: m.channel || "",
       userId: m.userId || 0,
+      groupId: m.groupId || 0,
       requestedBy: m.requestedBy || "",
       started_at: now,
       ts: now,
@@ -106,6 +107,7 @@ function beginAction(meta) {
       status: "running",
       channel: m.channel || (prev && prev.channel) || "",
       userId: m.userId || (prev && prev.userId) || 0,
+      groupId: m.groupId || (prev && prev.groupId) || 0,
       requestedBy: m.requestedBy || (prev && prev.requestedBy) || "",
       started_at: now,
       ts: prev ? prev.ts : now,
@@ -125,7 +127,7 @@ function proposeAction(meta) {
   try {
     const st = loadActionState();
     st.open = st.open || {};
-    st.open[key] = { action: m.action || "action", status: "proposed", channel: m.channel || "", userId: m.userId || 0, requestedBy: m.requestedBy || "", started_at: 0, ts: now, idemKey: key };
+    st.open[key] = { action: m.action || "action", status: "proposed", channel: m.channel || "", userId: m.userId || 0, groupId: m.groupId || 0, requestedBy: m.requestedBy || "", started_at: 0, ts: now, idemKey: key };
     saveActionState(st);
     recordAction({ action: m.action || "action", status: "proposed", key, channel: m.channel || "", userId: m.userId || 0, ok: false, detail: m.detail || "" });
   } catch (e) { try { log("warn", "proposeAction 失败: " + String(e.message).slice(0, 80)); } catch (e2) {} }
@@ -138,7 +140,7 @@ function cancelAction(key, reason) {
     const st = loadActionState();
     const op = (st.open && st.open[key]) || null;
     if (!op) return false;
-    recordAction({ action: op.action, status: "cancelled", key: String(key), channel: op.channel, userId: op.userId, ok: false, error: reason ? String(reason).slice(0, 120) : "已取消", finished_at: Date.now() });
+    recordAction({ action: op.action, status: "cancelled", key: String(key), channel: op.channel, userId: op.userId, groupId: op.groupId, ok: false, error: reason ? String(reason).slice(0, 120) : "已取消", finished_at: Date.now() });
     delete st.open[key];
     saveActionState(st);
     return true;
@@ -190,7 +192,7 @@ function endAction(key, res) {
       result_summary: r.summary ? String(r.summary).slice(0, 120) : "",
       verified: r.verified === true,
       finished_at: Date.now(),
-    }, op ? { channel: op.channel, userId: op.userId, requestedBy: op.requestedBy } : {}));
+    }, op ? { channel: op.channel, userId: op.userId, groupId: op.groupId, requestedBy: op.requestedBy } : {}));
     if (op) { delete st.open[key]; saveActionState(st); }
     /* 内联验证（工具返回即带凭据的场景）→ 补一条独立 verified 行 */
     if (r.verified === true) verifyAction(key, { ok: true, eventId: r.verification_event_id, summary: r.summary });
@@ -206,10 +208,10 @@ function reconcileOpenActions() {
     for (const k of keys) {
       const op = open[k];
       if (op.status === "proposed") {
-        recordAction({ action: op.action, status: "cancelled", key: k, channel: op.channel, userId: op.userId, requestedBy: op.requestedBy, ok: false, error: "restart：计划尚未执行，安全取消", finished_at: Date.now() });
+        recordAction({ action: op.action, status: "cancelled", key: k, channel: op.channel, userId: op.userId, groupId: op.groupId, requestedBy: op.requestedBy, ok: false, error: "restart：计划尚未执行，安全取消", finished_at: Date.now() });
         try { log("info", `重启对账：计划「${op.action}」（${k}）未执行 → cancelled`); } catch (e) {}
       } else {
-        recordAction({ action: op.action, status: "unknown", key: k, channel: op.channel, userId: op.userId, requestedBy: op.requestedBy, ok: false, error: "restart：中断后结果不明，已标记 unknown（不重放）", finished_at: Date.now() });
+        recordAction({ action: op.action, status: "unknown", key: k, channel: op.channel, userId: op.userId, groupId: op.groupId, requestedBy: op.requestedBy, ok: false, error: "restart：中断后结果不明，已标记 unknown（不重放）", finished_at: Date.now() });
         try { log("warn", `重启对账：行动「${op.action}」（${k}）结果不明 → unknown，不自动重放`); } catch (e) {}
       }
     }
@@ -268,7 +270,7 @@ function logBoundedJsonl(file, obj, maxBytes, keepLines) {
 }
 /* 阶段1：结构化工具结果流水（ToolOutcome 第一批；统一健康快照/感知事件的数据源） */
 function logToolOutcome(tool, status, summary, userId, channel, extra) {
-  const e = { tool, status, summary: String(summary || "").slice(0, 120), userId, channel: channel || "private", action_key: (extra && extra.actionKey) || null, verification_event_id: (extra && extra.eventId) || null };
+  const e = { tool, status, summary: String(summary || "").slice(0, 120), userId, channel: channel || "private", groupId: (extra && extra.groupId) || 0, petMode: !!(extra && extra.petMode), action_key: (extra && extra.actionKey) || null, verification_event_id: (extra && extra.eventId) || null };
   logBoundedJsonl("tool-outcomes.jsonl", e, 256 * 1024, 300);
   return e;   // 返回条目，供本轮 before_send 审计消费
 }
@@ -347,7 +349,7 @@ const { STYLE_DIRECTIVE, GROUP_DIRECTIVE, SITUATION_QQ, SITUATION_DESKTOP, situa
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.99.10";
+const BASE_VERSION = "2.0.0";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -1275,6 +1277,7 @@ async function agentChatOnce(history, userText, pctx) {
       for (const tc of msg.tool_calls) {
         let result = "（工具执行失败）";
         let _toolOk = null;   // 结构化结果：null=旧字符串黑名单判定；true/false=工具自报 ok（审计只认明确成功）
+        let _toolExtra = null;   // 结构化结果附带的行动关联：{actionKey, eventId}（WP3：副作用凭据最小接线）
         if (!toolAllowed(userId, tc.function.name, _extraInfo && _extraInfo.groupId ? "group" : undefined)) {
           result = "（这个功能只有主人能用哦～你自然婉拒对方，别答应也别假装做了）";
           messages.push({ role: "tool", tool_call_id: tc.id, content: result });
@@ -1289,6 +1292,9 @@ async function agentChatOnce(history, userText, pctx) {
             if (r && typeof r === "object" && !Array.isArray(r) && (("ok" in r) || ("text" in r))) {
               result = String(r.text == null ? (r.ok === false ? "（工具执行失败）" : "（已完成）") : r.text);
               _toolOk = r.ok !== false;
+              /* WP3：工具结构化返回可携带行动关联（actionKey/action_key、eventId/verification_event_id），
+               * 供 logToolOutcome 落盘、audit-service 做副作用凭据最小接线 */
+              _toolExtra = { actionKey: r.actionKey || r.action_key || null, eventId: r.eventId || r.verificationEventId || r.verification_event_id || null };
             } else {
               result = String(r == null ? "（已完成）" : r);
             }
@@ -1335,11 +1341,11 @@ async function agentChatOnce(history, userText, pctx) {
         if (_toolOk === true) _usedTools.push(tc.function.name);
         else if (_toolOk !== false && _rStr && _rStr.indexOf("工具执行失败") < 0 && _rStr.indexOf("只有主人能用") < 0 && _rStr.indexOf("【失败】") < 0) _usedTools.push(tc.function.name);
         /* 阶段1：结构化工具结果流水（ToolOutcome 第一批）——供健康快照/感知事件消费 */
-        _outcomes.push(logToolOutcome(tc.function.name, _toolOk === true ? "succeeded" : (_toolOk === false ? "failed" : "unknown"), _rStr, userId, (pctx && pctx.channel) || "private"));
+        _outcomes.push(logToolOutcome(tc.function.name, _toolOk === true ? "succeeded" : (_toolOk === false ? "failed" : "unknown"), _rStr, userId, (pctx && pctx.channel) || "private", Object.assign({ groupId: (_extraInfo && _extraInfo.groupId) || 0, petMode: !!(_extraInfo && _extraInfo.petMode) }, _toolExtra || {})));
         messages.push({ role: "tool", tool_call_id: tc.id, content: result });
       }
     } else {
-      const _bs = { text: String(msg.content || ""), channel: (pctx && pctx.channel) || "private", usedTools: _usedTools, outcomes: _outcomes };
+      const _bs = { text: String(msg.content || ""), channel: (pctx && pctx.channel) || "private", userId: userId || 0, groupId: (_extraInfo && _extraInfo.groupId) || 0, usedTools: _usedTools, outcomes: _outcomes };
       if (host && host.runBeforeSend) host.runBeforeSend(_bs);
       return { reply: _bs.text, stickers };
     }
@@ -1348,7 +1354,7 @@ async function agentChatOnce(history, userText, pctx) {
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].role === "assistant" && messages[i].content) { lastText = messages[i].content; break; }
   }
-  const _bs2 = { text: lastText, channel: (pctx && pctx.channel) || "private", usedTools: _usedTools, outcomes: _outcomes };
+  const _bs2 = { text: lastText, channel: (pctx && pctx.channel) || "private", userId: userId || 0, groupId: (_extraInfo && _extraInfo.groupId) || 0, usedTools: _usedTools, outcomes: _outcomes };
   if (host && host.runBeforeSend) host.runBeforeSend(_bs2);
   return { reply: _bs2.text, stickers };
 }
@@ -1393,7 +1399,7 @@ async function recordAndSend(userId, text, skipAudit) {
   /* 阶段一回归：直发路径（如心流 share_fun）也过审计；经 agentChatOnce 的调用方传 skipAudit=true 防双审 */
   let _out = String(text || "");
   if (!skipAudit) {
-    const _bs = { text: _out, channel: "private", usedTools: [] };
+    const _bs = { text: _out, channel: "private", userId: userId || 0, usedTools: [] };
     if (host && host.runBeforeSend) host.runBeforeSend(_bs);
     _out = _bs.text;
   }

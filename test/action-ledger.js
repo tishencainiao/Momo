@@ -385,9 +385,11 @@ check("qzone.js 成功后 verifyAction（tid 回执，与终态分开）", () =>
   assert.ok(q.includes("verifyAction(_k, { ok: true, eventId: _tid"));
   assert.ok(q.includes("summary: \"QQ 空间发布回执（tid）确认\""));
 });
-check("audit-service 凭据只认 succeeded/verified（proposed 等不算）", () => {
+check("audit-service 凭据：isSuccessRow 状态优先级 + validActionKey 查账本（Kimi 六缺口 A13/A14）", () => {
   const a = fs.readFileSync(path.join(__dirname, "..", "plugins", "audit-service.js"), "utf8");
-  assert.ok(a.includes("a.status === \"succeeded\" || a.status === \"verified\" || a.ok === true"));
+  assert.ok(a.includes("isSuccessRow"), "成功判定收敛为 isSuccessRow（A13）");
+  assert.ok(a.includes("validActionKey"), "副作用 action_key 必须查账本（A14）");
+  assert.ok(a.includes("!isSideEffect || validActionKey(o.action_key, s)"), "副作用凭据必须能在账本闭环");
 });
 check("reminders.js 接线：未到期不 propose，到期 tryBegin→await 发送→成功才 endAction", () => {
   const r = fs.readFileSync(path.join(__dirname, "..", "plugins", "reminders.js"), "utf8");
@@ -418,6 +420,10 @@ check("Kimi 三轮：usedTools 结构化 ok，审计只认明确成功", () => {
   assert.ok(idx.includes("_toolOk = r.ok !== false"), "插件工具支持 {text,ok} 结构化结果");
   assert.ok(idx.includes("_toolOk = false"), "搜索不可用/无表情包/异常 按失败计");
   assert.ok(idx.includes("if (_toolOk === true) _usedTools.push"), "只推明确成功");
+});
+check("Kimi 六缺口 A12：recordAndSend 直发审计载荷带真实 userId（旧无主凭据不背书）", () => {
+  const idx = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
+  assert.ok(idx.includes('channel: "private", userId: userId || 0, usedTools: []'), "直发载荷补 userId，scope 缺 userId 时审计不背书");
 });
 check("Kimi 三轮：qzone 日报幂等命中不标记「今天已发」", () => {
   const q = fs.readFileSync(path.join(__dirname, "..", "plugins", "qzone.js"), "utf8");

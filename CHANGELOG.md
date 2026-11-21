@@ -22,8 +22,9 @@
 > v1.46.2 起按月份拆分：明细在 `docs/changelog/<年>-<月>.md`，本文件只留规则与索引。
 > 较早版本的完整正文可直接读对应月份文件，或 `git log`。
 
-### 2026-11（139 个版本）→ [docs/changelog/2026-11.md](docs/changelog/2026-11.md)
+### 2026-11（140 个版本）→ [docs/changelog/2026-11.md](docs/changelog/2026-11.md)
 
+| v2.0.0 | 2026-11-21 | 「事实与稳定性底座」（Kimi v2.0.0 总计划 WP0–WP6 全量落地）：WP1 感知作用域闭环（新事件缺作用域拒绝、私聊/群/桌宠三分、旧数据 payload 推导+legacy_unscoped 隔离）；WP2 感知消费完整性（半行保留消费、event_id/observed_at/valid_until、行哈希防重）；WP3 行动凭据按作用域（群流水只为同群自述背书、私聊/群互不背书、无 userId 旧流水不背书、副作用 ToolOutcome 需 action_key）；WP4 健康覆盖感知故障（perception 暴露健康信号、fresh 快照过期自动降级 stale、工具失败可恢复）；WP5 全链路回归（81 测试 0 失败）；WP6 文档冻结（验收矩阵 A01–A24 全绿，docs/v2.0.0-validation.md）。预发布热修：必应字典退化检测放宽（search v1.2.0，标题/摘要独立窗口+过半判定，修「王洋律师 离谱 案件」类多词查询退化成单字字典页）。Kimi 复核返修（六缺口）：A02 群缺 groupId 感知失败关闭（perception v1.5.0）；A12 直发审计载荷补真实 userId+审计拒无主 scope（audit v1.2.0）；A13 isSuccessRow 状态优先级（failed+ok:true 拒绝）；A14 action_key 必须账本闭环；A19 感知写入失败抛错不推进 offset、恢复后补回且恰好一次（解析坏行计数进健康信号、错误不含消息正文，perception v1.5.1）；A20 工具健康按每工具最新结果判定（health v1.2.0） |
 | v1.99.10 | 2026-11-21 | 阶段0+1（Kimi 远期路线）：稳定性基线报告 docs/stability-baseline.md + 24h 模拟时钟测试 test/stability-sim.js（11 场景：重启对账/提醒失败重试/主动门禁/预算耗尽/身体离线/并发同文/跨天恢复）+ 健康快照框架服务 health（/体检，ws/身体/嵌入/预算/账本/工具六源探活，进程活着≠能力可用）+ 感知事件框架服务 perception（user_report/system_observation/tool_result 三源归一 tail 消费，model_inference 仅声明；/感知 命令）+ 工具结果流水 tool-outcomes.jsonl（256KB 有界）+ OneBot wsStatus 暴露；Kimi 返修加固：感知事件按 actor_scope/privacy_scope 隔离（两用户两群互不可见，system 全局）+ 用户陈述改 reported 口径 + consumeTail 哈希防重（同毫秒不丢事件）+ ToolOutcome 带 action_key/verification_event_id 并传入 before_send（usedTools 降级为弱匹配）+ 健康三误判修正（embed 函数调用/账本损坏 unknown/全 unknown 工具 stale）+ 基线证据修正 |
 | v1.99.9 | 2026-11-21 | 行动账本加固（Kimi 二轮+三轮返修）：tryBeginAction 并发占用语义 + 并发同文只发一次 + 发空间 24h 同内容幂等去重 + 提醒到期执行等发送结果（失败不写成功凭据、可重试、未到期不进 open 不随重启取消）+ 发送结果语义化（succeeded/duplicate_succeeded/running/failed/unknown，同键并发共享同一 Promise 真实结果）+ 失败消息不写会话历史 + 主动搭话/心智分享消费发送结果 + usedTools 结构化 ok 判定 + 生活日志过滤 verified/proposed/cancelled + 空间日报幂等命中不标记已发 |
 | v1.99.8 | 2026-11-21 | Kimi 三轮+四轮返修：完全相同记忆按 from 隔离（含完全重复）、移除伪 topic 上限、文件写入路径规范化+生成器上下文对齐、silenceStreak 跨天清零顺序修复（evaluateSilenceState 统一门禁纯函数）+ 投喂台词与测试路径收尾 |

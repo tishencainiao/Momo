@@ -144,6 +144,68 @@ check("返修：工具流水全 unknown → tools stale，不得显示正常", a
   assert.ok((tools.evidence || "").includes("结果不明"), "证据应提示结果不明：" + JSON.stringify(tools));
 });
 
+check("WP4：感知健康信号 → perception fresh / offline / unknown", async () => {
+  const freshCtx = mkCtx({
+    getApi: (ns) => (ns === "perception" ? { health: () => ({ lastOkAt: Date.now() - 1000, lastErrAt: 0, lastError: "" }) } : null),
+  });
+  mod.init(freshCtx);
+  await mod.__test.probe();
+  assert.strictEqual(mod.__test.allSnapshot().find((x) => x.name === "perception").status, "fresh");
+  const offCtx = mkCtx({
+    getApi: (ns) => (ns === "perception" ? { health: () => ({ lastOkAt: 0, lastErrAt: Date.now() - 1000, lastError: "messages.jsonl 读取失败" }) } : null),
+  });
+  mod.init(offCtx);
+  await mod.__test.probe();
+  const p = mod.__test.allSnapshot().find((x) => x.name === "perception");
+  assert.strictEqual(p.status, "offline", "感知报错必须判 offline，got: " + JSON.stringify(p));
+  assert.ok((p.evidence || "").includes("读取失败"), "应带错误信息：" + JSON.stringify(p));
+  mod.init(mkCtx());
+  await mod.__test.probe();
+  assert.strictEqual(mod.__test.allSnapshot().find((x) => x.name === "perception").status, "unknown");
+});
+
+check("WP4：fresh 快照过期 → 降级 stale（不保留过期 fresh）", async () => {
+  mod.init(mkCtx());
+  await mod.__test.probe();
+  let one = mod.__test.allSnapshot().find((x) => x.name === "onebot");
+  assert.strictEqual(one.status, "fresh");
+  mod.__test._snap.onebot.updatedAt = Date.now() - mod.__test.SNAP_STALE_MS - 60000;
+  one = mod.__test.allSnapshot().find((x) => x.name === "onebot");
+  assert.strictEqual(one.status, "stale", "过期 fresh 必须降级 stale，got: " + JSON.stringify(one));
+  assert.ok((one.evidence || "").includes("快照过期"), "应注明快照过期：" + JSON.stringify(one));
+});
+
+check("A20：工具健康按每工具最新结果判断恢复", async () => {
+  /* 同一工具先失败后成功：保留 [failed, succeeded] 两条记录 → 该工具已恢复 → fresh */
+  const outcomes = [
+    { ts: Date.now() - 300000, tool: "web_search", status: "failed" },
+    { ts: Date.now() - 60000, tool: "web_search", status: "succeeded" },
+  ];
+  mod.init(mkCtx({ loadToolOutcomes: () => outcomes }));
+  await mod.__test.probe();
+  let t = mod.__test.allSnapshot().find((x) => x.name === "tools");
+  assert.strictEqual(t.status, "fresh", "同工具最新 succeeded 应判 fresh（保留失败记录），got: " + JSON.stringify(t));
+  /* A 工具失败、B 工具成功：不能把 A 算恢复 */
+  const mixed = [
+    { ts: Date.now() - 300000, tool: "web_search", status: "failed" },
+    { ts: Date.now() - 60000, tool: "weather", status: "succeeded" },
+  ];
+  mod.init(mkCtx({ loadToolOutcomes: () => mixed }));
+  await mod.__test.probe();
+  t = mod.__test.allSnapshot().find((x) => x.name === "tools");
+  assert.strictEqual(t.status, "degraded", "A 失败 B 成功不能算 A 恢复，got: " + JSON.stringify(t));
+  /* 最新结果 unknown：仍不得显示 fresh */
+  const unk = [
+    { ts: Date.now() - 300000, tool: "web_search", status: "succeeded" },
+    { ts: Date.now() - 60000, tool: "web_search", status: "unknown" },
+  ];
+  mod.init(mkCtx({ loadToolOutcomes: () => unk }));
+  await mod.__test.probe();
+  t = mod.__test.allSnapshot().find((x) => x.name === "tools");
+  assert.strictEqual(t.status, "stale", "最新 unknown 不得显示 fresh，got: " + JSON.stringify(t));
+  assert.ok(!(t.evidence || "").includes("全部成功"), "文案不得称全部成功：" + JSON.stringify(t));
+});
+
 check("contextProvider：全 fresh/unknown 不注入；有异常才注入", async () => {
   const bodyApi = { status: async () => ({ data: { ok: true, pid: 1, visible: true } }) };
   const c2 = mkCtx({
