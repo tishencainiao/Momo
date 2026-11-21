@@ -74,8 +74,10 @@ function lifeCtx() {
   const recentBuzz = buzz.slice(-2).map((x) => `「${String(x.title || "").slice(0, 24)}」${String(x.view || "").slice(0, 40)}`).filter(Boolean);
   if (recentBuzz.length) out.push("最近刷到的热搜：" + recentBuzz.join("；"));
   // 8. 今天替谁做过什么（统一操作记录，含「谁要求的」）
-  const acts8 = readJsonl(path.join(_ctx.DATA_DIR, "actions.jsonl"), 40)
-    .filter((x) => now - (x.ts || 0) < 24 * 3600e3 && x.ok !== false);
+  // 行动账本口径：只按「行动」聚合一次——验证凭据（verified）不单独算一次行动；
+  // proposed/cancelled/failed/unknown 一律不进「做过」清单。
+  const acts8 = readJsonl(path.join(_ctx.DATA_DIR, "actions.jsonl"), 60)
+    .filter((x) => now - (x.ts || 0) < 24 * 3600e3 && x.ok !== false && x.status !== "verified");
   if (acts8.length) {
     const desc = acts8.slice(-4).map((a) => {
       const what = ACTION_LABEL[a.action] || a.action;
@@ -101,14 +103,17 @@ const ACTION_LABEL = {
 
 /* 查最近做过什么（含谁要求的） */
 function actionLogText(limit) {
-  const arr = readJsonl(path.join(_ctx.DATA_DIR, "actions.jsonl"), 200).slice(-(limit || 8)).reverse();
+  /* 行动账本口径：verified/proposed/cancelled 是同一行动的伴随记录，不单列，
+   * 避免一次发空间被展示成多次生活经历；只留终态行与旧格式行。 */
+  const arr = readJsonl(path.join(_ctx.DATA_DIR, "actions.jsonl"), 200).slice(-(limit || 8)).reverse()
+    .filter((a) => a.status !== "verified" && a.status !== "proposed" && a.status !== "cancelled");
   if (!arr.length) return "（最近还没做过什么需要记录的事）";
   return "【最近做过的事】\n" + arr.map((a) => {
     const t = a.ts ? new Date(a.ts).toLocaleString("zh-CN") : "";
     const what = ACTION_LABEL[a.action] || a.action;
     const tgt = a.target ? `「${_ctx.resolveCall(a.target)}」` : "";
     const by = a.by ? `${_ctx.resolveCall(a.by)}让的` : "我自己想的";
-    const ok = a.ok === false ? "（失败）" : "";
+    const ok = a.ok === false ? (a.status === "unknown" ? "（结果不明）" : "（失败）") : "";
     return `${t} ${what}${tgt} —— ${by}${ok}${a.detail ? "：" + a.detail : ""}`;
   }).join("\n");
 }

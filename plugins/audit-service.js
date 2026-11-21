@@ -26,7 +26,47 @@ function addOverclaimReflection(capability, saidText) {
   } catch (e) {}
 }
 
-function auditReply(text, usedTools) {
+/* 阶段一：动作自述 ↔ 行动凭据 校验。
+ * 声称「我刚(帮你)做了X」时，先查本轮工具台账（usedTools），再查最近行动流水（loadActions），
+ * 都查不到 → 认为是虚假成功自述，附上自我纠正（不删原话，由她说人话收回）。 */
+const CLAIM_RE = /(?:我刚|我已经|刚刚|刚才)(?:帮你?|给你?|替[你他她]|帮主人)?(搜|查|存|记|发|加|改|关|开|删|订)(?:了|过|好了)/;
+const CLAIM_VERB_ACTIONS = {
+  "搜": ["search", "web_search", "bing", "bingSearch"],
+  "查": ["search", "web_search", "bing", "weather", "balance", "look"],
+  "存": ["memory_edit", "memory_add", "memory_save", "save"],
+  "记": ["memory_edit", "memory_add", "remember", "todo_add", "reminder_add"],
+  "发": ["send", "qzone_post", "forward", "sticker_sent", "report_day", "report_week", "report_month", "proactive"],
+  "加": ["todo_add", "reminder_add", "memory_add", "hobby_add"],
+  "改": ["memory_edit", "settings_set", "selfmodify_approve"],
+  "关": ["settings_set", "dnd_on"],
+  "开": ["settings_set", "dnd_off"],
+  "删": ["todo_del", "reminder_del", "memory_forget"],
+  "订": ["reminder_add", "todo_add"],
+};
+function verifyClaim(text, usedTools, outcomes) {
+  const m = String(text || "").match(CLAIM_RE);
+  if (!m) return { ok: true, text };
+  const verb = m[1];
+  const want = CLAIM_VERB_ACTIONS[verb] || [];
+  const wantL = want.map((w) => w.toLowerCase());
+  const tools = (usedTools || []).map((t) => String(t).toLowerCase());
+  /* 强凭据：行动流水里 60 分钟内真有 succeeded/verified 记录（proposed/cancelled/failed/unknown 不算） */
+  let acts = [];
+  try { acts = (_ctx.loadActions ? _ctx.loadActions(40) : []) || []; } catch (e) {}
+  const cutoff = Date.now() - 60 * 60000;
+  const hit = acts.find((a) => a && a.ts >= cutoff && (a.status === "succeeded" || a.status === "verified" || a.ok === true) && wantL.some((w) => String(a.action || "").toLowerCase().includes(w)));
+  if (hit) return { ok: true, text };
+  /* 中凭据：本轮结构化 ToolOutcome 明确 succeeded（工具真的返回了成功） */
+  const oHit = (outcomes || []).find((o) => o && o.status === "succeeded" && wantL.some((w) => String(o.tool || "").toLowerCase().includes(w)));
+  if (oHit) return { ok: true, text };
+  /* 弱凭据：usedTools 只说明「工具被叫过」，不知道成败 → 不再单独充当成功凭据 */
+  const weak = wantL.some((w) => tools.includes(w));
+  const fix = "（我先翻了自己的记录——刚才这句先收回，我好像还没真正做成这件事，别算我的功劳）";
+  _ctx.log("warn", `行动自述校验：声称「${m[0]}」但行动流水与 ToolOutcome 都无成功凭据（工具台账${weak ? "仅弱匹配" : "无匹配"}）→ 已附自我纠正`);
+  return { ok: false, text: String(text).replace(m[0], m[0] + fix) };
+}
+
+function auditReply(text, usedTools, outcomes) {
   const src = String(text || "");
   if (!src) return { text: src, blocked: false };
   try {
@@ -38,7 +78,11 @@ function auditReply(text, usedTools) {
       triggers: cap.limitTriggers(),
       enabled: enabledFlag(),
     });
-    if (!res.blocked) return { text: src, blocked: false };
+    if (!res.blocked) {
+      /* 阶段一：吹牛表没命中时，再做「动作自述 ↔ 行动凭据」校验 */
+      const v = verifyClaim(src, usedTools, outcomes);
+      return { text: v.text, blocked: false };
+    }
     _ctx.log("warn", `审计拦截：声称「${res.hit.phrase}」（${res.hit.label}），本轮工具台账=[${(usedTools || []).join(",")}] → 已替换成如实说明`);
     try { cap.noteOverclaim(res.hit.label, res.hit.phrase); } catch (e) {}
     addOverclaimReflection(res.hit.label, src.slice(0, 60));
@@ -68,8 +112,9 @@ module.exports = {
   },
   hooks: {
     before_send: (p) => {
-      if (!p || p.channel !== "private") return;
-      const r = auditReply(p.text, p.usedTools || []);
+      /* private=私聊回话；proactive=主动搭话（也是私聊发送）；group/pet 不在审计范围 */
+      if (!p || (p.channel !== "private" && p.channel !== "proactive")) return;
+      const r = auditReply(p.text, p.usedTools || [], p.outcomes || []);
       p.text = r.text;
     },
   },

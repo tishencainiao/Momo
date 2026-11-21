@@ -38,6 +38,186 @@ function loadActions(n) {
       .slice(-(n || 20)).map((l) => { try { return JSON.parse(l); } catch (e) { return null; } }).filter(Boolean);
   } catch (e) { return []; }
 }
+
+/* ===== 阶段一（做稳）：行动凭据 = 状态机 + 幂等键 + 重启对账 =====
+ * 终态：succeeded / failed / unknown / cancelled；进行态：running（只进 action-state.json，不进 actions.jsonl）
+ * actions.jsonl 只追加终态行，旧格式 {ts,action,ok} 行继续可读（loadActions 兼容）。
+ */
+const ACTION_STATE_FILE = path.join(DATA_DIR, "action-state.json");
+const cryptoMod = require("crypto");
+function actionKey() {
+  const h = cryptoMod.createHash("sha1");
+  for (const a of arguments) h.update(String(a === undefined || a === null ? "" : a));
+  return h.digest("hex").slice(0, 20);
+}
+function loadActionState() {
+  try { return JSON.parse(fs.readFileSync(ACTION_STATE_FILE, "utf8")) || {}; } catch (e) { return {}; }
+}
+function saveActionState(st) {
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); writeJsonAtomic(ACTION_STATE_FILE, st); }
+  catch (e) { try { log("warn", "写行动状态失败: " + String(e.message).slice(0, 80)); } catch (e2) {} }
+}
+const _busyActions = new Map();   // 进程内行动锁：状态文件异常时兜底防同进程并发重复执行
+function tryBeginAction(meta) {
+  /* 抢占式开始行动：返回 {key, acquired, duplicateOf}。
+   * 同 key 已被占用（running 或已 planned）时 acquired=false —— 调用方必须停止执行真实副作用，
+   * 不能「别人在发我还发」。key 是业务幂等键，attempt_id 每次尝试唯一。
+   * Kimi 三轮：进程内锁兜底——状态文件读写异常时，同进程并发仍防重复执行。 */
+  const m = meta || {};
+  const key = m.key ? String(m.key) : actionKey(m.action, m.userId, Date.now(), Math.random());
+  const now = Date.now();
+  try {
+    const st = loadActionState();
+    st.open = st.open || {};
+    const prev = st.open[key];
+    if (prev) return { key, acquired: false, duplicateOf: prev.status || "running" };
+    if (_busyActions.get(key)) return { key, acquired: false, duplicateOf: "running" };
+    st.open[key] = {
+      action: m.action || "action",
+      status: "running",
+      channel: m.channel || "",
+      userId: m.userId || 0,
+      requestedBy: m.requestedBy || "",
+      started_at: now,
+      ts: now,
+      idemKey: key,
+      attempt_id: key + "-" + now.toString(36),
+    };
+    saveActionState(st);
+    try { _busyActions.set(key, true); } catch (e) {}
+    return { key, acquired: true, duplicateOf: "" };
+  } catch (e) { try { log("warn", "tryBeginAction 状态机异常（可用性优先放行）: " + String(e.message).slice(0, 80)); } catch (e2) {} }
+  /* 状态机异常时放行执行（可用性优先），但进程内锁仍占用防同进程重复；账本 endAction 缺 ok 记 unknown */
+  try { _busyActions.set(key, true); } catch (e) {}
+  return { key, acquired: true, duplicateOf: "" };
+}
+function beginAction(meta) {
+  /* 兼容包装：旧调用只拿 key。新代码请用 tryBeginAction 检查 acquired。 */
+  const m = meta || {};
+  const key = m.key ? String(m.key) : actionKey(m.action, m.userId, Date.now(), Math.random());
+  const now = Date.now();
+  try {
+    const st = loadActionState();
+    st.open = st.open || {};
+    const prev = st.open[key];
+    if (prev && prev.status === "running") return key;   // 已在执行
+    st.open[key] = {
+      action: m.action || (prev && prev.action) || "action",
+      status: "running",
+      channel: m.channel || (prev && prev.channel) || "",
+      userId: m.userId || (prev && prev.userId) || 0,
+      requestedBy: m.requestedBy || (prev && prev.requestedBy) || "",
+      started_at: now,
+      ts: prev ? prev.ts : now,
+      idemKey: key,
+      fromProposed: !!(prev && prev.status === "proposed"),
+      attempt_id: key + "-" + now.toString(36),
+    };
+    saveActionState(st);
+  } catch (e) { try { log("warn", "beginAction 失败: " + String(e.message).slice(0, 80)); } catch (e2) {} }
+  return key;
+}
+function proposeAction(meta) {
+  /* proposed：已计划，尚未执行。进 open（带 status），同时记一条 proposed 流水（可追溯） */
+  const m = meta || {};
+  const key = m.key ? String(m.key) : actionKey(m.action, m.userId, Date.now(), Math.random());
+  const now = Date.now();
+  try {
+    const st = loadActionState();
+    st.open = st.open || {};
+    st.open[key] = { action: m.action || "action", status: "proposed", channel: m.channel || "", userId: m.userId || 0, requestedBy: m.requestedBy || "", started_at: 0, ts: now, idemKey: key };
+    saveActionState(st);
+    recordAction({ action: m.action || "action", status: "proposed", key, channel: m.channel || "", userId: m.userId || 0, ok: false, detail: m.detail || "" });
+  } catch (e) { try { log("warn", "proposeAction 失败: " + String(e.message).slice(0, 80)); } catch (e2) {} }
+  return key;
+}
+function cancelAction(key, reason) {
+  /* cancelled：未执行或已取消。只对 open 中 planned/proposed/running 生效，返回是否取消成功 */
+  try { _busyActions.delete(key); } catch (e) {}
+  try {
+    const st = loadActionState();
+    const op = (st.open && st.open[key]) || null;
+    if (!op) return false;
+    recordAction({ action: op.action, status: "cancelled", key: String(key), channel: op.channel, userId: op.userId, ok: false, error: reason ? String(reason).slice(0, 120) : "已取消", finished_at: Date.now() });
+    delete st.open[key];
+    saveActionState(st);
+    return true;
+  } catch (e) { try { log("warn", "cancelAction 失败: " + String(e.message).slice(0, 80)); } catch (e2) {} return false; }
+}
+function verifyAction(key, res) {
+  /* 「结果已验证」与「工具已返回」分开记录：terminal 行=工具返回（endAction），
+   * verified 行=独立验证凭据（本条），带 verification_event_id 可回溯 */
+  const r = res || {};
+  try {
+    const st = loadActionState();
+    const op = (st.open && st.open[key]) || null;
+    let act = (op && op.action) || r.action || "";
+    if (!act) {
+      /* open 已清空时从最近的同键流水行继承动作名（endAction 之后补验证的常见场景） */
+      try {
+        const acts = loadActions(20);
+        const prev = (acts || []).filter((a) => a && a.key === key).slice(-1)[0];
+        if (prev && prev.action) act = prev.action;
+      } catch (e) {}
+    }
+    recordAction({
+      action: act || "action",
+      status: "verified",
+      key: String(key),
+      channel: op ? op.channel : "",
+      userId: op ? op.userId : 0,
+      ok: r.ok === true,
+      verification_event_id: r.eventId ? String(r.eventId).slice(0, 64) : "",
+      result_summary: r.summary ? String(r.summary).slice(0, 120) : "",
+      verified_at: Date.now(),
+    });
+  } catch (e) { try { log("warn", "verifyAction 失败: " + String(e.message).slice(0, 80)); } catch (e2) {} }
+}
+function endAction(key, res) {
+  const r = res || {};
+  try { _busyActions.delete(key); } catch (e) {}   // 进程内锁释放（无论记账成败）
+  /* 未明确 ok=false 且未明确 ok=true → unknown（不假装成功） */
+  const status = r.ok === true ? "succeeded" : (r.ok === false ? "failed" : "unknown");
+  try {
+    const st = loadActionState();
+    let op = (st.open && st.open[key]) || null;
+    recordAction(Object.assign({
+      action: (op && op.action) || r.action || "action",
+      status,
+      key: String(key),
+      ok: status === "succeeded",
+      error: r.error ? String(r.error).slice(0, 120) : "",
+      result_summary: r.summary ? String(r.summary).slice(0, 120) : "",
+      verified: r.verified === true,
+      finished_at: Date.now(),
+    }, op ? { channel: op.channel, userId: op.userId, requestedBy: op.requestedBy } : {}));
+    if (op) { delete st.open[key]; saveActionState(st); }
+    /* 内联验证（工具返回即带凭据的场景）→ 补一条独立 verified 行 */
+    if (r.verified === true) verifyAction(key, { ok: true, eventId: r.verification_event_id, summary: r.summary });
+  } catch (e) { try { log("warn", "endAction 失败: " + String(e.message).slice(0, 80)); } catch (e2) {} }
+}
+function reconcileOpenActions() {
+  /* 重启对账：running/结果不明 → unknown（绝不重放、绝不写成功）；proposed → cancelled（未执行，安全取消） */
+  try {
+    const st = loadActionState();
+    const open = (st && st.open) || {};
+    const keys = Object.keys(open);
+    if (!keys.length) return 0;
+    for (const k of keys) {
+      const op = open[k];
+      if (op.status === "proposed") {
+        recordAction({ action: op.action, status: "cancelled", key: k, channel: op.channel, userId: op.userId, requestedBy: op.requestedBy, ok: false, error: "restart：计划尚未执行，安全取消", finished_at: Date.now() });
+        try { log("info", `重启对账：计划「${op.action}」（${k}）未执行 → cancelled`); } catch (e) {}
+      } else {
+        recordAction({ action: op.action, status: "unknown", key: k, channel: op.channel, userId: op.userId, requestedBy: op.requestedBy, ok: false, error: "restart：中断后结果不明，已标记 unknown（不重放）", finished_at: Date.now() });
+        try { log("warn", `重启对账：行动「${op.action}」（${k}）结果不明 → unknown，不自动重放`); } catch (e) {}
+      }
+    }
+    st.open = {};
+    saveActionState(st);
+    return keys.length;
+  } catch (e) { try { log("warn", "重启对账失败: " + String(e.message).slice(0, 80)); } catch (e2) {} return 0; }
+}
 const SESS_DIR = path.join(DATA_DIR, "sessions");
 
 const LOCK_FILE = path.join(__dirname, "bridge.lock");
@@ -70,6 +250,33 @@ function logJsonl(file, obj) {
   try {
     fs.appendFileSync(path.join(DATA_DIR, file), JSON.stringify(Object.assign({ ts: Date.now() }, obj)) + "\n");
   } catch (e) {}
+}
+
+/* 有界 JSONL：追加一行，超过 maxBytes 截断保留最近 keepLines 行（阶段1 结构化工具流水用） */
+function logBoundedJsonl(file, obj, maxBytes, keepLines) {
+  try {
+    const p = path.join(DATA_DIR, file);
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.appendFileSync(p, JSON.stringify(Object.assign({ ts: Date.now() }, obj)) + "\n");
+    try {
+      if (fs.statSync(p).size > maxBytes) {
+        const keep = fs.readFileSync(p, "utf8").trim().split("\n").slice(-keepLines).join("\n") + "\n";
+        writeFileAtomic(p, keep);
+      }
+    } catch (e) {}
+  } catch (e) {}
+}
+/* 阶段1：结构化工具结果流水（ToolOutcome 第一批；统一健康快照/感知事件的数据源） */
+function logToolOutcome(tool, status, summary, userId, channel, extra) {
+  const e = { tool, status, summary: String(summary || "").slice(0, 120), userId, channel: channel || "private", action_key: (extra && extra.actionKey) || null, verification_event_id: (extra && extra.eventId) || null };
+  logBoundedJsonl("tool-outcomes.jsonl", e, 256 * 1024, 300);
+  return e;   // 返回条目，供本轮 before_send 审计消费
+}
+function loadToolOutcomes(limit) {
+  try {
+    const lines = fs.readFileSync(path.join(DATA_DIR, "tool-outcomes.jsonl"), "utf8").trim().split("\n").filter(Boolean);
+    return lines.slice(-(Number(limit) || 50)).map((l) => { try { return JSON.parse(l); } catch (e) { return null; } }).filter(Boolean);
+  } catch (e) { return []; }
 }
 
 let cfg = loadConfig();
@@ -140,7 +347,7 @@ const { STYLE_DIRECTIVE, GROUP_DIRECTIVE, SITUATION_QQ, SITUATION_DESKTOP, situa
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "1.99.6";
+const BASE_VERSION = "1.99.10";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -171,13 +378,14 @@ function evolIdentityText(userId, limit) {
   });
   const n = Math.max(1, Number(limit) || 20);
   const picked = relevant.slice(-n);
-  /* 事实分层：没被证实过的自我声称（kind=self-claim / verified:false）单独成段，标注"别当事实" */
+  /* 事实分层（Kimi 返修2：默认不可信）——只有明确 verified===true 才进事实区；
+   * verified 缺失的旧格式、verified:false、kind self-claim/physical-claim、纯字符串旧条目，一律进「待核实」区 */
   const plain = [], claims = [];
   for (const e of picked) {
-    if (typeof e === "string") { plain.push(e); continue; }
+    if (typeof e === "string") { claims.push(e); continue; }
     const t = e && e.text;
     if (!t) continue;
-    if (e.verified === false || e.kind === "self-claim") claims.push(t); else plain.push(t);
+    if (e.verified === true) plain.push(t); else claims.push(t);
   }
   const parts = [];
   if (plain.length) parts.push(plain.join("\n"));
@@ -615,6 +823,10 @@ const greeted = new Set();
 const lastActiveAt = new Map();
 const lastProactiveAt = new Map();
 const lastProactiveMsg = new Map();
+/* 阶段五：连续 silence 未获回复的计数（自己发言不算用户活跃；收到用户消息清零） */
+const silenceStreak = new Map();
+/* 返修5：silence 6h 门禁的日期维度——超 6h 每天只放行一次，跨天恢复（防永久冻结） */
+const lastSilenceDay = new Map();
 
 function loadProactiveState() {
   try {
@@ -623,12 +835,14 @@ function loadProactiveState() {
     for (const k of (s.greeted || [])) greeted.add(k);
     for (const [k, v] of Object.entries(s.lastActiveAt || {})) lastActiveAt.set(Number(k), Number(v));
     for (const [k, v] of Object.entries(s.lastProactiveAt || {})) lastProactiveAt.set(Number(k), Number(v));
+    for (const [k, v] of Object.entries(s.silenceStreak || {})) silenceStreak.set(Number(k), Number(v));
+    for (const [k, v] of Object.entries(s.lastSilenceDay || {})) lastSilenceDay.set(Number(k), Number(v));
   } catch (e) {}
 }
 function saveProactiveState() {
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
-    writeJsonAtomic(PROACTIVE_STATE_FILE, { lastProactiveTs, greeted: Array.from(greeted), lastActiveAt: Object.fromEntries(lastActiveAt), lastProactiveAt: Object.fromEntries(lastProactiveAt) });
+    writeJsonAtomic(PROACTIVE_STATE_FILE, { lastProactiveTs, greeted: Array.from(greeted), lastActiveAt: Object.fromEntries(lastActiveAt), lastProactiveAt: Object.fromEntries(lastProactiveAt), silenceStreak: Object.fromEntries(silenceStreak), lastSilenceDay: Object.fromEntries(lastSilenceDay) });
   } catch (e) {}
 }
 
@@ -878,7 +1092,7 @@ function buildPersonContext(env, opts) {
       if (_lens) channelLens = "【你们在桌宠窗口里最近聊的（刚刚的事，别当没发生过）】\n" + _lens;
     }
   } catch (e) {}
-  return { settings, memories, persona, call, userId, taskCtx, shortMemories, summaryKey, extraInfo, channelLens };
+  return { settings, memories, persona, call, userId, taskCtx, shortMemories, summaryKey, extraInfo, channelLens, channel: env.channel };
 }
 async function agentChatOnce(history, userText, pctx) {
   const settings = pctx.settings, memories = pctx.memories, persona = pctx.persona, call = pctx.call, userId = pctx.userId, taskCtx = pctx.taskCtx, shortMemories = pctx.shortMemories, channelLens = pctx.channelLens;
@@ -998,7 +1212,7 @@ async function agentChatOnce(history, userText, pctx) {
       const _cps = (host && host.contextProviders) || [];
       for (const _cp of _cps) {
         try {
-          const _r = _cp({ userId, petMode: !!(_extraInfo && _extraInfo.petMode) });
+          const _r = _cp({ userId, petMode: !!(_extraInfo && _extraInfo.petMode), channel: (pctx && pctx.channel) || "private", groupId: (_extraInfo && _extraInfo.groupId) || 0 });
           const _s = typeof _r === "string" ? _r : (_r && (_r.content || _r.text)) || "";
           if (_s && String(_s).trim()) _dput("extra", String(_s).trim());
         } catch (e) { log("warn", "contextProvider 失败: " + String(e && e.message).slice(0, 100)); }
@@ -1041,6 +1255,7 @@ async function agentChatOnce(history, userText, pctx) {
 
   const stickers = [];
   const _usedTools = [];   // 本轮真正执行成功的工具名（输出后审计要用：说了什么 vs 真做了什么）
+  const _outcomes = [];     // 本轮结构化工具结果（随 before_send 传给审计服务）
   const budgetOut = isBudgetExhausted();
   /* R2：_tier 已在动态块上方计算（同一调用内不变），此处不再重复 */
   // 预算耗尽时：只封禁花钱/高风险工具，保留本地只读工具（查账单/记忆/待办/体检等不花钱）
@@ -1059,6 +1274,7 @@ async function agentChatOnce(history, userText, pctx) {
       messages.push({ role: "assistant", content: msg.content || "", tool_calls: msg.tool_calls });
       for (const tc of msg.tool_calls) {
         let result = "（工具执行失败）";
+        let _toolOk = null;   // 结构化结果：null=旧字符串黑名单判定；true/false=工具自报 ok（审计只认明确成功）
         if (!toolAllowed(userId, tc.function.name, _extraInfo && _extraInfo.groupId ? "group" : undefined)) {
           result = "（这个功能只有主人能用哦～你自然婉拒对方，别答应也别假装做了）";
           messages.push({ role: "tool", tool_call_id: tc.id, content: result });
@@ -1069,18 +1285,26 @@ async function agentChatOnce(history, userText, pctx) {
           if (pTool) {
             const args = JSON.parse(tc.function.arguments || "{}");
             const r = await pTool.handler(args, Object.assign({ userId, call }, _extraInfo || {}));
-            result = String(r == null ? "（已完成）" : r);
+            /* 结构化结果 {text, ok}：工具自报成败，审计只认 ok!==false（Kimi 三轮：不再堆失败文案黑名单） */
+            if (r && typeof r === "object" && !Array.isArray(r) && (("ok" in r) || ("text" in r))) {
+              result = String(r.text == null ? (r.ok === false ? "（工具执行失败）" : "（已完成）") : r.text);
+              _toolOk = r.ok !== false;
+            } else {
+              result = String(r == null ? "（已完成）" : r);
+            }
           } else if (tc.function.name === "web_search") {
             const args = JSON.parse(tc.function.arguments || "{}");
             const q = String(args.query || "").slice(0, 80);
-            if (!q) { result = "（搜索不可用）"; }
+            if (!q) { result = "（搜索不可用）"; _toolOk = false; }
             else {
               try {
                 const results = await apiOf("search").bingSearch(q, 3);
                 result = results.length ? apiOf("search").formatResults(q, results) : "没有搜到结果";
+                _toolOk = true;
               } catch (e) {
                 log("warn", `必应搜索失败「${q.slice(0, 20)}」: ${String(e && e.message || e).slice(0, 120)}`);
                 result = "（搜索服务暂时不可用，稍后再试）";
+                _toolOk = false;
               }
             }
           } else if (tc.function.name === "send_sticker") {
@@ -1092,23 +1316,30 @@ async function agentChatOnce(history, userText, pctx) {
               stickers.push(s);
               const _hint = s.meaning ? `（这张的含义：${String(s.meaning).slice(0, 40)}${s.usage ? "；适合：" + String(s.usage).slice(0, 24) : ""}。可以顺着含义自然接一句）` : "";
               result = `已记录表情包「${s.label}」（编号 ${s.publicId || s.fname}）${_hint}`;
-            } else result = "（没有合适的表情包，这次别发了）";
+              _toolOk = true;
+            } else { result = "（没有合适的表情包，这次别发了）"; _toolOk = false; }
           } else if (tc.function.name === "check_balance") {
             const b = await fetchBalance();
             result = b ? `账户余额 ¥${b.total}（充值 ¥${b.topped} / 赠送 ¥${b.granted}）` : "（余额查询失败）";
+            _toolOk = !!b;
           } else if (tc.function.name === "check_usage") {
             result = usageLine();
+            _toolOk = true;
           } else if (tc.function.name === "mind_history") {
             const histArgs = JSON.parse(tc.function.arguments || "{}");
             result = apiOf("mind").mindHistoryText(Number(histArgs.limit) || 10);
+            _toolOk = true;
           }
-        } catch (e) { result = "工具执行失败: " + String(e.message).slice(0, 100); }
+        } catch (e) { result = "工具执行失败: " + String(e.message).slice(0, 100); _toolOk = false; }
         const _rStr = String(result == null ? "" : result);
-        if (_rStr && _rStr.indexOf("工具执行失败") < 0 && _rStr.indexOf("只有主人能用") < 0) _usedTools.push(tc.function.name);
+        if (_toolOk === true) _usedTools.push(tc.function.name);
+        else if (_toolOk !== false && _rStr && _rStr.indexOf("工具执行失败") < 0 && _rStr.indexOf("只有主人能用") < 0 && _rStr.indexOf("【失败】") < 0) _usedTools.push(tc.function.name);
+        /* 阶段1：结构化工具结果流水（ToolOutcome 第一批）——供健康快照/感知事件消费 */
+        _outcomes.push(logToolOutcome(tc.function.name, _toolOk === true ? "succeeded" : (_toolOk === false ? "failed" : "unknown"), _rStr, userId, (pctx && pctx.channel) || "private"));
         messages.push({ role: "tool", tool_call_id: tc.id, content: result });
       }
     } else {
-      const _bs = { text: String(msg.content || ""), channel: "private", usedTools: _usedTools };
+      const _bs = { text: String(msg.content || ""), channel: (pctx && pctx.channel) || "private", usedTools: _usedTools, outcomes: _outcomes };
       if (host && host.runBeforeSend) host.runBeforeSend(_bs);
       return { reply: _bs.text, stickers };
     }
@@ -1117,7 +1348,7 @@ async function agentChatOnce(history, userText, pctx) {
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].role === "assistant" && messages[i].content) { lastText = messages[i].content; break; }
   }
-  const _bs2 = { text: lastText, channel: "private", usedTools: _usedTools };
+  const _bs2 = { text: lastText, channel: (pctx && pctx.channel) || "private", usedTools: _usedTools, outcomes: _outcomes };
   if (host && host.runBeforeSend) host.runBeforeSend(_bs2);
   return { reply: _bs2.text, stickers };
 }
@@ -1152,17 +1383,70 @@ function notePremiseCorrection(userId, saidText) {
  * 回话点统一走 host.runBeforeSend({text, channel:"private", usedTools})。 */
 
 /* ---------------- 主动搭话生成 ---------------- */
-async function recordAndSend(userId, text) {
-  if (!text) return false;
-  try {
-    const his = loadSession(userId);
-    his.push({ role: "assistant", content: text, ts: Date.now() });
-    saveSession(userId, trimHistory(his, 40, 24000));
-    saveMsgTime(userId, Math.floor(Date.now() / 1000));   // 主动消息也更新时间戳，避免时间差误判
-  } catch (e) {}
-  try { await sendPrivate(userId, text); return true; }
-  catch (e) { log("warn", "recordAndSend 发送失败: " + e.message.slice(0, 120)); return false; }
+/* 进行中的发送（key → Promise<result>）：并发同键调用共享同一真实结果（Kimi 三轮） */
+const _sendInFlight = new Map();
+async function recordAndSend(userId, text, skipAudit) {
+  /* 发送结果语义（行动结果闭环，Kimi 三轮）：
+   * succeeded=本次真实发送成功 / duplicate_succeeded=此前已成功无需重发 / running=另一个执行未决 /
+   * failed=明确失败 / unknown=无法确认。调用方只认 succeeded 与 duplicate_succeeded 为「说过」。 */
+  if (!text) return { result: "failed", error: "空文本" };
+  /* 阶段一回归：直发路径（如心流 share_fun）也过审计；经 agentChatOnce 的调用方传 skipAudit=true 防双审 */
+  let _out = String(text || "");
+  if (!skipAudit) {
+    const _bs = { text: _out, channel: "private", usedTools: [] };
+    if (host && host.runBeforeSend) host.runBeforeSend(_bs);
+    _out = _bs.text;
+  }
+  const _key = actionKey("send", userId, _out);
+  /* ① 已成功过（10 分钟）：duplicate_succeeded（重启后同文也不重发） */
+  const _dup = loadActions(60).find((a) => a && a.key === _key && a.status === "succeeded" && (Date.now() - (a.ts || 0) < 10 * 60000));
+  if (_dup) { log("info", `recordAndSend 幂等命中 ${_key}（此前已成功）`); return { result: "duplicate_succeeded", key: _key }; }
+  /* ② 同键正在执行：等待同一个 Promise，共享真实结果（不重复发、不提前判成功） */
+  const _pending = _sendInFlight.get(_key);
+  if (_pending) {
+    log("info", `recordAndSend 等待同键执行中的真实结果 ${_key}`);
+    try { return await _pending; }
+    catch (e) { return { result: "unknown", key: _key, error: String((e && e.message) || "") }; }
+  }
+  /* ③ 抢占失败（同键占用且无线程内 Promise，如重启残留 open/状态异常）→ running：调用方不得写成功 */
+  const _t = tryBeginAction({ action: "send", key: _key, channel: "private", userId, requestedBy: "system", detail: _out.slice(0, 40) });
+  if (!_t.acquired) { log("warn", `recordAndSend 同键占用且结果未决（${_key}）→ running`); return { result: "running", key: _key }; }
+  /* ④ 真正执行：把「发送+记账」包成一个 Promise 共享给并发调用方 */
+  const _p = (async () => {
+    try {
+      let _sent = false, _err = "", _mid = "";
+      try {
+        const _ack = await sendPrivate(userId, _out);
+        _sent = true;
+        _mid = (_ack && _ack.data && _ack.data.message_id) ? String(_ack.data.message_id) : (_ack && _ack.message_id) ? String(_ack.message_id) : "";
+      } catch (e) {
+        _err = String((e && e.message) || "send failed");
+        log("warn", "recordAndSend 发送失败: " + _err.slice(0, 120));
+      }
+      endAction(_key, { ok: _sent, error: _err, summary: _sent ? "已发送" : "发送失败" });
+      /* 「工具已返回」与「结果已验证」分开：OneBot 回执（message_id）单独记验证凭据 */
+      if (_sent && _mid) verifyAction(_key, { ok: true, eventId: _mid, summary: "OneBot 回执确认" });
+      /* P1 返修：发送成功才写会话历史——失败的消息不得像「已经说过」一样进历史 */
+      if (_sent) {
+        try {
+          const his = loadSession(userId);
+          his.push({ role: "assistant", content: _out, ts: Date.now() });
+          saveSession(userId, trimHistory(his, 40, 24000));
+          saveMsgTime(userId, Math.floor(Date.now() / 1000));   // 主动消息也更新时间戳，避免时间差误判
+        } catch (e) {}
+        return { result: "succeeded", key: _key, messageId: _mid };
+      }
+      return { result: "failed", key: _key, error: _err };
+    } catch (e) {
+      /* 意外异常：结果不明。endAction 缺 ok → unknown（不假装成功） */
+      try { endAction(_key, { ok: undefined, error: String((e && e.message) || "internal error"), summary: "结果不明" }); } catch (e2) {}
+      return { result: "unknown", key: _key, error: String((e && e.message) || "") };
+    }
+  })();
+  _sendInFlight.set(_key, _p);
+  try { return await _p; } finally { _sendInFlight.delete(_key); }
 }
+
 async function proactiveAgentTurn(userId, intentDesc) {
   if (!apiKey || isBudgetExhausted()) return null;
   try {
@@ -1179,7 +1463,12 @@ async function proactiveAgentTurn(userId, intentDesc) {
     lastProactiveMsg.set(userId, reply);
     appendProactiveLog(userId, reply);
     const stickers = (raw && raw.stickers) || [];
-    await recordAndSend(userId, reply);
+    /* Kimi 三轮：消费真实发送结果——只有 succeeded / duplicate_succeeded 才记「说过」 */
+    const _sr = await recordAndSend(userId, reply, true);
+    if (!_sr || (_sr.result !== "succeeded" && _sr.result !== "duplicate_succeeded")) {
+      log("warn", `主动搭话发送未成功（${(_sr && _sr.result) || "unknown"}），不记已发送`);
+      return null;
+    }
     for (const s of stickers.slice(0, 2)) {
       try { await sendStickerImage(userId, s); noteStickerSent(stickerSessionKey(userId, 0), s); await sleep(600); } catch (e) { log("warn", "主动搭话表情包发送失败: " + e.message.slice(0, 120)); }
     }
@@ -1743,13 +2032,13 @@ async function runMindAction(action, content, settings, masterUin, now) {
         const cap = content || "给你看个好玩的～";
         /* R0-B：心流分享也过持久化去重（跨人冷却） */
         if (proactiveLoggedDup(masterUin, cap)) { log("info", "心智-分享趣图跳过：内容最近发过"); return; }
-        await recordAndSend(masterUin, cap);
+        const _sr = await recordAndSend(masterUin, cap);
+        if (!_sr || (_sr.result !== "succeeded" && _sr.result !== "duplicate_succeeded")) { log("warn", "心智分享趣图发送未成功，不记已分享"); return; }
         appendProactiveLog(masterUin, cap);
         if (img) {
           await onebotSend("send_msg", { message_type: "private", user_id: masterUin, message: [{ type: "image", data: { file: "file:///" + img.replace(/\\/g, "/") } }] }).catch(() => {});
         }
         lastProactiveAt.set(masterUin, now);
-        lastActiveAt.set(masterUin, now);
         saveProactiveState();
         log("info", `心智-分享趣图: ${cap.slice(0, 30)}`);
         recordAction({ action: "share_fun", ok: true }); setActivity("发呆");
@@ -2075,6 +2364,8 @@ function splitSafe(text, delims) {
 
 /* ---------------- OneBot 发送 ---------------- */
 let ws = null, sendSeq = 1, reconnectTimer = null;
+/* 阶段1：OneBot 连接状态快照（健康快照：进程活着 ≠ 能力可用） */
+let wsState = { state: "init", since: Date.now(), lastError: "" };
 function onebotSend(action, params) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return Promise.reject(new Error("ws 未连接"));
   return new Promise((resolve, reject) => {
@@ -2097,10 +2388,14 @@ async function sendPrivate(userId, text) {
   const gapMs = evolvePref("reply_gap_ms", qq.reply_gap_ms || 1200);
   const hardCap = evolvePref("reply_chunk_chars", qq.reply_chunk_chars || 1800);
   const segs = split ? splitReply(text, evolvePref("split_cap", 150)) : hardChunk(text, hardCap);
+  const acks = [];
   for (const seg of segs) {
-    await onebotSend("send_msg", { message_type: "private", user_id: Number(userId), message: seg });
+    const ack = await onebotSend("send_msg", { message_type: "private", user_id: Number(userId), message: seg });
+    acks.push(ack);
     await sleep(split ? gapMs : 300);
   }
+  /* 返回最后一条回执（含 data.message_id），供行动凭据「结果已验证」用 */
+  return acks.length ? acks[acks.length - 1] : null;
 }
 
 /* ---------------- 消息处理 ---------------- */
@@ -2180,6 +2475,7 @@ async function handlePrivateMessage(event) {
   logJsonl("messages.jsonl", { userId, channel: "private", text: String(text || "").slice(0, 500), images: parsed.images.length });
   lastInteractionTs = Date.now();
   lastActiveAt.set(userId, Date.now());
+  silenceStreak.delete(userId);
   saveProactiveState();
   
   const msgTime = Number(event.time) || Math.floor(Date.now() / 1000);
@@ -2900,9 +3196,10 @@ function connect() {
   log("info", "连接 OneBot WS: " + url);
   try {
     ws = new WebSocket(url);
-    ws.onopen = () => { resetWsDelay(); log("info", "OneBot WS 已连接"); };
-    ws.onerror = (e) => log("warn", "OneBot WS 错误: " + (e.message || e.type || "unknown"));
-    ws.onclose = () => { const d = nextWsDelay(); log("warn", `OneBot WS 断开，${Math.round(d / 1000)} 秒后重连`); reconnectTimer = setTimeout(connect, d); };
+    wsState = { state: "connecting", since: Date.now(), lastError: "" };
+    ws.onopen = () => { resetWsDelay(); wsState = { state: "open", since: Date.now(), lastError: "" }; log("info", "OneBot WS 已连接"); };
+    ws.onerror = (e) => { wsState.lastError = String((e && (e.message || e.type)) || "unknown"); log("warn", "OneBot WS 错误: " + (e.message || e.type || "unknown")); };
+    ws.onclose = () => { const d = nextWsDelay(); wsState = { state: "closed", since: Date.now(), lastError: wsState.lastError }; log("warn", `OneBot WS 断开，${Math.round(d / 1000)} 秒后重连`); reconnectTimer = setTimeout(connect, d); };
     ws.onmessage = (ev) => {
       try {
         const obj = JSON.parse(ev.data);
@@ -2915,7 +3212,7 @@ function connect() {
         else if (obj.post_type === "meta_event" && obj.meta_event_type === "lifecycle") log("info", `Bot 上线 self_id=${obj.self_id}`);
       } catch (e) { log("error", "消息解析异常: " + e.message); }
     };
-  } catch (e) { const d = nextWsDelay(); log("error", "WS 建立失败: " + e.message); reconnectTimer = setTimeout(connect, d); }
+  } catch (e) { const d = nextWsDelay(); wsState = { state: "closed", since: Date.now(), lastError: String(e && e.message || "") }; log("error", "WS 建立失败: " + e.message); reconnectTimer = setTimeout(connect, d); }
 }
 
 /* ================= 桌宠联脑：本地 OpenAI 兼容接口 =================
@@ -3056,6 +3353,8 @@ const split0 = (cfg.qq && cfg.qq.split_reply) ? `拆条≤${cfg.qq.split_max_cha
 const pr0 = (cfg.proactive && cfg.proactive.enabled) ? `主动搭话(沉默${cfg.proactive.silence_minutes || 120}分+${cfg.proactive.morning_greet || "08:00"}/${cfg.proactive.night_greet || "23:00"})` : "主动搭话关";
 const vis0 = (cfg.chat && cfg.chat.vision && cfg.chat.vision.enabled === false) ? "关" : "开";
 log("info", `模型=${s0.model} 接口=${s0.base_url} 联网=${ws0} 回复=${split0} ${pr0} 看图=${vis0} ${budgetLine()}`);
+/* 阶段一：重启对账——running/结果不明的行动标 unknown，绝不盲目重放 */
+try { const _rec = reconcileOpenActions(); if (_rec > 0) log("warn", `重启对账完成：${_rec} 条中断行动已标记 unknown（不重放）`); } catch (e) {}
 connect();
 /* 桌宠联脑接口（本地 OpenAI 兼容） */
 try { startPetApi(); } catch (e) { log("warn", "桌宠联脑接口启动异常: " + String(e.message).slice(0, 100)); }
@@ -3085,7 +3384,9 @@ host = createHost({
   loadMemories, saveMemories, loadShortMemories, saveShortMemories, loadSession, saveSession,
   writeFileAtomic, writeJsonAtomic,
   isMaster, resolveCall, userPersona, isBudgetExhausted, budgetLevel, canAfford, ACTION_COST, getFavor,
-  recordAction, loadActions,
+  recordAction, loadActions, beginAction, tryBeginAction, endAction, actionKey, reconcileOpenActions,
+  loadToolOutcomes, wsStatus: () => Object.assign({}, wsState),
+  proposeAction, cancelAction, verifyAction,
   getCurrentStatus, setCurrentStatus, clearCurrentStatus, applyStatusRule, userQuietState, markProbed, loadActivityState,
   todayText, periodOfDay, nowHM, formatGap, dayStr, todayMMDD, parseMemoryJson,
   loadAppellations, saveAppellations, loadMute, addMute, removeMute, resolveTargetId, loadWishes, addWish,
@@ -3100,8 +3401,10 @@ host = createHost({
     get lastShallowTs() { return lastShallowTs; },
     set lastShallowTs(v) { lastShallowTs = v; },
     get STARTED_AT() { return PROACTIVE_STARTED_AT; },
-    MIND_PAUSE_MS, lastActiveAt, lastProactiveAt, lastProactiveMsg, greeted,
+    MIND_PAUSE_MS, lastActiveAt, lastProactiveAt, lastProactiveMsg, greeted, silenceStreak, lastSilenceDay,
     saveProactiveState, proactiveIntervalMs, getProactivePref,
+    /* 阶段五：用户真回复（收到消息）时清零 silence 连击 */
+    resetSilenceStreak: (u) => { silenceStreak.delete(u); saveProactiveState(); },
     isBusy: (u) => busyUsers.has(u),
     getBoredom, setActivity, fetchFunImage, coreContextMessages, proactiveAgentTurn,
     /* 大脑决策：现在该不该主动发（日程/趣图等候选都先过这一关） */

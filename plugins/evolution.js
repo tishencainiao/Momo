@@ -185,7 +185,7 @@ async function extractSelfIdentity(userText, replyText, settings, userId) {
   if (Date.now() - lastIdentityExtract < IDENTITY_INTERVAL_MS) return;
   if (!userText || !replyText) return;
   lastIdentityExtract = Date.now();
-  const prompt = `你是 Momo（大肥鱼桌宠）。下面是你刚和对方的一段对话。请从中提炼 0~1 条「关于你自己的成长记忆」（比如：你喜欢/讨厌什么、你立过的约定、对方夸你或指出你的点、你自己说的关于自己的话）。要求：以"我"开头、一句话 10~40 字、自然具体；没有值得记的就只输出 NO。\n\n注意：只记"性格/感受/约定/被指出的点"，不要记"我做了某个具体动作"（比如"我放了首歌给他""我发了个文件"）——那类要有工具记录才能算事实；也不要抢对方的功劳：对方点的外卖、选的东西、做的决定是对方的，除非这段对话里你确实推荐/提议过，否则别记成"我推荐的/我提议的"。\n\n对话：\n对方：${String(userText).slice(0, 200)}\nMomo：${String(replyText).slice(0, 200)}`;
+  const prompt = `你是 Momo（大肥鱼桌宠）。下面是你刚和对方的一段对话。请从中提炼 0~1 条「关于你自己的成长记忆」（比如：你喜欢/讨厌什么、你立过的约定、对方夸你或指出你的点、你自己说的关于自己的话）。要求：以"我"开头、一句话 10~40 字、自然具体；没有值得记的就只输出 NO。\n\n注意：只记"性格/感受/约定/被指出的点"，不要记"我做了某个具体动作"（比如"我放了首歌给他""我发了个文件"）——那类要有工具记录才能算事实；也不要抢对方的功劳：对方点的外卖、选的东西、做的决定是对方的，除非这段对话里你确实推荐/提议过，否则别记成"我推荐的/我提议的"。如果这条记忆是关于物理经历或感官体验（摸到/看到/闻到/身体有感觉），在句子最前面加 [PHY] 标记。\n\n对话：\n对方：${String(userText).slice(0, 200)}\nMomo：${String(replyText).slice(0, 200)}`;
   try {
     const raw = await _ctx.completeOnce([{ role: "user", content: prompt }], settings, 120, 0.4);
     const s = String(raw || "").trim();
@@ -194,15 +194,35 @@ async function extractSelfIdentity(userText, replyText, settings, userId) {
       _ctx.log("warn", `成长记忆已拦（无工具佐证的动作自述）: ${s.slice(0, 40)}`);
       return;
     }
+    /* 阶段三：负证据不固化——「对方没来/没回」这类不能变成"我常被冷落"的性格 */
+    if (/对方(没|没有|不在|不回|没回)|没人(理|回)|一直没回|等(了|不到)/.test(s)) return;
+    /* 阶段三：物理经历只进待核实，不进事实人格 */
+    const isPhy = s.startsWith("[PHY]");
+    const text = s.replace(/^\[PHY\]\s*/, "");
+    let kind = "self-report";
+    if (/约定|答应|说好|以后|记得要/.test(text)) kind = "agreement";
+    else if (/喜欢|讨厌|怕|性格|总是|我就是|我这个人|其实我/.test(text)) kind = "trait";
+    if (isPhy) kind = "physical-claim";
     const full = selfIdentityListFull();
-    if (full.some((i) => (typeof i === "string" ? i : i.text) === s)) return;
-    full.push({ text: s, from: userId || 0, kind: "self-report", verified: true });
+    /* 阶段三：同主题近重复只增证据次数，不新增条目（Kimi 返修3：只在同一个 from 内合并，不跨用户串数据） */
+    const _uid = Number(userId) || 0;
+    const near = full.find((i) => (Number(i && i.from) || 0) === _uid && nearDupSelf(typeof i === "string" ? i : (i && i.text) || "", text));
+    if (near) {
+      near.evidences = (Number(near.evidences) || 1) + 1;
+      near.lastTs = Date.now();
+      _ctx.writeJsonAtomic(path.join(_ctx.SELF_DIR, "identity.json"), full);
+      _ctx.reloadEvolution(); refreshEvolve();
+      _ctx.log("info", `成长记忆同主题+1 证据: ${text.slice(0, 40)}`);
+      return;
+    }
+    if (full.some((i) => ((Number(i && i.from) || 0) === _uid) && (typeof i === "string" ? i : i.text) === text)) return;
+    full.push({ text, from: userId || 0, kind, verified: false, evidences: 1, ts: Date.now() });
     trimWithArchive(full, SELF_ID_MAX, "identity");
     fs.mkdirSync(_ctx.SELF_DIR, { recursive: true });
     _ctx.writeJsonAtomic(path.join(_ctx.SELF_DIR, "identity.json"), full);
     _ctx.reloadEvolution(); refreshEvolve();
-    journalAppend({ type: "identity", text: s, from: userId || 0 });
-    _ctx.log("info", `成长记忆+1: ${s.slice(0, 50)}`);
+    journalAppend({ type: "identity", text, from: userId || 0 });
+    _ctx.log("info", `成长记忆+1: ${text.slice(0, 50)}`);
   } catch (e) { _ctx.log("warn", "成长记忆提炼失败: " + e.message.slice(0, 120)); }
 }
 /* 外部（如刷视频）主动写入一条成长记忆：去重 + 限量 + 记 journal */
@@ -211,8 +231,12 @@ function addIdentityItem(text, from) {
   if (!s || s.length < 4) return false;
   if (looksLikeUnverifiedDeed(s)) { _ctx.log("warn", `成长记忆已拦（外部写入，无工具佐证）: ${s.slice(0, 40)}`); return false; }
   const full = selfIdentityListFull();
-  if (full.some((i) => (typeof i === "string" ? i : i.text) === s)) return false;
-  full.push({ text: s, from: Number(from) || 0, kind: "self-report", verified: true });
+  /* Kimi 返修1（三轮）：完全重复也只限同一个 from 内去重，不跨用户串数据 */
+  const _uid = Number(from) || 0;
+  if (full.some((i) => ((Number(i && i.from) || 0) === _uid) && (typeof i === "string" ? i : i.text) === s)) return false;
+  const near = full.find((i) => (Number(i && i.from) || 0) === _uid && nearDupSelf(typeof i === "string" ? i : (i && i.text) || "", s));
+  if (near) { near.evidences = (Number(near.evidences) || 1) + 1; near.lastTs = Date.now(); }
+  else full.push({ text: s, from: _uid, kind: "self-report", verified: false, evidences: 1, ts: Date.now() });
   trimWithArchive(full, SELF_ID_MAX, "identity");
   try {
     fs.mkdirSync(_ctx.SELF_DIR, { recursive: true });
@@ -241,6 +265,12 @@ async function selfScoreReply(userText, replyText, settings) {
 async function tunePrefFromScore(st) {
   const avg = st.sum / st.count;
   saveScore({ count: 0, sum: 0 });
+  /* 阶段五：LLM 自评不是主人的真实反馈——auto_tune 默认关，关闭时只记录不自动调参 */
+  if (_ctx.getSetting("evolution.auto_tune", false) !== true) {
+    journalAppend({ type: "score", avg: Math.round(avg * 100) / 100, note: "auto_tune 关闭，仅记录不调参" });
+    _ctx.log("info", `自我评分均分 ${avg.toFixed(2)}（auto_tune 关闭，仅记录）`);
+    return;
+  }
   const cur = (evolve && evolve.pref) || {};
   const cap = Number(cur.split_cap !== undefined ? cur.split_cap : 150);
   const gap = Number(cur.reply_gap_ms !== undefined ? cur.reply_gap_ms : (_ctx.config.qq && _ctx.config.qq.reply_gap_ms) || 1200);
@@ -547,7 +577,15 @@ function cleanExpiredProposals(now) {
     return changed;
   } catch (e) { return false; }
 }
-const CTX_CHEATSHEET = `ctx 可用：log(level,msg)、config、apiKey、settings()、sendPrivate(u,t)、sendGroup(g,t)、recordAndSend(u,t)（先记会话再发）、onebotSend(action,params)、sendStickerImage(u,s)、loadMemories(u)、saveMemories(u,items)、loadShortMemories(u)、saveShortMemories(u,items)、loadSession(u)、saveSession(u,msgs)、isMaster(u)、resolveCall(u)、userPersona(u,s)、isBudgetExhausted()、getEmotion()、getMood()、getBoredom()、getFavor(u)、todayText()、periodOfDay()、nowHM()、formatGap(ms)、dayStr(off)、todayMMDD()、parseMemoryJson(raw)、completeOnce(msgs,settings,max,temp)、reasonComplete(msgs,settings,max)、textSimilar(a,b)、DATA_DIR、registry.list()`;
+const CTX_CHEATSHEET = `ctx 可用（self-* 沙箱真实能力，Kimi 返修3 对齐 makeSelfCtx；不在列表里的 ctx 能力一律不存在，不要调用）：
+- 通用：log(level,msg)、isMaster(u)、resolveCall(u)、recordAction(o)、loadActions(n)、getSetting(k,d)、textSimilar(a,b)、DATA_DIR、SELF_DIR
+- 记忆读：loadMemories(u)、loadShortMemories(u)、loadSession(u)、loadEvolution()、loadMindState()、thoughtTexts(n)、openLoopsText(n)
+- 情绪/预算读：getEmotion()、getMood()、moodLabel()、getBoredom()、getFavor(u)、canAfford(x)、isBudgetExhausted()、budgetLevel()、budgetCfg()
+- 时间读：todayText()、dateText()、periodOfDay()、hourNow()、hmNow()、formatGap(ms)
+- 发送（manifest.permissions 必须含 "send" 才存在，否则调用抛错）：sendPrivate(u,t)、sendGroup(g,t)、recordAndSend(u,t)
+- 隐私（permissions 含 "config"/"apiKey"/"settings" 才存在）：config、apiKey、settings()
+- 写盘：writeJsonAtomic(file,obj)、writeFileAtomic(file,text)——路径强制限在 DATA_DIR/SELF_DIR 内，越界抛错
+- getApi(ns)：只放行 manifest.requires 里声明的命名空间，未声明返回 undefined`;
 async function generatePluginCode(goalDesc) {
   const prompt = `你是 Momo（大肥鱼桌宠）的代码生成器。请为下面的目标写一个**完整可运行**的 Node.js 插件文件（CommonJS）。\n\n目标：${goalDesc}\n\n插件格式（必须严格遵循）：\n\`\`\`javascript\nmodule.exports = {\n  name: "self-英文小写单词",\n  displayName: "中文显示名",\n  description: "一句话说清做什么、何时用",\n  version: "1.0.0",\n  engines: { kernel: ">=${_ctx.BASE_VERSION}" },\n  requires: [],\n  permissions: ["DATA_DIR", "log"],\n  attribution: { source: "self-generated by Momo", license: "self-generated", note: "Momo 自改进化层生成（selfModify）" },\n  init(ctx) { _ctx = ctx; },\n  tools: [{ def: {type:"function",function:{name:"工具名",description:"何时调用",parameters:{type:"object",properties:{}}}}, handler(args, info) { return "结果文本"; } }],\n  commands: [{ key: "/命令", regex: /^\\/命令/, handler(msg) { /* 用 _ctx.sendPrivate(msg.userId, "回复") */ } }],\n  hooks: { timer(payload) { const now = payload && payload.now || Date.now(); /* 自行节流 */ } },\n};\n\`\`\`\n\n可用 API（只能调用这些 + Node 内置模块 fs/path）：\n${CTX_CHEATSHEET}\n\n硬性规则：\n1. name 必须匹配 /^self-[a-z0-9-]{1,30}$/\n2. 不能修改、读取或启动任何外部进程以外的核心文件；不要 require 网络依赖\n3. 所有可能抛错的地方都要 try-catch，绝不能 process.exit\n4. 只输出两个代码块，不要任何其它解释文字：\n第一个是 javascript 代码块（\`\`\`javascript ... \`\`\`）；\n第二个是 summary 块，用五行人话说明这个插件（每行 ≤25 字）：\n\`\`\`summary\n想干什么：<一句人话>\n为什么：<主人为什么可能想要它>\n怎么改：<一行技术说明>\n影响：<会影响什么>\n代价：<成本或风险>\n\`\`\``;
   const raw = await _ctx.reasonComplete([{ role: "user", content: prompt }], _ctx.settings(), 3000);
@@ -569,20 +607,23 @@ function validatePluginCode(code, name) {
   if (!/^self-[a-z0-9-]{1,30}$/.test(name)) return { ok: false, msg: "插件名不合法（必须 self-小写单词）" };
   if (!/module\.exports\s*=/.test(code)) return { ok: false, msg: "缺少 module.exports" };
   if (code.includes("process.exit")) return { ok: false, msg: "不允许 process.exit" };
+  /* 阶段二（Kimi 审查）：审批前绝不执行生成代码——只做文本黑名单 + node --check 静态检查。
+   * 正则不是安全边界（真隔离需进程权限模型），它只是第一道粗筛；真正的边界是
+   * 最小权限 ctx（send/config/apiKey 不可见）+ 主人审批 + 24h 观察 + 自动回滚。 */
+  const STATIC_BANS = ["child_process", "eval(", "new Function", "process.env", "import("];
+  for (const b of STATIC_BANS) {
+    if (code.includes(b)) return { ok: false, msg: "包含危险调用（" + b + "），不予通过" };
+  }
   const tmp = path.join(_ctx.DATA_DIR, "sm-test-" + Date.now() + ".js");
   fs.writeFileSync(tmp, code);
-  let loadOk = false, msg = "";
+  let ok = false, msg = "";
   try {
     const chk = spawnSync(process.execPath, ["--check", tmp], { encoding: "utf8", timeout: 20000 });
-    if (chk.status !== 0) { msg = "语法错误: " + String(chk.stderr || "").slice(0, 200); }
-    else {
-      const r = spawnSync(process.execPath, ["-e", "try{require(" + JSON.stringify(tmp) + ");console.log('SMOKE-OK')}catch(e){console.log('SMOKE-FAIL:'+e.message);process.exit(1)}"], { encoding: "utf8", timeout: 30000 });
-      loadOk = r.status === 0 && /SMOKE-OK/.test(r.stdout || "");
-      msg = loadOk ? "" : ("加载失败: " + String(r.stdout || r.stderr || "").slice(0, 200));
-    }
+    ok = chk.status === 0;
+    msg = ok ? "" : ("语法错误: " + String(chk.stderr || "").slice(0, 200));
   } catch (e) { msg = "校验异常: " + String(e.message).slice(0, 150); }
   try { fs.unlinkSync(tmp); } catch (e) {}
-  return { ok: loadOk, msg };
+  return { ok, msg };
 }
 /* ---- 能力扫描：新插件默认不许主动发消息（这是最大的口子） ---- */
 const DANGEROUS_APIS = ["sendPrivate", "sendGroup", "recordAndSend", "onebotSend", "sendStickerImage"];
@@ -733,7 +774,19 @@ function approveOneSelfMod(id) {
   const dest = path.join(_ctx.DATA_DIR, "..", "plugins", p.name + ".js");
   if (fs.existsSync(dest)) return `（插件 ${p.name} 已存在）`;
   try {
-    _ctx.writeFileAtomic(dest, p.code);
+    /* Kimi 返修4：发送权限双检——审批许可(p.allow_send) + manifest 声明，两者一致才放行。
+     * 批准时按 p.allow_send 同步改写生成代码里的 permissions：true 注入 "send"、false 剥掉 "send"。 */
+    let code = String(p.code || "");
+    if (p.allow_send === true) {
+      if (!/permissions\s*:\s*\[[^\]]*"send"/.test(code)) {
+        code = code.replace(/permissions\s*:\s*\[/, (m) => m + '"send", ');
+        _ctx.log("info", `自修改批准：${p.name} 已按审批许可授予发送权限（permissions 加 "send"）`);
+      }
+    } else if (/permissions\s*:\s*\[[^\]]*"send"/.test(code)) {
+      code = code.replace(/permissions\s*:\s*\[[^\]]*"send"\s*,?\s*/, (m) => m.replace(/"send"\s*,?\s*/, ""));
+      _ctx.log("info", `自修改批准：${p.name} 未获发送许可，已从 permissions 剥掉 "send"`);
+    }
+    _ctx.writeFileAtomic(dest, code);
     p.status = "approved";
     saveSelfProposals(arr);
     /* 版本历史：保留最近 5 份 */
@@ -874,6 +927,7 @@ module.exports = {
   version: "1.1.0",
   settings: [
     { key: "evolve.require_approval", label: "自我改代码需要我批准", type: "boolean", default: true, desc: "开启后，她写的新插件要先给你看、你批准才生效" },
+    { key: "evolution.auto_tune", label: "按自评自动调回复参数", type: "boolean", default: false, desc: "关闭时自我评分只记录不自动改 split_cap/reply_gap（默认关，自评不是你的真实反馈）" },
   ],
   init(ctx) { _ctx = ctx; refreshEvolve(); lastWishAttempt = Date.now(); },
   hooks: {
@@ -894,13 +948,14 @@ module.exports = {
       try { checkSelfModWatch(); } catch (e) {}
     },
   },
-  apiSpec: {"evolution":{"selfReflection":{"input":"","output":"","sideEffect":""},"evolveExplore":{"input":"","output":"","sideEffect":""},"tunePrefFromScore":{"input":"","output":"","sideEffect":""},"extractSelfIdentity":{"input":"","output":"","sideEffect":""},"selfScoreReply":{"input":"","output":"","sideEffect":""},"matchSkillRule":{"input":"","output":"","sideEffect":""},"runSkillRule":{"input":"","output":"","sideEffect":""},"addWish":{"input":"","output":"","sideEffect":"写盘"},"loadWishes":{"input":"","output":"","sideEffect":"只读"},"loadProposals":{"input":"","output":"","sideEffect":"只读"},"exploreFun":{"input":"","output":"","sideEffect":""},"addIdentityItem":{"input":"","output":"","sideEffect":"写盘"},"selfModify":{"input":"","output":"","sideEffect":""},"approveSelfMod":{"input":"","output":"","sideEffect":""},"rejectSelfMod":{"input":"","output":"","sideEffect":""},"listSelfMods":{"input":"","output":"","sideEffect":"只读"},"rollbackSelf":{"input":"","output":"","sideEffect":""},"scanCapabilities":{"input":"","output":"","sideEffect":"只读"},"proposalDetail":{"input":"","output":"","sideEffect":"只读"},"summaryText":{"input":"","output":"","sideEffect":"只读"},"nearDupSelf":{"input":"","output":"","sideEffect":"只读"},"cleanExpiredProposals":{"input":"","output":"","sideEffect":"写盘"},"recordSelfFailure":{"input":"","output":"","sideEffect":"写盘"},"checkSelfSunset":{"input":"","output":"","sideEffect":""},"proposalCountThisMonth":{"input":"","output":"","sideEffect":"只读"},"approveOneSelfMod":{"input":"","output":"","sideEffect":"写盘"},"looksLikeUnverifiedDeed":{"input":"","output":"","sideEffect":""}}},
+  apiSpec: {"evolution":{"selfReflection":{"input":"","output":"","sideEffect":""},"evolveExplore":{"input":"","output":"","sideEffect":""},"tunePrefFromScore":{"input":"","output":"","sideEffect":""},"extractSelfIdentity":{"input":"","output":"","sideEffect":""},"selfScoreReply":{"input":"","output":"","sideEffect":""},"matchSkillRule":{"input":"","output":"","sideEffect":""},"runSkillRule":{"input":"","output":"","sideEffect":""},"addWish":{"input":"","output":"","sideEffect":"写盘"},"loadWishes":{"input":"","output":"","sideEffect":"只读"},"loadProposals":{"input":"","output":"","sideEffect":"只读"},"exploreFun":{"input":"","output":"","sideEffect":""},"addIdentityItem":{"input":"","output":"","sideEffect":"写盘"},"selfModify":{"input":"","output":"","sideEffect":""},"approveSelfMod":{"input":"","output":"","sideEffect":""},"rejectSelfMod":{"input":"","output":"","sideEffect":""},"listSelfMods":{"input":"","output":"","sideEffect":"只读"},"rollbackSelf":{"input":"","output":"","sideEffect":""},"scanCapabilities":{"input":"","output":"","sideEffect":"只读"},"proposalDetail":{"input":"","output":"","sideEffect":"只读"},"summaryText":{"input":"","output":"","sideEffect":"只读"},"nearDupSelf":{"input":"","output":"","sideEffect":"只读"},"cleanExpiredProposals":{"input":"","output":"","sideEffect":"写盘"},"recordSelfFailure":{"input":"","output":"","sideEffect":"写盘"},"checkSelfSunset":{"input":"","output":"","sideEffect":""},"proposalCountThisMonth":{"input":"","output":"","sideEffect":"只读"},"approveOneSelfMod":{"input":"","output":"","sideEffect":"写盘"},"looksLikeUnverifiedDeed":{"input":"","output":"","sideEffect":""},"validatePluginCode":{"input":"code, name","output":"{ok, msg}","sideEffect":"只读（纯静态检查，不执行代码）"}}},
 
   api: {
     evolution: {
       selfReflection, evolveExplore, tunePrefFromScore, extractSelfIdentity, selfScoreReply,
       matchSkillRule, runSkillRule, addWish, loadWishes, loadProposals, exploreFun, addIdentityItem,
       selfModify, approveSelfMod, rejectSelfMod, listSelfMods, rollbackSelf, scanCapabilities,
+      validatePluginCode,
       proposalDetail, summaryText, nearDupSelf, cleanExpiredProposals,
       recordSelfFailure, checkSelfSunset, proposalCountThisMonth, approveOneSelfMod,
       looksLikeUnverifiedDeed,

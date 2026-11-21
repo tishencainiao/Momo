@@ -38,12 +38,16 @@ T("pet 入口带 taskCtx", /buildPersonContext\(\{ sender: master, room: 0, chan
     const f = sandbox.f;
     const priv = f({ sender: 7, room: 0, channel: "private" }, {});
     T("private 装配", priv.userId === 7 && priv.call === "U7" && priv.persona === "persona-7" && priv.summaryKey === undefined && priv.taskCtx === "" && priv.memories.length === 1 && priv.settings.max_tokens === 2048 && priv.extraInfo === null);
+    T("private 渠道透传", priv.channel === "private");
     const grp = f({ sender: 7, room: 42, channel: "group" }, { taskCtx: "gctx", messageId: "m1" });
     T("group 装配", grp.summaryKey === "g42_7" && grp.extraInfo.groupId === 42 && grp.extraInfo.messageId === "m1" && grp.taskCtx === "gctx" && grp.settings.max_tokens === 250 && grp.memories[0].content === "g42m7" && grp.shortMemories[0].content === "g42s7");
+    T("group 渠道透传", grp.channel === "group");
     const pet = f({ sender: 9, room: 0, channel: "pet" }, { taskCtx: "petCtx" });
     T("pet 装配", pet.summaryKey === null && pet.extraInfo.petMode === true && pet.taskCtx === "petCtx" && pet.call === "U9" && pet.userId === 9);
+    T("pet 渠道透传", pet.channel === "pet");
     const pro = f({ sender: 7, room: 0, channel: "proactive" }, {});
     T("proactive 装配", pro.summaryKey === undefined && pro.taskCtx === "" && pro.call === "U7" && pro.extraInfo === null);
+    T("proactive 渠道透传", pro.channel === "proactive");
     const privCapped = f({ sender: 7, room: 0, channel: "private" }, { settings: { max_tokens: 200 }, taskCtx: "t" });
     T("settings 覆盖保留（预算耗尽降 200）", privCapped.settings.max_tokens === 200 && privCapped.taskCtx === "t");
   } catch (e) { T("vm 提取 buildPersonContext", false, String(e)); }

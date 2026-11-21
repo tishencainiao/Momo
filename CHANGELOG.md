@@ -22,7 +22,12 @@
 > v1.46.2 起按月份拆分：明细在 `docs/changelog/<年>-<月>.md`，本文件只留规则与索引。
 > 较早版本的完整正文可直接读对应月份文件，或 `git log`。
 
-### 2026-11（135 个版本）→ [docs/changelog/2026-11.md](docs/changelog/2026-11.md)
+### 2026-11（139 个版本）→ [docs/changelog/2026-11.md](docs/changelog/2026-11.md)
+
+| v1.99.10 | 2026-11-21 | 阶段0+1（Kimi 远期路线）：稳定性基线报告 docs/stability-baseline.md + 24h 模拟时钟测试 test/stability-sim.js（11 场景：重启对账/提醒失败重试/主动门禁/预算耗尽/身体离线/并发同文/跨天恢复）+ 健康快照框架服务 health（/体检，ws/身体/嵌入/预算/账本/工具六源探活，进程活着≠能力可用）+ 感知事件框架服务 perception（user_report/system_observation/tool_result 三源归一 tail 消费，model_inference 仅声明；/感知 命令）+ 工具结果流水 tool-outcomes.jsonl（256KB 有界）+ OneBot wsStatus 暴露；Kimi 返修加固：感知事件按 actor_scope/privacy_scope 隔离（两用户两群互不可见，system 全局）+ 用户陈述改 reported 口径 + consumeTail 哈希防重（同毫秒不丢事件）+ ToolOutcome 带 action_key/verification_event_id 并传入 before_send（usedTools 降级为弱匹配）+ 健康三误判修正（embed 函数调用/账本损坏 unknown/全 unknown 工具 stale）+ 基线证据修正 |
+| v1.99.9 | 2026-11-21 | 行动账本加固（Kimi 二轮+三轮返修）：tryBeginAction 并发占用语义 + 并发同文只发一次 + 发空间 24h 同内容幂等去重 + 提醒到期执行等发送结果（失败不写成功凭据、可重试、未到期不进 open 不随重启取消）+ 发送结果语义化（succeeded/duplicate_succeeded/running/failed/unknown，同键并发共享同一 Promise 真实结果）+ 失败消息不写会话历史 + 主动搭话/心智分享消费发送结果 + usedTools 结构化 ok 判定 + 生活日志过滤 verified/proposed/cancelled + 空间日报幂等命中不标记已发 |
+| v1.99.8 | 2026-11-21 | Kimi 三轮+四轮返修：完全相同记忆按 from 隔离（含完全重复）、移除伪 topic 上限、文件写入路径规范化+生成器上下文对齐、silenceStreak 跨天清零顺序修复（evaluateSilenceState 统一门禁纯函数）+ 投喂台词与测试路径收尾 |
+| v1.99.7 | 2026-11-21 | Kimi 二轮返修：审计 before_send 真实接线（channel 透传）+ self-* 沙箱真允许列表 + 成长记忆默认不可信（verified 分层/同 from 去重/结构化 topic）+ silence 6h 日期维度（跨天恢复） + 提示词残留清理 + doc-check 提示词全文一致 |
 
 | v1.98.9 | 2026-11-15 | 修复：R1 原子写回归（createHost 补传 writeFileAtomic/writeJsonAtomic）+ 桌宠报时状态自我覆盖死循环 |
 

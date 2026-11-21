@@ -52,16 +52,43 @@ async function publishQzone(content, images) {
   const payload = { content, ugc_right: ugc };
   const imgs = Array.isArray(images) ? images.filter(Boolean) : [];
   if (imgs.length) payload.images = imgs;
-  const r = await fetch(http + "/send_qzone_msg", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok || j.status !== "ok") throw new Error(j.wording || j.status || ("HTTP " + r.status));
-  const tid = (j.data && j.data.tid) || "";
-  recordQzonePost(tid, content);
-  try { _ctx.recordAction({ action: "qzone_post", by: Number((payload && payload._by) || 0), detail: `${imgs.length ? "配图" : "纯文字"}：${String(content).slice(0, 40)}`, ok: true }); } catch (e) {}
-  return j;
+  /* 阶段一：发空间是有副作用的行动 → 幂等键 + 抢占 + 去重。
+   * - 同内容 24h 内已 succeeded → 不重发（业务去重）；
+   * - tryBeginAction 抢占失败 = 同键正在执行 → 不重发（并发去重）。 */
+  const _idem = _ctx.actionKey ? _ctx.actionKey("qzone_post", String(content).slice(0, 80)) : null;
+  if (_idem && _ctx.loadActions) {
+    try {
+      const _prev = _ctx.loadActions(200).find((a) => a && a.key === _idem && a.status === "succeeded" && (Date.now() - (a.ts || 0) < 24 * 3600e3));
+      if (_prev) { try { _ctx.log("info", `qzone 跳过重复发布（24h 幂等命中 ${_idem}）`); } catch (e) {} return { status: "ok", data: { dedup: true } }; }
+    } catch (e) {}
+  }
+  const _t = (_ctx.actionKey && _ctx.tryBeginAction)
+    ? _ctx.tryBeginAction({ action: "qzone_post", key: _idem, channel: "private", userId: Number((payload && payload._by) || 0), requestedBy: "qzone-plugin", detail: `${imgs.length ? "配图" : "纯文字"}：${String(content).slice(0, 40)}` })
+    : { key: _idem, acquired: true };
+  if (!_t.acquired) { try { _ctx.log("info", `qzone 跳过并发重复发布（同键执行中 ${_idem}）`); } catch (e) {} return { status: "ok", data: { dedup: true } }; }
+  const _k = _t.key;
+  let _ok = false, _err = "", _tid = "";
+  try {
+    const r = await fetch(http + "/send_qzone_msg", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j.status !== "ok") throw new Error(j.wording || j.status || ("HTTP " + r.status));
+    _tid = (j.data && j.data.tid) || "";
+    recordQzonePost(_tid, content);
+    _ok = true;
+    return j;
+  } catch (e) {
+    _err = String((e && e.message) || "publish failed");
+    throw e;
+  } finally {
+    if (_k) {
+      try { _ctx.endAction(_k, { ok: _ok, error: _err, summary: _ok ? "已发布" : "发布失败" }); } catch (e) {}
+      /* 结果已验证：有真实 tid 回执才独立记 verified（P1-3：无回执 ID 只能是「工具已返回成功」） */
+      if (_ok && _tid && _ctx.verifyAction) { try { _ctx.verifyAction(_k, { ok: true, eventId: _tid, summary: "QQ 空间发布回执（tid）确认" }); } catch (e) {} }
+    }
+  }
 }
 
 /* 判断一段对话值不值得发（顺带给情绪，用于配图） */
@@ -106,9 +133,15 @@ async function qzoneDailyPost() {
   const settings = _ctx.settings();
   const post = await selfQzonePost(settings);
   if (!post) return;
-  await publishQzone(post, pickQzoneImage(post));
-  st.last_self = _ctx.dayStr(0);
-  saveQzoneState(st);
+  const _pub = await publishQzone(post, pickQzoneImage(post));
+  /* Kimi 三轮：幂等命中（24h 已发过/并发去重）≠ 今天真的发出了——不得标记「今天已发」，
+   * 否则原发布最终失败（或昨天深夜发过）时，今天会被误标已发而不再尝试 */
+  if (_pub && _pub.data && _pub.data.dedup === true) {
+    _ctx.log("info", "空间保底发布幂等命中，未标记今天已发");
+  } else {
+    st.last_self = _ctx.dayStr(0);
+    saveQzoneState(st);
+  }
   _ctx.log("info", `空间保底发布: ${post.slice(0, 40)}`);
 }
 

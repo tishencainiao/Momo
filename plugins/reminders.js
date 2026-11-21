@@ -71,7 +71,11 @@ module.exports = {
         return "【失败】没听出时间和内容，提醒没有设置成功。请让对方说清楚「几分钟后」或「几点」，内容是什么。不要回答已经设好。";
       }
       const r = loadReminders();
-      r.push({ id: "r" + Date.now().toString(36), userId: info.userId, text: rem.text, dueTs: rem.dueTs, done: false });
+      const nid = "r" + Date.now().toString(36);
+      /* Kimi 二轮 P0-3 方案 b：未到期的持久计划不进 open 行动表（不 propose），
+       * 到期真正准备执行时才 tryBegin→end。这样重启对账不会把未来提醒误标 cancelled。 */
+      const actKey = _ctx.actionKey ? _ctx.actionKey("reminder_fire", info.userId, rem.text, rem.dueTs) : "";
+      r.push({ id: nid, userId: info.userId, text: rem.text, dueTs: rem.dueTs, done: false, actKey });
       saveReminders(r);
       return `【成功】已设置提醒：${_ctx.formatGap(rem.dueTs - Date.now())}后提醒「${rem.text}」`;
     },
@@ -92,22 +96,44 @@ module.exports = {
       if (now - lastCheck < 30000) return;
       lastCheck = now;
       const r = loadReminders();
-      let changed = false;
-      for (const x of r) {
-        if (x.done || x.dueTs > now) continue;
-        x.done = true; changed = true;
-        _ctx.recordAndSend(Number(x.userId), `⏰ 提醒你：${x.text}`).catch(() => {});
-        if (cfgBool("reminder.desktop_toast", true)) showDesktopToast("Momo 提醒", x.text);
-        // v0.6：桌面上也播报一句（身体在跑时才有反应，失败静默）
-        try {
-          const ba = _ctx.getApi("body");
-          if (ba && typeof ba.announce === "function") {
-            ba.announce(`⏰ 到点啦：${x.text}`, { duration_ms: 8000 }).catch(() => {});
+      const due = r.filter((x) => !x.done && x.dueTs <= now);
+      if (!due.length) return;
+      for (const x of due) {
+        const key = x.actKey || (_ctx.actionKey ? _ctx.actionKey("reminder_fire", Number(x.userId) || 0, String(x.text), Number(x.dueTs) || 0) : "");
+        if (key && x.actKey !== key) x.actKey = key;
+        /* Kimi 二轮 P0-2：发送成功后才 done=true + endAction(succeeded)；
+         * 失败写 failed 凭据、保留提醒下轮重试（最多 5 次后放弃），绝不「没发就记成功」。 */
+        (async () => {
+          if (x.done) return;
+          const t = (key && _ctx.tryBeginAction)
+            ? _ctx.tryBeginAction({ key, action: "reminder_fire", channel: "private", userId: Number(x.userId) || 0, requestedBy: Number(x.userId) || 0, detail: `提醒「${String(x.text).slice(0, 30)}」` })
+            : { key, acquired: true };
+          if (!t.acquired) return;   // 同键并发触发：交给已在执行的那次
+          /* Kimi 三轮：消费语义化结果——只有 succeeded / duplicate_succeeded（此前已成功送达）才算发出 */
+          const _sr = await _ctx.recordAndSend(Number(x.userId), `⏰ 提醒你：${x.text}`).catch(() => null);
+          const sent = !!(_sr && (_sr.result === "succeeded" || _sr.result === "duplicate_succeeded"));
+          if (sent) {
+            x.done = true;
+            if (key && _ctx.endAction) { try { _ctx.endAction(key, { ok: true, summary: "提醒已触发并发出" }); } catch (e) {} }
+            if (cfgBool("reminder.desktop_toast", true)) showDesktopToast("Momo 提醒", x.text);
+            // v0.6：桌面上也播报一句（身体在跑时才有反应，失败静默）
+            try {
+              const ba = _ctx.getApi("body");
+              if (ba && typeof ba.announce === "function") {
+                ba.announce(`⏰ 到点啦：${x.text}`, { duration_ms: 8000 }).catch(() => {});
+              }
+            } catch (e) {}
+            _ctx.log("info", `提醒触发 → ${x.userId}: ${x.text.slice(0, 30)}`);
+          } else {
+            x.failCount = (x.failCount || 0) + 1;
+            if (key && _ctx.endAction) { try { _ctx.endAction(key, { ok: false, error: "QQ 发送失败", summary: "提醒发送失败" }); } catch (e) {} }
+            if (x.failCount >= 5) { x.done = true; _ctx.log("warn", `提醒重试 5 次仍失败，放弃 → ${x.userId}: ${String(x.text).slice(0, 30)}`); }
+            else _ctx.log("warn", `提醒发送失败(${x.failCount}/5)，下轮重试 → ${x.userId}: ${String(x.text).slice(0, 30)}`);
           }
-        } catch (e) {}
-        _ctx.log("info", `提醒触发 → ${x.userId}: ${x.text.slice(0, 30)}`);
+          saveReminders(r);
+        })().catch((e) => { try { _ctx.log("warn", "提醒触发异常: " + String(e && e.message).slice(0, 80)); } catch (e2) {} });
       }
-      if (changed) saveReminders(r);
+      saveReminders(r);   // actKey 回填立即落盘
     },
   },
 };

@@ -9,7 +9,7 @@ function createHost(core) {
   const toolRegistry = new Map();      // toolName -> { def, handler }
   const commandRegistry = new Map();   // key -> { regex, handler }
   const apis = new Map();              // 插件导出的能力（供内核/其他插件调用）
-  const hookLists = { startup: [], timer: [], private_message: [], group_message: [], reply: [] };
+  const hookLists = { startup: [], timer: [], private_message: [], group_message: [], reply: [], before_send: [] };
   const contextProviders = [];         // () => [{role,content}] 注入核心上下文
 
   /* 可配置参数（settings registry）：插件声明 settings，Momo 可查询/修改
@@ -82,6 +82,82 @@ function createHost(core) {
     return true;
   }
 
+  /* 阶段二（Kimi 审查）：self-* 自建插件的最小权限 ctx。
+   * 自建插件默认拿不到：config / apiKey / settings() / 一切发送接口（sendPrivate/sendGroup/
+   * recordAndSend/onebotSend/sendStickerImage）——这些只有在 manifest.permissions 显式声明
+   * "send"（或 "config"/"apiKey"）时才放行。其余能力照常（预算、记忆、日志都带全局闸门）。
+   * 注意：这不是安全沙箱（插件仍可 require('fs') 等），真隔离需进程权限模型；它是
+   * 「未声明能力不可见/调用即拒」的最小权限层。 */
+  const SELF_DENY_SEND = ["sendPrivate", "sendGroup", "recordAndSend", "onebotSend", "sendStickerImage"];
+  /* Kimi 返修4：真允许列表——self-* 只拿 SELF_ALLOW 白名单里的只读/受控能力，
+   * 其余 ctx 全部不可见；getApi 只放行 manifest.requires 声明的命名空间；
+   * 文件写入强制限定在 DATA_DIR/SELF_DIR 内。
+   * 注意：SELF_ALLOW 是「统一安全能力白名单」（所有 self-* 共用同一份），
+   * 不是按每个插件 permissions 逐项声明的完整最小权限——permissions 目前只控制
+   * send/config/apiKey/settings 四个高敏感项是否放行。 */
+  const SELF_ALLOW = [
+    "log", "isMaster", "resolveCall", "recordAction", "loadActions", "getSetting",
+    "getEmotion", "getMood", "moodLabel", "getBoredom",
+    "loadMemories", "loadShortMemories", "getFavor",
+    "canAfford", "isBudgetExhausted", "budgetLevel", "budgetCfg",
+    "todayText", "dateText", "periodOfDay", "hourNow", "hmNow", "formatGap",
+    "loadSession", "loadEvolution", "loadMindState", "thoughtTexts", "openLoopsText", "textSimilar",
+    "DATA_DIR", "SELF_DIR",
+  ];
+  function _inDataScope(file) {
+    /* Kimi 返修3（三轮）：路径规范化——先 resolve 再 relative 判断是否仍在根内，防 DATA_DIR/../outside 绕过 */
+    let p;
+    try { p = path.resolve(String(file || "")); } catch (e) { return false; }
+    const roots = [core.DATA_DIR, core.SELF_DIR].filter(Boolean);
+    return roots.some((r) => {
+      let rr;
+      try { rr = path.resolve(String(r)); } catch (e) { return false; }
+      const rel = path.relative(rr, p);
+      return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+    });
+  }
+  function _denySendStub(k) {
+    return () => {
+      const msg = `self-* 插件未声明发送权限（manifest.permissions 需含 "send"），调用 ${k} 被拒绝`;
+      try { core.log("warn", msg); } catch (e) {}
+      throw new Error(msg);
+    };
+  }
+  function makeSelfCtx(fullCtx, permissions, requires) {
+    const perms = Array.isArray(permissions) ? permissions : [];
+    const reqs = Array.isArray(requires) ? requires : [];
+    const out = {};
+    for (const k of SELF_ALLOW) {
+      if (k in fullCtx) out[k] = fullCtx[k];
+    }
+    /* 未声明的隐私/发送能力：显式占位（调用即拒 + 记日志），防 undefined 静默失败 */
+    if (perms.includes("config")) out.config = fullCtx.config;
+    if (perms.includes("apiKey")) out.apiKey = fullCtx.apiKey;
+    if (perms.includes("settings")) out.settings = fullCtx.settings;
+    for (const k of SELF_DENY_SEND) {
+      if (perms.includes("send")) { if (k in fullCtx) out[k] = fullCtx[k]; }
+      else out[k] = _denySendStub(k);
+    }
+    /* getApi：只放行 requires 声明的命名空间（防拿到 roles/capability 等越权） */
+    out.getApi = (ns) => {
+      if (reqs.includes(ns) || perms.includes(ns)) {
+        return apis.get(ns);
+      }
+      try { core.log("warn", `self-* 插件未声明依赖命名空间 "${ns}"（manifest.requires 需包含），getApi 被拒绝`); } catch (e) {}
+      return undefined;
+    };
+    /* 文件写入：路径强制限定 DATA_DIR/SELF_DIR */
+    out.writeJsonAtomic = (file, obj) => {
+      if (!_inDataScope(file)) { const m = `self-* 插件越界写入被拒: ${file}`; try { core.log("warn", m); } catch (e) {} throw new Error(m); }
+      return core.writeJsonAtomic(file, obj);
+    };
+    out.writeFileAtomic = (file, text) => {
+      if (!_inDataScope(file)) { const m = `self-* 插件越界写入被拒: ${file}`; try { core.log("warn", m); } catch (e) {} throw new Error(m); }
+      return core.writeFileAtomic(file, text);
+    };
+    return out;
+  }
+
   const ctx = {
     log: (l, m) => core.log(l, m),
     get config() { return core.cfg; },
@@ -91,6 +167,14 @@ function createHost(core) {
     getSetting: (k, d) => getSetting(k, d),
     setSetting: (k, v) => setSetting(k, v),
     recordAction: (e) => core.recordAction(e),    loadActions: (n) => core.loadActions(n),
+    /* 阶段一：行动凭据（begin/end 状态机 + 幂等键；createHost 已传同参） */
+    beginAction: (m) => core.beginAction(m),
+    tryBeginAction: (m) => core.tryBeginAction(m),
+    endAction: (k, r) => core.endAction(k, r),
+    actionKey: (...parts) => core.actionKey(...parts),
+    proposeAction: (m) => core.proposeAction(m),
+    cancelAction: (k, reason) => core.cancelAction(k, reason),
+    verifyAction: (k, r) => core.verifyAction(k, r),
     getUserStatus: (u) => core.getCurrentStatus(u),
     isUserQuiet: (u) => core.userQuietState(u),
     markProbed: (u) => core.markProbed(u),
@@ -99,6 +183,9 @@ function createHost(core) {
     sendPrivate: (u, t) => core.sendPrivate(u, t),
     sendGroup: (g, t) => core.onebotSend("send_msg", { message_type: "group", group_id: Number(g), message: [{ type: "text", data: { text: String(t) } }] }),
     recordAndSend: (u, t) => core.recordAndSend(u, t),
+    /* 阶段1：健康快照数据源（进程活着 ≠ 能力可用） */
+    wsStatus: () => (typeof core.wsStatus === "function" ? core.wsStatus() : { state: "unknown", since: 0, lastError: "" }),
+    loadToolOutcomes: (n) => (typeof core.loadToolOutcomes === "function" ? core.loadToolOutcomes(n) : []),
     onebotSend: (a, p) => core.onebotSend(a, p),
     sendStickerImage: (u, s) => core.sendStickerImage(u, s),
     describeImageFile: (file, prompt) => { const v = apis.get("vision"); if (!v) throw new Error("视觉插件未加载"); return v.describeImageFile(file, prompt); },
@@ -264,7 +351,7 @@ function createHost(core) {
     for (const c of (mod.commands || [])) {
       if (c && c.key && c.regex) { commandRegistry.set(c.key, c); rec.commands.push(c.key); }
     }
-    for (const k of ["startup", "timer", "private_message", "group_message", "reply"]) {
+    for (const k of ["startup", "timer", "private_message", "group_message", "reply", "before_send"]) {
       if (mod.hooks && typeof mod.hooks[k] === "function") {
         const fn = mod.hooks[k].bind(mod);
         hookLists[k].push(fn);
@@ -277,7 +364,10 @@ function createHost(core) {
       rec.ctxProviders.push(cp);
     }
     if (mod.api) for (const [k, v] of Object.entries(mod.api)) { apis.set(k, v); rec.apis.push(k); }
-    if (typeof mod.init === "function") { try { mod.init(ctx); } catch (e) { core.log("warn", `插件 ${mod.name} init 失败: ${e.message.slice(0, 120)}`); } }
+    if (typeof mod.init === "function") {
+      const isSelf = /^self-/.test(String(mod.name || ""));
+      try { mod.init(isSelf ? makeSelfCtx(ctx, mod.permissions, mod.requires) : ctx); } catch (e) { core.log("warn", `插件 ${mod.name} init 失败: ${e.message.slice(0, 120)}`); }
+    }
     pluginRecords.set(file, rec);
     return mod;
   }
@@ -295,9 +385,9 @@ function createHost(core) {
     return bad;
   }
 
-  function loadPlugins() {
+  function loadPlugins(dirOverride) {
     loadDisabled();
-    const dir = path.join(__dirname, "plugins");
+    const dir = dirOverride || path.join(__dirname, "plugins");
     if (!fs.existsSync(dir)) return;
     const files = fs.readdirSync(dir).filter((x) => x.endsWith(".js") && !x.startsWith("_")).sort();
     for (const f of files) {
@@ -367,7 +457,7 @@ function createHost(core) {
 
   function allToolDefs() { return core.AGENT_TOOLS.concat(plugins.flatMap((p) => (p.tools || []).map((t) => t.def))); }
 
-  return { plugins, toolRegistry, commandRegistry, apis, hookLists, contextProviders, loadPlugins, runHook, runBeforeSend, allToolDefs, ctx, reloadPlugin, watchPlugins, checkRequires, pluginRecords, setPluginEnabled, pluginState: () => ({ disabled: Array.from(disabledSet) }) };
+  return { plugins, toolRegistry, commandRegistry, apis, hookLists, contextProviders, loadPlugins, runHook, runBeforeSend, allToolDefs, ctx, reloadPlugin, watchPlugins, checkRequires, pluginRecords, setPluginEnabled, pluginState: () => ({ disabled: Array.from(disabledSet) }), makeSelfCtx: (fullCtx, perms, reqs) => makeSelfCtx(fullCtx || ctx, perms, reqs) };
 }
 
 module.exports = { createHost };

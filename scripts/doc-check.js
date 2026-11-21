@@ -137,6 +137,26 @@ if (!indexText) {
   if (missing === 0) ok('索引完整性：docs/index.md 覆盖 ' + topMd.length + ' 份顶层文档');
 }
 
+// 8) 提示词一致性：docs/prompt-map.md 引用常量与 prompts.js 实际常量**全文一致**（Kimi 收尾：只比首行 24 字会漏中间漂移）
+try {
+  const prompts = require(path.join(root, 'prompts.js'));
+  const pmNorm = (readText(path.join(root, 'docs', 'prompt-map.md')) || '').replace(/\r/g, '');
+  const keys = ['STYLE_DIRECTIVE', 'SITUATION_QQ', 'SITUATION_DESKTOP', 'SELF_AWARENESS', 'PRIVACY_DIRECTIVE', 'GROUP_DIRECTIVE'];
+  if (!pmNorm) {
+    fail('docs/prompt-map.md 不存在');
+  } else {
+    let mismatch = 0;
+    for (const k of keys) {
+      const v = String(prompts[k] || '').replace(/\r/g, '');
+      if (v && v.trim() && !pmNorm.includes(v)) {
+        fail('prompt-map.md 与 prompts.js 不一致：' + k + ' 全文对不上（提示词改了要同步 §4 全文）');
+        mismatch++;
+      }
+    }
+    if (mismatch === 0) ok('提示词一致性：prompt-map.md 六个常量与 prompts.js 全文对齐');
+  }
+} catch (e) { fail('prompts.js 加载失败：' + e.message); }
+
 console.log('');
 if (problems.length === 0) {
   console.log('[doc-check] 通过：无偏差');
