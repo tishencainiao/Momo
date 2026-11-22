@@ -44,7 +44,7 @@ check("没有中二腔", hit.length === 0, hit.join(","));
 // 4. 运行状态
 check("有 BOOT_TS", src.includes("const BOOT_TS = Date.now()"));
 check("动态块注入运行状态", src.includes("【你的运行状态】"));
-check("刚启动时提醒别假装记得", src.includes("别假装记得"));
+check("刚启动时如实区分重启与失忆（B22）", src.includes("刚刚重启上线") && src.includes("这是新进程、不是新人格") && !src.includes("之前那段对你来说还是空白的"));
 
 // 5. 注入了 messages
 check("SELF_AWARENESS 被推入 messages", src.includes("content: SELF_AWARENESS"));

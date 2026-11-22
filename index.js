@@ -349,7 +349,7 @@ const { STYLE_DIRECTIVE, GROUP_DIRECTIVE, SITUATION_QQ, SITUATION_DESKTOP, situa
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "2.0.0";
+const BASE_VERSION = "2.1.0";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -788,7 +788,7 @@ function resolveCall(userId) {
   if (allowed.indexOf(Number(userId)) >= 0) return "朋友";
   return "陌生人";
 }
-function userPersona(userId, settings) {
+function userPersona(userId, settings, ctxObj) {
   const call = resolveCall(userId);
   const _isM = isMaster(userId);
   const _allowed = ((cfg.qq && cfg.qq.allowed_users) || []).map(Number);
@@ -805,7 +805,7 @@ function userPersona(userId, settings) {
     : `【称呼】对方不是你的主人，称呼他「${call}」或「你」，语气自然友好。\n【权限认知】找文件、截图、开软件、代发QQ等电脑/QQ操作只有主人能用；对方要求这类事时自然婉拒（如「这个只有我主人能用哦～」），不要答应、也不要假装做过了。`;
   /* 记忆消化：有「认识」就用认识替代流水账（默认关，settings 打开） */
   let _mdText = null;
-  try { const _md = host && apiOf("memoryDigest"); _mdText = _md ? _md.digestText(userId) : null; } catch (e) {}
+  try { const _md = host && apiOf("memoryDigest"); _mdText = _md ? _md.digestText(userId, ctxObj || { channel: "private", groupId: 0 }) : null; } catch (e) {}
   const growth = _mdText ? null : evolIdentityText(userId);
   const lessons = _mdText ? null : evolReflectionText(userId);
   /* 双轨注入：消化摘要（长期认识）+ 最近 8 条原文（近期鲜活细节） */
@@ -1055,6 +1055,10 @@ const thinkStreak = new Map();
  * env: { sender=说话的人, room=0私聊/群号, channel=private|group|proactive|pet }
  * opts 可覆盖：settings（如预算耗尽降 200）、taskCtx、messageId（群聊） */
 function buildPersonContext(env, opts) {
+  /* v2.1 WP2：私聊/桌宠上下文排除群记忆（B07 群记忆不进私聊/pet；legacy 无 scope 保留） */
+  function nonGroupMemories(items) {
+    return (items || []).filter((m) => !(Number(m.groupId || 0) > 0) && String(m.channel || "") !== "group");
+  }
   const o = opts || {};
   const userId = Number(env.sender);
   const settings = Object.assign({}, o.settings || resolveChatSettings());
@@ -1068,17 +1072,17 @@ function buildPersonContext(env, opts) {
     summaryKey = "g" + groupId + "_" + userId;
     extraInfo = { groupId, messageId: o.messageId };
   } else if (env.channel === "pet") {
-    memories = loadMemories(userId);
-    shortMemories = pruneShortMemories(userId);
+    memories = nonGroupMemories(loadMemories(userId));
+    shortMemories = nonGroupMemories(pruneShortMemories(userId));
     summaryKey = null;
     extraInfo = { petMode: true };
   } else {
-    memories = loadMemories(userId);
-    shortMemories = pruneShortMemories(userId);
+    memories = nonGroupMemories(loadMemories(userId));
+    shortMemories = nonGroupMemories(pruneShortMemories(userId));
     summaryKey = undefined;
   }
   call = resolveCall(userId);
-  persona = userPersona(userId, settings);
+  persona = userPersona(userId, settings, { channel: env.channel, groupId: extraInfo && extraInfo.groupId ? extraInfo.groupId : 0 });
   /* E3 跨通道镜头：QQ 与桌宠互见最近 3 条（切换通道不失忆） */
   let channelLens = "";
   try {
@@ -1152,7 +1156,7 @@ async function agentChatOnce(history, userText, pctx) {
   try {
     const upMs = Date.now() - BOOT_TS;
     const upTxt = upMs < 10 * 60000
-      ? "刚启动不久（之前那段对你来说还是空白的，别假装记得）"
+      ? "刚刚重启上线（这是新进程、不是新人格；会话、记忆与摘要照旧随上下文注入，能读到的就是有效的，没读到或中断期间的事照实说不记得，别编造）"
       : `这次已经连续运行了 ${formatGap(upMs)}`;
     _dput("now", `【你的运行状态】${upTxt}。`);
   } catch (e) {}
@@ -1163,7 +1167,7 @@ async function agentChatOnce(history, userText, pctx) {
     _dput("now", `【生活费】${budgetLine()}，状态${lvName}。钱紧时就别做花钱的事，好好陪对方聊天。`);
   } catch (e) {}
   /* —— 区二【你记得的】按需：flash/minimal 档不注入，省 token —— */
-  const _mdHas = (() => { try { const a = host && apiOf("memoryDigest"); return a ? a.hasDigest(userId) : false; } catch (e) { return false; } })();
+  const _mdHas = (() => { try { const a = host && apiOf("memoryDigest"); return a ? a.hasDigest(userId, { channel: (pctx && pctx.channel) || "private", groupId: (_extraInfo && _extraInfo.groupId) || 0 }) : false; } catch (e) { return false; } })();
   if (_tierLv >= 1) {
     if (memories && memories.length) {
       if (!_mdHas) _dput("mem", memoryIndexPrompt(memories, call));
@@ -2710,7 +2714,7 @@ async function processPrivateChat(userId, text, images, voiceRequested, msgTime)
     const history = loadSession(userId);
     const memories = loadMemories(userId);
     const shortMemories = pruneShortMemories(userId);
-    const persona = userPersona(userId, settings);
+    const persona = userPersona(userId, settings, { channel: "private", groupId: 0 });
     let taskCtx = "";
     const pcApi = host && apiOf("pcTools");
     if (master && !budgetOut && pcApi) {

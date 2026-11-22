@@ -6,6 +6,7 @@
 const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
+const crypto = require("crypto");
 let _ctx = null;
 let _timer = null;
 
@@ -31,7 +32,10 @@ function tick() {
   const st = loadState();
   if (!dailyDue(now, st)) return;
   runDigest([]).then((r) => {
-    if (!r.ok) { try { _ctx.log("warn", "每日记忆消化失败：" + (r.err || r.msg || "")); } catch (e) {} return; }
+    if (!r.all) {
+      try { _ctx.log("warn", "每日记忆消化未全部成功（成功 " + (r.okNames || []).length + " / 失败 " + (r.failNames || []).length + "），今天不标记完成，稍后重试"); } catch (e) {}
+      return;
+    }
     const st2 = loadState();
     st2.lastDate = now.toDateString();
     st2.lastTs = Date.now();
@@ -51,7 +55,104 @@ function loadBucket(name) {
   try { return JSON.parse(fs.readFileSync(path.join(digestDir(), name + ".json"), "utf8")); } catch (e) { return null; }
 }
 function enabled() { try { return _ctx.getSetting("mem.digest.enabled", true) === true; } catch (e) { return true; } }
-function hasDigest(userId) { return !!loadBucket(String(userId)); }
+/* v2.1 WP3：稳定来源键（镜像 digest.py src_id：kind|scope|text 的 sha1 前 12 位）。
+ * 读侧只用它做「证据是否仍存在」的失效校验：旧位置号（A1/R1/M1）不再是凭据。 */
+function srcId(kind, scope, text) {
+  const h = crypto.createHash("sha1").update(kind + "|" + scope + "|" + String(text), "utf8").digest("hex").slice(0, 12);
+  return "S_" + h;
+}
+function selfDir() {
+  try { return _ctx.SELF_DIR || path.resolve(_ctx.DATA_DIR, "..", "self"); } catch (e) { return path.resolve(__dirname, "..", "self"); }
+}
+/* B12 返修：identity/reflection 条目两种形态——字符串条目正文=字符串本身；对象条目取 .text */
+function textOf(x) { return typeof x === "string" ? x : ((x && x.text) || ""); }
+function readSelfList(name) {
+  try { return JSON.parse(fs.readFileSync(path.join(selfDir(), name), "utf8")); } catch (e) { return []; }
+}
+function masterUid() {
+  try { return Number((_ctx.config && _ctx.config.qq && _ctx.config.qq.master_user) || 0); } catch (e) { return 0; }
+}
+function memScopeOf(m, uid) {
+  const u = String(uid);
+  return (String(m.channel || "") === "group" && Number(m.groupId) > 0)
+    ? "group:" + Number(m.groupId)
+    : "user:" + u;
+}
+/* 该桶现存输入换算出的「有效来源键集合」（镜像 digest.py collect 的归属规则） */
+function liveKeys(bucketName) {
+  const mu = masterUid();
+  const keys = new Set();
+  try {
+    if (bucketName === "global") {
+      /* global 桶=ident/refl 中 from==0 且未被重定向到主人的条目 */
+      const identItems = readSelfList("identity.json");
+      for (const e of identItems) {
+        const f = Number((e && e.from) || 0);
+        if (f !== 0) continue;
+        keys.add(srcId("ident", "self", textOf(e)));
+      }
+      const reflItems = readSelfList("reflections.json");
+      for (const r of reflItems) {
+        const f = Number((r && r.from) || 0);
+        if (f !== 0) continue;
+        const text = textOf(r);
+        if ((r && r.subject) === "master" || (mu && String(text).includes("主人"))) continue;
+        keys.add(srcId("refl", "self", text));
+      }
+      return keys;
+    }
+    const uid = String(bucketName);
+    /* 本人桶=该用户短期记忆 + from==该 uid 的 ident/refl + 归属主人的 refl */
+    const memSvc = _ctx.getApi ? _ctx.getApi("memory") : null;
+    const items = (memSvc && memSvc.loadMemories) ? (memSvc.loadMemories(uid) || []) : [];
+    for (const m of items) {
+      if (!m || !m.content) continue;
+      keys.add(srcId("mem", memScopeOf(m, uid), m.content));
+    }
+    const identItems = readSelfList("identity.json");
+    for (const e of identItems) {
+      if (Number((e && e.from) || 0) !== Number(uid)) continue;
+      keys.add(srcId("ident", "user:" + uid, textOf(e)));
+    }
+    const reflItems = readSelfList("reflections.json");
+    for (const r of reflItems) {
+      const text = textOf(r);
+      const mine = Number((typeof r === "object" && r && r.from) || 0) === Number(uid);
+      const toMaster = (r && r.subject) === "master" || (mu && String(text).includes("主人"));
+      if (!mine && !toMaster) continue;
+      keys.add(srcId("refl", "user:" + uid, text));
+    }
+  } catch (e) { try { _ctx.log("warn", "digest liveKeys 失败：" + e.message); } catch (e2) {} }
+  return keys;
+}
+/* fail-closed：证据为空/不是 S_ 稳定键/有任何一个已不在 live 集 → 该 topic 不注入 */
+function topicActive(t, live) {
+  if (!t || !live) return false;
+  const ev = t.evidence;
+  if (!Array.isArray(ev) || !ev.length) return false;
+  for (const k of ev) {
+    if (!/^S_[0-9a-f]{12}$/.test(String(k))) return false;
+    if (!live.has(String(k))) return false;
+  }
+  return true;
+}
+/* 桶的 topics 里筛出仍有效的（旧位置号/失效证据一律不注入） */
+function activeTopics(bucket, live) {
+  if (!bucket || !Array.isArray(bucket.topics)) return [];
+  return bucket.topics.filter((t) => topicActive(t, live));
+}
+function hasDigest(userId, opts) {
+  const c = digestCtx(opts);
+  const person = loadBucket(String(userId));
+  const global = loadBucket("global");
+  const ptop = activeTopics(person, liveKeys(String(userId)));
+  const gtop = activeTopics(global, liveKeys("global"));
+  if (!ptop.length && !gtop.length) return false;
+  if (c.channel === "group") {
+    return ptop.some((t) => String(t.privacy_scope || "") === "group:" + c.groupId) || gtop.some((t) => t.public_self === true);
+  }
+  return ptop.some((t) => !/^group:/.test(String(t.privacy_scope || "")));
+}
 function maxTopics() { try { return Math.max(3, Number(_ctx.getSetting("mem.digest.max_topics", 20)) || 20); } catch (e) { return 20; } }
 
 function fmtTopics(bucket, limit, opts) {
@@ -59,7 +160,9 @@ function fmtTopics(bucket, limit, opts) {
   const topics = (bucket && Array.isArray(bucket.topics)) ? bucket.topics : [];
   return topics
     .filter((t) => !(o.dedupFor && t.duplicate_of === o.dedupFor))
-    .filter((t) => !(o.hideMaster && /主人/.test(String(t.insight || "") + String(t.theme || ""))))
+    .filter((t) => !(o.publicOnly && t.public_self !== true))
+    .filter((t) => !(o.scopeOnly && String(t.privacy_scope || "") !== o.scopeOnly))
+    .filter((t) => !(o.excludeGroupScoped && /^group:/.test(String(t.privacy_scope || ""))))
     .slice(0, limit)
     .map((t) => `- ${t.insight || t.theme || ""}`)
     .filter((s) => s.length > 2);
@@ -71,26 +174,58 @@ function isAdmin(uid) {
   } catch (e) { return false; }
 }
 
-/* 给提示词用的消化文本：本人桶 + 通用桶；没开或没文件返回 null */
-function digestText(userId) {
+/* v2.1 WP2：digest 作用域。opts={channel,groupId}；旧签名（无 opts）按 private 安全兼容 */
+function digestCtx(opts) {
+  const o = opts || {};
+  const channel = o.channel === "group" ? "group" : "private";
+  return { channel, groupId: Number(o.groupId) || 0 };
+}
+/* 给提示词用的消化文本：按作用域取桶；没开或没文件返回 null */
+function digestText(userId, opts) {
   if (!enabled()) return null;
+  const c = digestCtx(opts);
   const limit = maxTopics();
   const admin = isAdmin(userId);
-  const person = loadBucket(String(userId));
-  const global = loadBucket("global");
+  const person = { topics: activeTopics(loadBucket(String(userId)), liveKeys(String(userId))) };
+  const global = { topics: activeTopics(loadBucket("global"), liveKeys("global")) };
   const parts = [];
+  /* 5.4/5.5：无作用域 global 只许主人 private/pet；其余上下文只放行 public_self */
+  const masterPrivate = admin && c.channel !== "group";
   if (global) {
-    /* 跨桶去重：只有当浏览者自己的桶里有同一条时，才跳过 global 那条（别把通用特质藏掉） */
-    const lines = fmtTopics(global, limit, { dedupFor: String(userId), hideMaster: !admin });
+    const lines = masterPrivate
+      ? fmtTopics(global, limit, { dedupFor: String(userId) })
+      : fmtTopics(global, limit, { publicOnly: true });
     if (lines.length) parts.push(`【你对自己的认识（消化后，比流水账更稳定）】\n${lines.join("\n")}`);
   }
   if (person) {
-    const lines = fmtTopics(person, limit, { skipDup: false });
+    /* 5.1/5.2：私聊看本人桶但排除显式群 scope 记录；群上下文只看该群 scope */
+    const lines = c.channel === "group"
+      ? fmtTopics(person, limit, { scopeOnly: "group:" + c.groupId })
+      : fmtTopics(person, limit, { excludeGroupScoped: true });
     if (lines.length) parts.push(`【你对对方的认识（消化后）】\n${lines.join("\n")}`);
   }
   return parts.length ? parts.join("\n") : null;
 }
 
+/* WP4：最小只读运行状态（读 manifest.json，不写任何文件） */
+function digestStatus() {
+  const out = { scopes: {}, pending: [], dead: [], lastSuccess: 0, stale: [], lastError: "" };
+  try {
+    const mf = JSON.parse(fs.readFileSync(path.join(digestDir(), "manifest.json"), "utf8"));
+    const scopes = (mf && mf.scopes) || {};
+    const now = Date.now();
+    for (const name of Object.keys(scopes)) {
+      const rec = scopes[name] || {};
+      out.scopes[name] = { status: rec.status || "unknown", lastSuccess: rec.last_success || 0, error: rec.error || "", sourceRevision: rec.source_revision || "", counts: rec.counts || {}, failStreak: rec.fail_streak || 0 };
+      if (rec.last_success) out.lastSuccess = Math.max(out.lastSuccess, Number(rec.last_success) || 0);
+      if (rec.error) out.lastError = String(rec.error).slice(0, 120);
+      if (rec.status && rec.status !== "ok" && rec.status !== "pending_commit") out.pending.push(name);
+      if (rec.last_success && now - Number(rec.last_success) > 7 * 24 * 3600e3) out.stale.push(name);
+      if (Number(rec.fail_streak || 0) >= 3) out.dead.push(name);
+    }
+  } catch (e) {}
+  return out;
+}
 function info() {
   const out = { enabled: enabled(), global: null, persons: [] };
   try {
@@ -121,9 +256,13 @@ function runDigest(args) {
     p.stdout.on("data", (d) => { out += d.toString(); });
     p.stderr.on("data", (d) => { err += d.toString(); });
     p.on("close", (code) => {
-      if (code === 0) { try { _ctx.recordAction({ action: "digest", ok: true }); } catch (e) {} }
+      const resLine = (out.match(/RESULT (\{[\s\S]*?\})\s*$/) || [])[1];
+      let parsed = null;
+      if (resLine) { try { parsed = JSON.parse(resLine); } catch (e) {} }
+      const all = parsed ? parsed.all === true : code === 0;
+      if (all) { try { _ctx.recordAction({ action: "digest", ok: true }); } catch (e) {} }
       try { _ctx.setActivity("发呆"); } catch (e) {}
-      resolve({ ok: code === 0, code, out: out.trim(), err: err.trim().slice(0, 400) });
+      resolve({ ok: code === 0, code, all, partial: !!(parsed && parsed.partial), okNames: (parsed && parsed.ok) || [], failNames: (parsed && parsed.failed) || [], out: out.trim(), err: err.trim().slice(0, 400) });
     });
     p.on("error", (e) => { try { _ctx.setActivity("发呆"); } catch (e2) {} resolve({ ok: false, msg: e.message }); });
   });
@@ -136,7 +275,7 @@ module.exports = {
   userScoped: true,
   requires: ["time"],
   permissions: ["DATA_DIR", "config", "getApi", "getSetting", "isMaster", "log", "recordAction", "setActivity"],
-  version: "1.0.0",
+  version: "1.2.0",
   init(ctx) { _ctx = ctx; try { startTimer(); } catch (e) {} },
   dispose() { try { if (_timer) { clearInterval(_timer); _timer = null; } } catch (e) {} },
   settings: [
@@ -151,9 +290,10 @@ module.exports = {
     { key: "mem.digest.daily", label: "每晚自动消化", type: "boolean", default: true, desc: "每天到点自动跑一次消化（依赖下面那个小时）" },
     { key: "mem.digest.hour", label: "每天几点消化", type: "number", default: 22, min: 0, max: 23, desc: "整点，默认 22 点" },
   ],
-  apiSpec: {"memoryDigest":{"digestText":{"input":"","output":"","sideEffect":""},"info":{"input":"","output":"","sideEffect":""},"runDigest":{"input":"","output":"","sideEffect":""},"enabled":{"input":"","output":"","sideEffect":""},"hasDigest":{"input":"","output":"","sideEffect":"只读"},"dailyDue":{"input":"","output":"","sideEffect":""},"tick":{"input":"","output":"","sideEffect":""}}},
+  apiSpec: {"memoryDigest":{"digestText":{"input":"","output":"","sideEffect":""},"info":{"input":"","output":"","sideEffect":""},"runDigest":{"input":"","output":"","sideEffect":""},"digestStatus":{"input":"","output":"","sideEffect":"只读"},"enabled":{"input":"","output":"","sideEffect":""},"hasDigest":{"input":"","output":"","sideEffect":"只读"},"dailyDue":{"input":"","output":"","sideEffect":""},"tick":{"input":"","output":"","sideEffect":""}}},
 
-  api: { memoryDigest: { digestText, info, runDigest, enabled, hasDigest, dailyDue, tick } },
+  api: { memoryDigest: { digestText, info, runDigest, enabled, hasDigest, dailyDue, tick, digestStatus } },
+  __test: { srcId, topicActive, liveKeys, activeTopics, digestStatus },
   tools: [
     {
       def: {

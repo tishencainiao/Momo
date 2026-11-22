@@ -262,10 +262,11 @@ function groupMemberCtx(groupId, userId) {
 /* 群梗代理（实现见 plugins/group-memes.js） */
 function groupMemesCtx(groupId) { try { const a = _ctx.getApi("groupMemes"); return a ? a.ctx(groupId) : ""; } catch (e) { return ""; } }
 function detectGroupMeme(groupId, text, userId) { try { const a = _ctx.getApi("groupMemes"); if (a) return a.detectAndLearn(groupId, text, userId); } catch (e) {} return null; }
-/* 群聊记忆隔离：别的群得来的记忆不在本群展示（私聊和未标群的照常） */
+/* 群聊记忆隔离（v2.1 WP2）：群上下文只取当前群记录；私聊/其他群/legacy 无群号一律不进入；缺 groupId 失败关闭返回空 */
 function filterMemoriesForGroup(items, groupId) {
   const g = String(groupId || "");
-  return (items || []).filter((m) => !m.groupId || String(m.groupId) === g);
+  if (!g) return [];
+  return (items || []).filter((m) => String(m.groupId || "") === g);
 }
 
 /* ---------------- 群聊日志（发言人归因）+ 跨窗口连续性 ---------------- */

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* 跨群记忆隔离测试：别的群的记忆不进本群；mergeMemories 会写 groupId */
+/* 跨群记忆隔离测试（v2.1 WP2）：群上下文严格只取本群记忆；私聊/legacy 无群号不进群（B06/B09）；mergeMemories 会写 groupId */
 const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
@@ -41,17 +41,17 @@ const mems = [
 const inG1 = filter(mems, G1).map((m) => m.content);
 check("A群能看到 A群的记忆", inG1.some((c) => c.indexOf("老八") >= 0), JSON.stringify(inG1));
 check("A群看不到 B群的记忆", !inG1.some((c) => c.indexOf("阿强") >= 0), JSON.stringify(inG1));
-check("A群能看到私聊记忆", inG1.some((c) => c.indexOf("冰美式") >= 0));
-check("A群能看到没标群的旧记忆", inG1.some((c) => c.indexOf("旧记忆") >= 0));
-check("过滤后剩 3 条", inG1.length === 3, "实际 " + inG1.length);
+check("私聊记忆不进任何群（B06）", !inG1.some((c) => c.indexOf("冰美式") >= 0), JSON.stringify(inG1));
+check("没标群的旧记忆不进群（B09 legacy）", !inG1.some((c) => c.indexOf("旧记忆") >= 0), JSON.stringify(inG1));
+check("过滤后剩 1 条（只有本群）", inG1.length === 1, "实际 " + inG1.length);
 
 const inG2 = filter(mems, G2).map((m) => m.content);
 check("B群反过来也隔离", !inG2.some((c) => c.indexOf("老八") >= 0) && inG2.some((c) => c.indexOf("阿强") >= 0));
 
-const inEmpty = filter(mems, "").length;
-check("空群号时只剩无群记忆", inEmpty === 2, "实际 " + inEmpty);
+check("空群号失败关闭（缺 groupId 不回退）", filter(mems, "").length === 0, "实际 " + filter(mems, "").length);
+check("undefined groupId 失败关闭", filter(mems, undefined).length === 0);
 check("空数组不报错", filter([], G1).length === 0);
-check("undefined 不报错", filter(undefined, G1).length === 0);
+check("undefined items 不报错", filter(undefined, G1).length === 0);
 
 /* ---- 2. mergeMemories 会写 groupId（memory.js） ---- */
 const memSrc = fs.readFileSync(path.join(ROOT, "plugins/memory.js"), "utf8");
@@ -72,7 +72,9 @@ items = merge(items, ["喜欢冰美式"], "private", "");
 check("私聊记忆 groupId 为空", items[1].groupId === "", JSON.stringify(items[1]));
 
 items = merge(items, ["感冒了点了山药粥"], "group", G2);
-check("重复内容不重复记", items.length === 2, "实际 " + items.length);
+check("同文不同群独立记录", items.length === 3, "实际 " + items.length);
+items = merge(items, ["感冒了点了山药粥"], "group", G1);
+check("同文同群去重", items.length === 3, "实际 " + items.length);
 
 console.log(`\n通过 ${pass} / 失败 ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -79,6 +79,18 @@ async function probe() {
     } else setSnap("perception", { status: "unknown", since: 0, evidence: "感知服务未加载" });
   } catch (e) {}
   try {
+    const mdg = _ctx.getApi("memoryDigest");
+    if (mdg && typeof mdg.digestStatus === "function") {
+      const dg = mdg.digestStatus() || {};
+      const scopes = Object.keys(dg.scopes || {});
+      if (!scopes.length) setSnap("digest", { status: "unknown", since: now, evidence: "记忆消化尚未运行（无 manifest 记录）" });
+      else if (dg.dead && dg.dead.length) setSnap("digest", { status: "degraded", since: now, evidence: "记忆消化存在死任务：" + dg.dead.join("、") });
+      else if (dg.pending && dg.pending.length) setSnap("digest", { status: "degraded", since: now, evidence: "记忆消化存在失败/挂起 scope：" + dg.pending.join("、") + (dg.lastError ? "（" + String(dg.lastError).slice(0, 60) + "）" : "") });
+      else if (dg.stale && dg.stale.length) setSnap("digest", { status: "stale", since: now, evidence: "记忆消化结果过期：" + dg.stale.join("、") });
+      else setSnap("digest", { status: "fresh", since: now, evidence: "记忆消化清单正常" });
+    } else setSnap("digest", { status: "unknown", since: 0, evidence: "消化服务未加载" });
+  } catch (e) {}
+  try {
     const ores = openCount();
     if (ores.error) setSnap("ledger", { status: "unknown", since: now, evidence: "行动账本不可读：" + String(ores.error).slice(0, 60) });
     else setSnap("ledger", { status: ores.count > 0 ? "stale" : "fresh", since: now, evidence: ores.count > 0 ? ("行动账本有 " + ores.count + " 条未闭环（下次重启会转 unknown）") : "行动账本无遗留 open" });
@@ -120,7 +132,7 @@ function openCount() {
 
 function allSnapshot() {
   const now = Date.now();
-  return ["onebot", "body", "embed", "budget", "ledger", "tools", "perception"].map((k) => {
+  return ["onebot", "body", "embed", "budget", "ledger", "tools", "perception", "digest"].map((k) => {
     const s = Object.assign({ name: k }, getSnap(k));
     /* WP4：fresh 必须是「最近」的成功信号；快照超过 SNAP_STALE_MS 没重探 → 降级 stale，绝不保留过期 fresh */
     if (s.status === "fresh" && now - (s.updatedAt || 0) > SNAP_STALE_MS) {
@@ -139,7 +151,7 @@ module.exports = {
   system: true,
   userScoped: false,   // 纯系统级：只读探活，不按人处理数据/发消息
   requires: [],
-  version: "1.2.0",
+  version: "1.2.1",
   apiSpec: {
     health: {
       snapshot: { input: "无", output: "能力状态数组", sideEffect: "只读" },

@@ -64,6 +64,28 @@ async function baiduSearch(query, limit) {
    判定=命中特征的结果过半（宽于旧的「全含拼音」——退化页常混有「王姓/王者荣耀」等未命中项导致兜底失效）。
    标题与摘要分别取前 60 字窗口——摘要往往很长，拼接后会把标题里的特征挤出窗口。 */
 const DICT_FEATURES = ["拼音", "（汉语文字）", "姓（中华姓氏）", "的意思与解释", "汉典", "字典"];
+function isStubDominated(results, query) {
+  /* 砍词退化：必应偶发把长查询砍成头两字（「猫咪翻车现场」→「猫咪」），返回百科 stub 页+垃圾站群。
+     判定=查询去空格取 2 字滑窗，过半结果命中滑窗 < 1/3 即退化（正常结果至少吃到核心词）。
+     查询 < 4 字或无结果/单条不判。 */
+  const q = String(query || "").replace(/\s+/g, "");
+  if (q.length < 4) return false;
+  if (!Array.isArray(results) || results.length < 2) return false;
+  const grams = [];
+  for (let i = 0; i + 2 <= q.length; i++) {
+    const g = q.slice(i, i + 2);
+    if (grams.indexOf(g) < 0) grams.push(g);
+  }
+  if (!grams.length) return false;
+  let bad = 0;
+  for (const r of results) {
+    const text = String(r.title || "") + " " + String(r.snippet || "").slice(0, 40);
+    let hit = 0;
+    for (const g of grams) if (text.indexOf(g) >= 0) hit++;
+    if (hit / grams.length < 1 / 3) bad++;
+  }
+  return bad * 2 >= results.length;
+}
 function isDictDominated(results) {
   if (!Array.isArray(results) || results.length === 0) return false;
   let hit = 0;
@@ -76,16 +98,30 @@ function isDictDominated(results) {
 }
 async function bingSearch(query, limit) {
   const qs = (q) => "https://cn.bing.com/search?q=" + encodeURIComponent(q) + "&setlang=zh-CN&count=" + (limit || 10);
+  const degraded = (r, q) => isDictDominated(r) || isStubDominated(r, q);
   let results = parseBingHtml(await httpsGet(qs(query), 15000), limit);
-  /* 兜底：必应对「王洋律师 离谱 案件」这类多词查询偶尔退化成单字字典页（结果全是「拼音/汉字」词条）。
-     检测到字典结果过半时，改用查询里最长的一段重试一次（多词查询里最长段通常是核心词）。 */
-  if (isDictDominated(results)) {
+  /* 兜底一：字典退化（多词查询被拆成单字字典页）→ 用最长空格段重试。
+     兜底二：砍词退化（长查询被砍成头两字、返回百科 stub/垃圾站群）→ 无空格查询切掉头 2 字重试（「猫咪翻车现场」→「翻车现场」），
+     至多再切一次（去头 4 字）。重试仍退化 → 返回空数组（web_search 显示「没有搜到结果」，不把垃圾喂给模型）。 */
+  if (degraded(results, query)) {
+    const cands = [];
     const parts = String(query).split(/\s+/).filter(Boolean);
     const best = parts.reduce((a, b) => (b.length > a.length ? b : a), "");
-    if (best && best !== query) {
-      const r2 = parseBingHtml(await httpsGet(qs(best), 15000), limit);
-      if (r2.length) results = r2;
+    if (best && best !== query) cands.push(best);
+    const q0 = String(query).replace(/\s+/g, "");
+    if (parts.length <= 1) {
+      if (q0.length > 4) cands.push(q0.slice(2));
+      if (q0.length > 6) cands.push(q0.slice(4));
     }
+    let usedQ = query;
+    for (const c of cands) {
+      try {
+        const r2 = parseBingHtml(await httpsGet(qs(c), 15000), limit);
+        if (r2.length && !degraded(r2, c)) { results = r2; usedQ = c; break; }
+      } catch (e) { /* 单个候选失败继续下一个 */ }
+    }
+    /* 注意：替换后必须用 usedQ 复判（重试成功的「翻车现场」结果对原始查询仍会误判退化） */
+    if (degraded(results, usedQ)) results = [];
   }
   return results;
 }
@@ -108,12 +144,12 @@ function httpsGet(url, timeoutMs) {
 module.exports = {
   name: "search",
   displayName: "搜索",
-  version: "1.2.0",
+  version: "1.3.0",
   description: "必应国内版网页搜索（cn.bing.com 抓取，零 key 零成本）+ 百度解析（备用）",
   userScoped: false,
   permissions: ["UA", "cleanText", "sleep"],
   init(ctx) { _ctx = ctx; },
-  apiSpec: {"search":{"parseBaiduHtml":{"input":"html","output":"[{title,url,snippet}]","sideEffect":"无"},"parseBingHtml":{"input":"html","output":"[{title,url,snippet}]","sideEffect":"无"},"formatResults":{"input":"results, n","output":"string","sideEffect":"无"},"isDictDominated":{"input":"results","output":"bool","sideEffect":"无"},"baiduSearch":{"input":"q, n","output":"[result]","sideEffect":"联网"},"bingSearch":{"input":"q, n","output":"[result]","sideEffect":"联网(免费)"},"httpsGet":{"input":"url, opt","output":"text","sideEffect":"联网"}}},
+  apiSpec: {"search":{"parseBaiduHtml":{"input":"html","output":"[{title,url,snippet}]","sideEffect":"无"},"parseBingHtml":{"input":"html","output":"[{title,url,snippet}]","sideEffect":"无"},"formatResults":{"input":"results, n","output":"string","sideEffect":"无"},"isDictDominated":{"input":"results","output":"bool","sideEffect":"无"},"isStubDominated":{"input":"results, query","output":"bool","sideEffect":"无"},"baiduSearch":{"input":"q, n","output":"[result]","sideEffect":"联网"},"bingSearch":{"input":"q, n","output":"[result]","sideEffect":"联网(免费)"},"httpsGet":{"input":"url, opt","output":"text","sideEffect":"联网"}}},
 
-  api: { search: { parseBaiduHtml, parseBingHtml, formatResults, isDictDominated, baiduSearch, bingSearch, httpsGet } },
+  api: { search: { parseBaiduHtml, parseBingHtml, formatResults, isDictDominated, isStubDominated, baiduSearch, bingSearch, httpsGet } },
 };

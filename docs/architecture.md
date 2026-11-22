@@ -1,6 +1,6 @@
 # Momo 架构说明
 
-> 版本：v2.0.0 · 更新：2026-11-21
+> 版本：v2.1.0 · 更新：2026-11-22
 > 路径：`E:\Learn\Momo\`
 > 这份文档必须和代码同步。改了架构就改这里，别让它比代码旧。
 
@@ -47,7 +47,7 @@ E:\Learn\Momo\
 ├── self/                    # 自我进化层（identity / reflections / skills / journal / pref）
 ├── data/                    # 运行时数据（不进版本库）
 ├── stickers/                # 表情包文件 + stickers.db 语义库
-├── test/                    # 81 个测试文件，纯 node 断言
+├── test/                    # 85 个测试文件，纯 node 断言
 ├── docs/                    # 文档（本文件、development.md、changelog/、decisions/）
 ├── archive/                 # 历史补丁脚本与旧文档
 ├── supervise.ps1            # 守护进程（崩溃自动重启）

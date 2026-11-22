@@ -206,6 +206,30 @@ check("A20：工具健康按每工具最新结果判断恢复", async () => {
   assert.ok(!(t.evidence || "").includes("全部成功"), "文案不得称全部成功：" + JSON.stringify(t));
 });
 
+check("WP4：消化健康 digestStatus → fresh/degraded/stale/unknown", async () => {
+  const mk = (dg) => mkCtx({ getApi: (ns) => (ns === "memoryDigest" ? { digestStatus: () => dg } : null) });
+  const c1 = mk(null);
+  mod.init(c1); await mod.__test.probe();
+  assert.strictEqual(mod.__test.allSnapshot().find((s) => s.name === "digest").status, "unknown", "未加载→unknown");
+  const c2 = mk({ scopes: { "100000001": { status: "ok" }, "43": { status: "ok" } }, dead: ["43"], pending: [], stale: [], lastError: "" });
+  mod.init(c2); await mod.__test.probe();
+  const d2 = mod.__test.allSnapshot().find((s) => s.name === "digest");
+  assert.strictEqual(d2.status, "degraded", "dead 非空→degraded");
+  assert.ok(d2.evidence.includes("死任务"), "证据含死任务：" + d2.evidence);
+  const c3 = mk({ scopes: { "43": { status: "failed" } }, dead: [], pending: ["43"], stale: [], lastError: "fake" });
+  mod.init(c3); await mod.__test.probe();
+  const d3 = mod.__test.allSnapshot().find((s) => s.name === "digest");
+  assert.strictEqual(d3.status, "degraded", "pending 非空→degraded");
+  assert.ok(d3.evidence.includes("失败/挂起") && d3.evidence.includes("fake"), "证据含失败文案与 lastError");
+  const c4 = mk({ scopes: { "100000001": { status: "ok", last_success: 1 }, "43": { status: "ok", last_success: 1 } }, dead: [], pending: [], stale: ["43"], lastError: "" });
+  mod.init(c4); await mod.__test.probe();
+  assert.strictEqual(mod.__test.allSnapshot().find((s) => s.name === "digest").status, "stale", "仅 stale→stale");
+  const c5 = mk({ scopes: { "100000001": { status: "ok" } }, dead: [], pending: [], stale: [], lastError: "" });
+  mod.init(c5); await mod.__test.probe();
+  assert.strictEqual(mod.__test.allSnapshot().find((s) => s.name === "digest").status, "fresh", "全 ok→fresh");
+  mod.init(ctx); // 恢复主 ctx
+});
+
 check("contextProvider：全 fresh/unknown 不注入；有异常才注入", async () => {
   const bodyApi = { status: async () => ({ data: { ok: true, pid: 1, visible: true } }) };
   const c2 = mkCtx({

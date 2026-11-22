@@ -64,6 +64,28 @@ check("正常结果不误判（含长摘要）", D([
 check("空结果不算退化", D([]) === false);
 check("单条正常结果不算退化", D([{ title: "王洋律师", snippet: "短视频博主" }]) === false);
 
+/* 2c. isStubDominated 行为（复刻「猫咪翻车现场」砍词退化与正常「翻车现场」） */
+const SD = search.api.search.isStubDominated;
+check("「猫咪翻车现场」砍词退化判定为 stub（猫百科+猫咪社区站群）", SD([
+  { title: "猫（猫科猫属动物）_百度百科", snippet: "当猫咪到了10岁，已经步入了老年时期了。" },
+  { title: "猫咪社区 · 好片子值得慢慢看完", snippet: "猫咪社区 · 正在放映 好片子值" },
+  { title: "猫咪社区_养猫经验交流与猫咪日常分享_铲屎官聚集地", snippet: "猫咪社区是一个围绕养猫展开的交流平台" },
+  { title: "猫咪社区 - 知乎", snippet: "" },
+], "猫咪翻车现场") === true);
+check("正常「翻车现场」不误判（结果吃到核心词）", SD([
+  { title: "翻车（翻车）_百度百科", snippet: "百度百科是一部内容开放、自由的网络百科全书" },
+  { title: "龙骨水车：古代高效率的提水工具 - 知乎", snippet: "翻车,又名龙骨水车，是一种刮板式连续提水机" },
+  { title: "龙骨车_百度百科", snippet: "龙骨车，即翻车，汉代创造的一种机械提水工具" },
+], "翻车现场") === false);
+check("查询 <4 字不判（避免单字/双字查询误伤）", SD([
+  { title: "猫_百度百科", snippet: "" }, { title: "猫咪社区", snippet: "" },
+], "猫咪") === false);
+check("单条结果不算退化", SD([{ title: "猫（猫科猫属动物）_百度百科", snippet: "" }], "猫咪翻车现场") === false);
+check("bingSearch 重试链含砍词切头重试", src.includes("q0.slice(2)") && src.includes("q0.slice(4)"));
+check("重试仍退化返回空数组", src.includes("results = []"));
+check("api 含 isStubDominated", Object.keys(search.api.search).includes("isStubDominated"));
+check("apiSpec 含 isStubDominated", src.includes('"isStubDominated"'));
+
 /* 3. apiSpec 契约一致：api 与 apiSpec 函数名一一对应 */
 const names = Object.keys(search.api.search).sort();
 const spec = JSON.parse(src.match(/apiSpec:\s*(\{[\s\S]*?\}),\s*\n\s*api:/)[1].replace(/"sideEffect":"[^"]*"/g, '"sideEffect":"x"'));

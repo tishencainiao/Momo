@@ -26,23 +26,23 @@ function topMemories(items, n) {
   return ranked.slice(0, n);
 }
 function saveMemories(userId, items) {
+  fs.mkdirSync(MEM_DIR(), { recursive: true });
+  let outItems = items || [];
+  outItems = outItems.map((it) => Object.assign({}, it, { from: Number(it.from) || Number(userId) || 0 }));
   try {
-    fs.mkdirSync(MEM_DIR(), { recursive: true });
-    let outItems = items || [];
-    outItems = outItems.map((it) => Object.assign({}, it, { from: Number(it.from) || Number(userId) || 0 }));
-    try {
-      const _ra = _ctx.getApi ? _ctx.getApi("roles") : null;
-      if (_ra && _ra.resolveRole(userId) === "visitor") {
-        const cap = Math.max(0, Number(_ra.rateCfg().memoryCap) || 200);
-        if (outItems.length > cap) outItems = outItems.slice(outItems.length - cap);
-      }
-    } catch (e) {}
-    _ctx.writeJsonAtomic(memPath(userId), { updated: Date.now(), items: outItems });
-    /* E4：保存后后台预热向量（fire-and-forget） */
-    try {
-      const emb = _ctx.getApi ? _ctx.getApi("embed") : null;
-      if (emb && emb.refresh) emb.refresh(outItems.slice(-20).map((m) => String(m.content || ""))).catch(() => {});
-    } catch (e) {}
+    const _ra = _ctx.getApi ? _ctx.getApi("roles") : null;
+    if (_ra && _ra.resolveRole(userId) === "visitor") {
+      const cap = Math.max(0, Number(_ra.rateCfg().memoryCap) || 200);
+      if (outItems.length > cap) outItems = outItems.slice(outItems.length - cap);
+    }
+  } catch (e) {}
+  /* v2.1 返修 B02：写盘失败必须向上抛——调用方（consolidateUserMemories）只有确认落盘成功
+     才允许清理短期源记忆，否则数据丢失。 */
+  _ctx.writeJsonAtomic(memPath(userId), { updated: Date.now(), items: outItems });
+  /* E4：保存后后台预热向量（fire-and-forget） */
+  try {
+    const emb = _ctx.getApi ? _ctx.getApi("embed") : null;
+    if (emb && emb.refresh) emb.refresh(outItems.slice(-20).map((m) => String(m.content || ""))).catch(() => {});
   } catch (e) {}
 }
 function memoryPrompt(items, call) {
@@ -182,8 +182,9 @@ function loadShortMemories(userId) {
   return [];
 }
 function saveShortMemories(userId, items) {
-  try { fs.mkdirSync(SHORT_MEM_DIR(), { recursive: true }); _ctx.writeJsonAtomic(shortMemFile(userId), { updated: Date.now(), items }); }
-  catch (e) { try { _ctx.log("warn", "短期记忆保存失败: " + e.message.slice(0, 160)); } catch (e2) {} }
+  /* v2.1 返修：写盘失败向上抛错（B02），调用方（memory.js applyResult/consolidate）据此不标 done、不删源数据 */
+  fs.mkdirSync(SHORT_MEM_DIR(), { recursive: true });
+  _ctx.writeJsonAtomic(shortMemFile(userId), { updated: Date.now(), items });
 }
 function pruneShortMemories(userId) {
   const items = loadShortMemories(userId);
