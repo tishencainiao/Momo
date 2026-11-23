@@ -349,7 +349,7 @@ const { STYLE_DIRECTIVE, GROUP_DIRECTIVE, SITUATION_QQ, SITUATION_DESKTOP, situa
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "2.2.1";
+const BASE_VERSION = "2.2.2";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -3455,7 +3455,7 @@ async function processPrivateChat(userId, text, images, voiceRequested, msgTime,
     await maybeRollSummary(userId, history, settings);
     _pMark("succeeded", { session_repaired: !_histOk, send_action_key: _tk2 || undefined });
     if (host) host.runHook("reply", { userId, text, reply, channel: "private" });
-    saveSeenMsg(userId, Math.floor(Date.now() / 1000));
+    _markScanned("private", userId, _evIds[0] || "", msgTime || Math.floor(Date.now() / 1000));
     if (msgTime) saveMsgTime(userId, msgTime);
     log("info", `表情包诊断: 列表=${listStickers().length}, 情绪=${getEmotion().name}/${typeof valence === "number" ? valence.toFixed(0) : "?"}`);
     const _agentStickers = (agentRes && agentRes.stickers) || [];

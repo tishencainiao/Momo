@@ -30,6 +30,7 @@ const ruleBlock = ruleIdx >= 0 ? src.slice(ruleIdx, ruleIdx + 1200) : "";
 check("技能规则分支存在", ruleIdx >= 0);
 check("技能规则分支里标记了已读", ruleBlock.indexOf("_markScanned(\"private\", userId, event.message_id, msgTime)") >= 0,
   ruleBlock.slice(0, 200));
+check("全文件无 saveSeenMsg 残留（WP3 已删旧函数，v2.2.2 修闲聊尾部漏网）", src.indexOf("saveSeenMsg(") < 0);
 
 // 2. 行为级：宽限期过滤（WP3：宽限期在 catchUpPrivate 内）
 const fnSrc = extractFunc(src, "catchUpMissedMessages");
