@@ -26,6 +26,7 @@
 | [stability-baseline.md](stability-baseline.md) | 稳定性基线：8 项安全指标口径 + 24h 模拟时钟测试说明 | 🤖 | 改稳定性护栏/监测时 |
 | [v2.0.0-validation.md](v2.0.0-validation.md) | v2.0.0「事实与稳定性底座」验收矩阵（A01–A24）与交付状态 | 🤖 | 版本大里程碑验收时 |
 | [v2.1.0-validation.md](v2.1.0-validation.md) | v2.1.0「连续存在底座 I」验收矩阵（B01–B24）与交付状态 | 🤖 | 版本大里程碑验收时 |
+| [v2.2.0-validation.md](v2.2.0-validation.md) | v2.2.0「连续存在底座 II」验收矩阵（C01–C32）与交付状态 | 🤖 | 版本大里程碑验收时 |
 | [roles-and-permissions.md](roles-and-permissions.md) | 角色/权限/参数级权限约定 | 🤖 | 改权限判断时 |
 
 ### 指南（怎么做 · 流程/规范）

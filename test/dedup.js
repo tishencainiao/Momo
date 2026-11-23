@@ -28,18 +28,25 @@ function extractFunc(s, name) {
 const ruleIdx = src.indexOf("const skillRule = matchSkillRule");
 const ruleBlock = ruleIdx >= 0 ? src.slice(ruleIdx, ruleIdx + 1200) : "";
 check("技能规则分支存在", ruleIdx >= 0);
-check("技能规则分支里标记了已读", ruleBlock.indexOf("saveSeenMsg(userId, msgTime)") >= 0,
+check("技能规则分支里标记了已读", ruleBlock.indexOf("_markScanned(\"private\", userId, event.message_id, msgTime)") >= 0,
   ruleBlock.slice(0, 200));
 
-// 2. 行为级：宽限期过滤
+// 2. 行为级：宽限期过滤（WP3：宽限期在 catchUpPrivate 内）
 const fnSrc = extractFunc(src, "catchUpMissedMessages");
+const privSrc = extractFunc(src, "catchUpPrivate");
+const sortSrc = extractFunc(src, "_sortMsgs");
+const recovSrc = extractFunc(src, "_recoverApi");
+const markSSrc = extractFunc(src, "_markScanned");
+const markCSrc = extractFunc(src, "_markCompleted");
+const grpSrc = extractFunc(src, "catchUpGroups");
 check("提取到 catchUpMissedMessages", !!fnSrc);
-check("源码里有宽限期常量", fnSrc && fnSrc.indexOf("GRACE_SEC") >= 0);
+check("源码里有宽限期常量", privSrc && privSrc.indexOf("GRACE_SEC") >= 0);
 
 const nowSec = Math.floor(Date.now() / 1000);
 let recovered = [];
 const ctx = {
-  cfg: { qq: { allowed_users: [1000] } },
+  cfg: { qq: { allowed_users: [1000], master_user: 0 } },
+  host: null,
   loadSeenMsg: () => ({ "1000": nowSec - 300 }),
   saveSeenMsg: () => {},
   log: () => {},
@@ -49,25 +56,25 @@ const ctx = {
   enqueuePrivateChat: (u, text) => { recovered.push({ u, text }); },
   qzoneHttp: async () => ({
     messages: [
-      { user_id: 1000, time: nowSec - 120, message: "两分钟前的（该补）" },
-      { user_id: 1000, time: nowSec - 5, message: "五秒前的（可能正在处理，别补）" },
-      { user_id: 1000, time: nowSec - 200, message: "老消息（已读之后？不，比 seen 新）" },
-      { user_id: 2000, time: nowSec - 120, message: "别人发的（不该补）" },
+      { user_id: 1000, message_id: "x1", time: nowSec - 120, message: "两分钟前的（该补）" },
+      { user_id: 1000, message_id: "x2", time: nowSec - 5, message: "五秒前的（可能正在处理，别补）" },
+      { user_id: 1000, message_id: "x3", time: nowSec - 200, message: "老消息（已读之后？不，比 seen 新）" },
+      { user_id: 2000, message_id: "x4", time: nowSec - 120, message: "别人发的（不该补）" },
     ],
   }),
 };
 vm.createContext(ctx);
-vm.runInContext(fnSrc + "\nthis.catchUp = catchUpMissedMessages;", ctx);
+vm.runInContext(["const RECOVER_MAX_MSGS = 50; const RECOVER_MAX_LLM = 20;", recovSrc, sortSrc, markSSrc, markCSrc, privSrc, grpSrc, fnSrc, "this.catchUp = catchUpMissedMessages;"].join("\n"), ctx);
 ctx.catchUp().then(() => {
   const texts = recovered.map((r) => r.text).join("|");
   check("补回了 2 分钟前的消息", texts.indexOf("两分钟前的") >= 0, texts);
   check("没补 5 秒前的新消息", texts.indexOf("五秒前的") < 0, texts);
   check("没补别人的消息", texts.indexOf("别人发的") < 0, texts);
-  check("补回的是合并成一条", recovered.length === 1, JSON.stringify(recovered));
+  check("补回按条入队（不再合并成一条）", recovered.length === 2 && texts.indexOf("老消息") >= 0, JSON.stringify(recovered));
 
   // 3. 全部都在宽限期内 → 一条都不补
   recovered = [];
-  ctx.qzoneHttp = async () => ({ messages: [{ user_id: 1000, time: nowSec - 3, message: "刚刚" }] });
+  ctx.qzoneHttp = async () => ({ messages: [{ user_id: 1000, message_id: "y1", time: nowSec - 3, message: "刚刚" }] });
   return ctx.catchUp();
 }).then(() => {
   check("全在宽限期内时不补", recovered.length === 0, JSON.stringify(recovered));

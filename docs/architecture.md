@@ -1,6 +1,6 @@
 # Momo 架构说明
 
-> 版本：v2.1.0 · 更新：2026-11-22
+> 版本：v2.2.0 · 更新：2026-11-22
 > 路径：`E:\Learn\Momo\`
 > 这份文档必须和代码同步。改了架构就改这里，别让它比代码旧。
 
@@ -19,7 +19,7 @@
 
 ```
 QQ ──WS──> SnowLuma ──WS(3001)──> 桥接 index.js
-                                   ├─ 插件平台（51 个插件 / 75 个工具 / 31 个命令，以 check.js/运行日志为准）
+                                   ├─ 插件平台（52 个插件 / 75 个工具 / 32 个命令，以 check.js/运行日志为准）
                                    ├─ Agent 循环（最多 6 步 工具调用）
                                    ├─ 本地状态（data/ JSON + stickers.db）
                                    └─ DeepSeek API
@@ -42,12 +42,12 @@ E:\Learn\Momo\
 ├── plugin-host.js           # 插件宿主：加载器 / ctx / 钩子 / 工具与命令注册表
 ├── sticker-store.js         # 表情包语义库（node:sqlite，非插件）
 ├── config.json              # 配置
-├── plugins/                 # 51 个功能插件
+├── plugins/                 # 52 个插件
 ├── body/                    # 自建身体（Python/PySide6，v0.1 起；见 body-architecture.md）
 ├── self/                    # 自我进化层（identity / reflections / skills / journal / pref）
 ├── data/                    # 运行时数据（不进版本库）
 ├── stickers/                # 表情包文件 + stickers.db 语义库
-├── test/                    # 85 个测试文件，纯 node 断言
+├── test/                    # 94 个测试文件，纯 node 断言
 ├── docs/                    # 文档（本文件、development.md、changelog/、decisions/）
 ├── archive/                 # 历史补丁脚本与旧文档
 ├── supervise.ps1            # 守护进程（崩溃自动重启）
@@ -161,7 +161,7 @@ E:\Learn\Momo\
 - 提示词地图（`docs/prompt-map.md`，v1.72.0）：一轮请求的提示词分层与动态块清单
 - 主动性调参（v1.72.0）：沉默 60 分钟主动搭话、身体自娱概率 ×2、每日生活费上限 1 元
 
-## 6. 插件清单（51 个）
+## 6. 插件清单（52 个）
 
 `appellations` `birthdays` `browse` `budget-report` `buzz` `capability-index` `dsh-link` `emotion`
 `evolution` `followup` `fun-core` `goals` `group-chat` `group-info` `group-memes` `hobby`
@@ -199,7 +199,7 @@ E:\Learn\Momo\
 - 重启：`taskkill /PID <node> /F` → supervisor 自动拉起（约 15 秒）
 - 自检：`node check.js`（语法 + 配置 + 插件结构）
 - 测试：`node test/<名字>.js`，全部跑一遍约 10 秒
-- 健康：日志出现 `插件平台就绪：51 个插件（工具 75 / 命令 31）` + `Bot 上线`
+- 健康：日志出现 `插件平台就绪：52 个插件（工具 75 / 命令 31）` + `Bot 上线`
 
 ## 10. 已知限制
 

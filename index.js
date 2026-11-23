@@ -349,7 +349,7 @@ const { STYLE_DIRECTIVE, GROUP_DIRECTIVE, SITUATION_QQ, SITUATION_DESKTOP, situa
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "2.1.0";
+const BASE_VERSION = "2.2.0";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -472,7 +472,7 @@ function startApiKeyWatchdog() {
 /* ---------------- 会话存取 ---------------- */
 function sessionPath(userId) { return path.join(SESS_DIR, String(userId) + ".json"); }
 function loadSession(userId) { try { const d = JSON.parse(fs.readFileSync(sessionPath(userId), "utf8")); if (Array.isArray(d.messages)) return d.messages; } catch (e) {} return []; }
-function saveSession(userId, messages) { try { fs.mkdirSync(SESS_DIR, { recursive: true }); writeJsonAtomic(sessionPath(userId), { updated: Date.now(), messages }); } catch (e) {} }
+function saveSession(userId, messages) { fs.mkdirSync(SESS_DIR, { recursive: true }); writeJsonAtomic(sessionPath(userId), { updated: Date.now(), messages }); }
 
 /* ---------------- 会话摘要（L1：滚动压缩长对话，防止超过 40 轮后失忆） ---------------- */
 function summaryFile(userId) { return path.join(SESS_DIR, String(userId) + ".summary.json"); }
@@ -2157,30 +2157,174 @@ function recentSpaceContext(userId) {
   return `【你最近看到对方空间发的动态】${recent}`;
 }
 
-/* ---------------- 漏消息补回 ---------------- */
+/* ---------------- 漏消息补回（v2.2.0 WP3：事件身份去重+收件箱+分离游标） ---------------- */
+/* seen-msg.json 自 v2.2.0 起只读（legacy_floor），不再写入；读迁移见 conversation-recovery.legacyFloor */
 const SEEN_MSG_FILE = path.join(DATA_DIR, "seen-msg.json");
 function loadSeenMsg() { try { return JSON.parse(fs.readFileSync(SEEN_MSG_FILE, "utf8")); } catch (e) { return {}; } }
-function saveSeenMsg(userId, ts) { const s = loadSeenMsg(); s[String(userId)] = ts; try { fs.mkdirSync(DATA_DIR, { recursive: true }); writeJsonAtomic(SEEN_MSG_FILE, s); } catch (e) {} }
-async function catchUpMissedMessages() {
-  const users = (cfg.qq && cfg.qq.allowed_users) || [];
-  for (const u of users) {
-    try {
-      const data = await qzoneHttp("get_friend_msg_history", { user_id: u, count: 10 });
-      const msgs = (data && (data.messages || data.msglist)) || [];
-      const seen = (loadSeenMsg())[String(u)] || 0;
-      /* 宽限期：太新的消息可能还在处理中（回复要好几秒到几十秒），不能当成"漏了"重放，否则会回两遍 */
-      const GRACE_SEC = 60;
-      const nowSec = Math.floor(Date.now() / 1000);
-      const missed = msgs.filter((m) => Number(m.user_id) === Number(u) && Number(m.time || 0) > seen && Number(m.time || 0) < nowSec - GRACE_SEC);
-      if (!missed.length) continue;
-      const texts = missed.map((m) => textOfMessage(m.message)).filter((t) => t && String(t).trim());
-      if (!texts.length) continue;
-      const latestTime = Math.max(...missed.map((m) => Number(m.time || 0)));
-      saveSeenMsg(u, latestTime);
-      log("info", `补回漏消息 u=${u}: ${texts.length} 条`);
-      enqueuePrivateChat(u, texts.join("\n"), [], false, latestTime);
-    } catch (e) { log("warn", "补消息检查失败 u=" + u + ": " + e.message.slice(0, 120)); }
+
+function _recoverApi() { try { return host && apiOf("conversationRecovery"); } catch (e) { return null; } }
+const RECOVER_MAX_MSGS = 50;  /* 单轮单 scope 补回入队上限 */
+const RECOVER_MAX_LLM = 20;   /* 单轮 LLM 消耗上限（按入队条数近似约束） */
+
+function _markScanned(kind, key, messageId, sourceTs) {
+  const cr = _recoverApi(); if (!cr) return;
+  try { cr.saveCursor(kind, key, { scanned: { message_id: String(messageId || ""), source_ts: Number(sourceTs) || 0 } }); } catch (e) { log("warn", "补消息游标写入失败: " + String(e.message).slice(0, 80)); }
+}
+function _markCompleted(kind, key, messageId, sourceTs) {
+  const cr = _recoverApi(); if (!cr) return;
+  try { cr.saveCursor(kind, key, { completed: { message_id: String(messageId || ""), source_ts: Number(sourceTs) || 0 } }); } catch (e) { log("warn", "补消息游标写入失败: " + String(e.message).slice(0, 80)); }
+}
+function _sortMsgs(msgs) {
+  return msgs.slice().sort((a, b) => (Number(a.time || 0) - Number(b.time || 0)) || String(a.message_id || "").localeCompare(String(b.message_id || "")));
+}
+
+/* 私聊补回：只补 > completed 游标（或 legacy_floor）且在 60s 宽限期前的消息；
+   每条先按完整 event_id 入收件箱再入队；入箱失败立即停止且不推进任何游标。 */
+async function catchUpPrivate(userId) {
+  const cr = _recoverApi();
+  const GRACE_SEC = 60;
+  const nowSec = Math.floor(Date.now() / 1000);
+  const data = await qzoneHttp("get_friend_msg_history", { user_id: userId, count: 20 });
+  const msgs = (data && (data.messages || data.msglist)) || [];
+  if (!msgs.length) return;
+  const truncated = msgs.length >= 20;
+  const mine = msgs.filter((m) => Number(m.user_id) === Number(userId) && m.message_id != null);
+  if (!mine.length) return;
+  const ordered = _sortMsgs(mine);
+  const st = cr ? (((cr.cursorState().private) || {})[String(userId)] || null) : null;
+  const legacyF = cr ? (cr.legacyFloor()[String(userId)] || 0) : 0;
+  const floorSec = (st && st.completed && Number(st.completed.source_ts || 0)) || legacyF;
+  /* 与旧游标同秒边界（无 completed 证据）：不确定 → 进待确认，不擅自补发也不悄然跳过 */
+  const boundary = st ? [] : ordered.filter((m) => Number(m.time || 0) === floorSec);
+  /* 同秒游标不靠 message_id 字符串大小：有 completed 时同秒历史全扫描，靠收件箱 event ID 去重（数字 ID 10 完成后同秒 9 也正确） */
+  const cands = ordered.filter((m) => ((st && st.completed) ? Number(m.time || 0) >= floorSec : Number(m.time || 0) > floorSec) && Number(m.time || 0) < nowSec - GRACE_SEC);
+  let enqueued = 0;
+  let completedM = null;
+  let _prefixOk = true;
+  for (const m of cands) {
+    if (enqueued >= RECOVER_MAX_MSGS) {
+      if (cr) { try { cr.recordPending("private", userId, cands.length - RECOVER_MAX_MSGS, "离线消息超过单轮恢复上限，需人工确认"); } catch (e) {} }
+      break;
+    }
+    const eid = cr ? cr.eventIdFor("private", Number(userId), 0, String(m.message_id)) : "";
+    const existing = cr && eid ? cr.readEvent(eid) : null;
+    if (existing) {
+      /* 连续完成前缀：只有 succeeded/intentional_no_reply 且此前都完成才推进 completed；failed/unknown/cancelled 截断 */
+      const _okT = existing.stage === "succeeded" || existing.stage === "intentional_no_reply";
+      if (_okT && _prefixOk !== false) completedM = m;
+      else _prefixOk = false;
+      continue;
+    }
+    const t = textOfMessage(m.message);
+    if (!t || !String(t).trim()) { continue; }
+    /* 新入队的事件：completed 不得越过它（前面有 pending 时后续不再推进） */
+    _prefixOk = false;
+    let evId = eid;
+    if (cr && eid) {
+      try {
+        const r = cr.recordEvent({ channel: "private", userId: Number(userId), groupId: 0, messageId: String(m.message_id), sourceTs: Number(m.time || 0), parsedInput: { text: String(t).slice(0, 500) }, rawEvent: m });
+        evId = r && r.event ? r.event.event_id : null;
+        if (!r || !r.isNew) { if (r && r.event) completedM = m; continue; }
+      } catch (e) {
+        log("warn", `补回入箱失败 u=${userId}: ` + String(e.message).slice(0, 120));
+        return;  /* 入箱失败：不推进 scanned/completed */
+      }
+    }
+    enqueuePrivateChat(Number(userId), t, [], false, Number(m.time || 0), evId);
+    enqueued++;
   }
+  const scannedM = ordered[ordered.length - 1];
+  if (scannedM) _markScanned("private", userId, scannedM.message_id, Number(scannedM.time || 0));
+  if (completedM) _markCompleted("private", userId, completedM.message_id, Number(completedM.time || 0));
+  if (boundary.length && cr) { try { cr.recordPending("private", userId, boundary.length, "legacy_boundary：与旧 seen 游标同秒边界，未自动补发"); } catch (e) {} }
+  if (truncated && cr) { try { cr.markGap("private", userId, "历史返回达到上限，可能截断"); } catch (e) {} }
+  if (enqueued) log("info", `补回私聊 u=${userId}: 候选 ${cands.length} 条，入队 ${enqueued} 条${truncated ? "（历史截断）" : ""}`);
+}
+
+/* 群补回（保守）：只补明确 @Momo 的消息；群功能关闭直接跳过；历史/API 异常标 gap_suspected。 */
+async function catchUpGroup(groupId) {
+  const cr = _recoverApi();
+  const GRACE_SEC = 60;
+  const nowSec = Math.floor(Date.now() / 1000);
+  const selfId = _lastSelfId || Number((cfg.qq && cfg.qq.self_id) || 0);
+  let data;
+  try { data = await qzoneHttp("get_group_msg_history", { group_id: groupId, count: 20 }); }
+  catch (e) {
+    if (cr) { try { cr.markGap("group", groupId, "get_group_msg_history 失败: " + String(e.message).slice(0, 120)); } catch (_) {} }
+    return;
+  }
+  const msgs = (data && (data.messages || data.msglist)) || [];
+  if (!msgs.length) return;
+  const truncated = msgs.length >= 20;
+  const addressed = msgs.filter((m) => m.message_id != null && Array.isArray(m.message) && m.message.some((s) => s && s.type === "at" && String(s.data && s.data.qq) === String(selfId)));
+  if (!addressed.length) return;
+  const ordered = _sortMsgs(addressed);
+  const st = cr ? (((cr.cursorState().groups) || {})[String(groupId)] || null) : null;
+  const floorSec = (st && st.completed && Number(st.completed.source_ts || 0)) || 0;
+  const cands = ordered.filter((m) => ((st && st.completed) ? Number(m.time || 0) >= floorSec : Number(m.time || 0) > floorSec) && Number(m.time || 0) < nowSec - GRACE_SEC);
+  /* C20：只推进本次新确认的连续完成前缀；没有新进展时不得重写旧 completed（source_ts 必须单调）。 */
+  let _gCompletedM = null;
+  for (const m of ordered) {
+    const _eidC = cr ? cr.eventIdFor("group", Number((m.sender && m.sender.user_id) || m.user_id) || 0, Number(groupId), String(m.message_id)) : "";
+    const _evC = (_eidC && cr && cr.readEvent) ? cr.readEvent(_eidC) : null;
+    if (!_evC) break;
+    if (_evC.stage === "succeeded" || _evC.stage === "intentional_no_reply") _gCompletedM = m;
+    else break;
+  }
+  if (_gCompletedM) _markCompleted("group", groupId, _gCompletedM.message_id, Number(_gCompletedM.time || 0));
+  let enqueued = 0;
+  for (const m of cands) {
+    if (enqueued >= RECOVER_MAX_MSGS) {
+      if (cr) { try { cr.recordPending("group", groupId, cands.length - RECOVER_MAX_MSGS, "群补回超过单轮恢复上限，需人工确认"); } catch (e) {} }
+      break;
+    }
+    const uid = Number((m.sender && m.sender.user_id) || m.user_id) || 0;
+    if (!uid) continue;
+    const eid = cr ? cr.eventIdFor("group", uid, Number(groupId), String(m.message_id)) : "";
+    if (cr && eid && cr.readEvent(eid)) continue;
+    const t = textOfMessage(m.message);
+    if (!t || !String(t).trim()) continue;
+    let evId = eid;
+    if (cr && eid) {
+      try {
+        const r = cr.recordEvent({ channel: "group", userId: uid, groupId: Number(groupId), messageId: String(m.message_id), sourceTs: Number(m.time || 0), parsedInput: { text: String(t).slice(0, 500) }, rawEvent: m });
+        evId = r && r.event ? r.event.event_id : null;
+        if (!r || !r.isNew) continue;
+      } catch (e) {
+        log("warn", `群补回入箱失败 g=${groupId}: ` + String(e.message).slice(0, 120));
+        return;
+      }
+    }
+    enqueueGroupChat(Number(groupId), uid, t, [], Number(m.time || 0), true, "群友", evId);
+    enqueued++;
+  }
+  const scannedM = ordered[ordered.length - 1];
+  if (scannedM) _markScanned("group", groupId, scannedM.message_id, Number(scannedM.time || 0));
+  if (truncated && cr) { try { cr.markGap("group", groupId, "历史返回达到上限，可能截断"); } catch (e) {} }
+  if (enqueued) log("info", `补回群 g=${groupId}: 候选 ${cands.length} 条，入队 ${enqueued} 条${truncated ? "（历史截断）" : ""}`);
+}
+
+async function catchUpGroups() {
+  /* D2：_lastSelfId 启动兜底——重启后尚未收到新消息时也能拿到 self_id */
+  if (!_lastSelfId) {
+    try {
+      const _li = await qzoneHttp("get_login_info", {});
+      if (_li && _li.user_id) _lastSelfId = Number(_li.user_id);
+    } catch (e) { log("warn", "get_login_info 失败：" + String((e && e.message) || e).slice(0, 100)); }
+  }
+  if (!(cfg.qq && cfg.qq.respond_to_groups)) return;
+  let groups = [];
+  try { groups = ((await qzoneHttp("get_group_list", {})) || []).map((g) => Number(g.group_id || g)).filter(Boolean); }
+  catch (e) { log("warn", "get_group_list 失败，跳过群补回: " + String(e.message).slice(0, 120)); return; }
+  for (const gid of groups) { try { await catchUpGroup(gid); } catch (e) { log("warn", "群补回异常 g=" + gid + ": " + String(e.message).slice(0, 120)); } }
+}
+
+async function catchUpMissedMessages() {
+  const users = new Set([...(cfg.qq && cfg.qq.allowed_users) || []]);
+  const masterUid = Number((cfg.qq && cfg.qq.master_user) || 0);
+  if (masterUid) users.add(masterUid);
+  for (const u of users) { try { await catchUpPrivate(Number(u)); } catch (e) { log("warn", "补消息检查失败 u=" + u + ": " + String(e.message).slice(0, 120)); } }
+  try { await catchUpGroups(); } catch (e) { log("warn", "群补消息检查失败: " + String(e.message).slice(0, 120)); }
 }
 
 /* ---------------- 短期记忆 + 记忆固化 + 消息时间戳 ---------------- */
@@ -2450,7 +2594,9 @@ async function transcribeRecords(messageId, records) { try { const a = host && a
 /* ---------------- 图片识别（视觉） ---------------- */
 
 
+let _lastSelfId = 0;
 async function handlePrivateMessage(event) {
+  if (Number(event.self_id)) _lastSelfId = Number(event.self_id);
   const userId = Number(event.user_id), selfId = Number(event.self_id);
   if (userId === selfId) return;
   const _allowed = (cfg.qq && cfg.qq.allowed_users) || [];
@@ -2460,12 +2606,23 @@ async function handlePrivateMessage(event) {
     : (_allowed.includes(userId) || isMaster(userId) ? "user" : "ignored");
   if (_role === "ignored") { log("info", `忽略非白名单用户 ${userId}`); return; }
   if (_role === "visitor" && _rolesApi && !_rolesApi.rateOk(userId)) { log("info", `访客限速，忽略 ${userId}`); return; }
+  /* WP2：先入收件箱再走插件钩子（重复投递在 hook 前拦截，避免重复 hook 副作用） */
+  const _crApi = host && apiOf("conversationRecovery");
+  let _eidP = "";
+  const _finP = (_st, _patch) => { if (_crApi && _eidP) { try { _crApi.updateStage(_eidP, _st, _patch); } catch (e) {} } };
+  if (_crApi) {
+    const _msgTime0 = Number(event.time) || Math.floor(Date.now() / 1000);
+    _eidP = _crApi.eventIdFor("private", userId, 0, String(event.message_id || ""));
+    const _old = _eidP ? _crApi.readEvent(_eidP) : null;
+    if (_old && _old.stage !== "failed_retryable" && _old.stage !== "dead") { log("info", `重复投递（已处理/处理中）跳过 ${userId}:${event.message_id}`); return; }
+    _crApi.recordEvent({ channel: "private", userId: userId, groupId: 0, messageId: String(event.message_id || ""), sourceTs: _msgTime0, rawEvent: event, parsedInput: String(event.raw_message || "").slice(0, 500) });
+  }
   if (host && host.hookLists.private_message.length) {
     for (const fn of host.hookLists.private_message) {
-      try { if (fn(host.ctx, { userId, event, raw: String(event.raw_message || "") }) === true) return; } catch (e) { log("warn", "插件私聊钩子失败: " + e.message.slice(0, 120)); }
+      try { if (fn(host.ctx, { userId, event, raw: String(event.raw_message || "") }) === true) { _finP("succeeded", { reason: "plugin_hook_handled" }); return; } } catch (e) { log("warn", "插件私聊钩子失败: " + e.message.slice(0, 120)); }
     }
   }
-  if (!isMaster(userId) && isMuted(userId)) return;
+  if (!isMaster(userId) && isMuted(userId)) { _finP("intentional_no_reply", { reason: "muted" }); return; }
   const parsed = parseMessage(event.message);
   let text = parsed.text;
   if (parsed.faces.length) {
@@ -2479,7 +2636,7 @@ async function handlePrivateMessage(event) {
   }
   if (!text && !parsed.images.length) {
     text = String(event.raw_message || "").trim();
-    if (!text) return;
+    if (!text) { _finP("intentional_no_reply", { reason: "empty" }); return; }
   }
   log("info", `收到私聊 ${userId}，文本 ${text.length} 字，图片 ${parsed.images.length} 张`);
   logJsonl("messages.jsonl", { userId, channel: "private", text: String(text || "").slice(0, 500), images: parsed.images.length });
@@ -2501,33 +2658,133 @@ async function handlePrivateMessage(event) {
   const _prefCmd = text.replace(/^\//, "").trim();
   if (["别打扰", "安静", "别吵", "别烦我", "别找我"].includes(_prefCmd)) {
     setProactivePref(userId, "off"); 
-    return sendPrivate(userId, "好，我以后不主动找你啦～你想我的时候随时发消息，我都在的。");
+    try {
+ 
+      await sendPrivate(userId, "好，我以后不主动找你啦～你想我的时候随时发消息，我都在的。");
+ 
+      _finP("succeeded", { reason: "command" });
+      return;
+ 
+    } catch (_cse) {
+ 
+      _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+ 
+      return;
+ 
+    }
   }
   if (["少点主动", "降低频率", "少点聊", "安静点", "少主动"].includes(_prefCmd)) {
     setProactivePref(userId, "low"); 
-    return sendPrivate(userId, "好哦，我会少主动找你的～");
+    try {
+ 
+      await sendPrivate(userId, "好哦，我会少主动找你的～");
+ 
+      _finP("succeeded", { reason: "command" });
+      return;
+ 
+    } catch (_cse) {
+ 
+      _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+ 
+      return;
+ 
+    }
   }
   if (["正常", "恢复正常", "正常频率"].includes(_prefCmd)) {
     setProactivePref(userId, "normal"); 
-    return sendPrivate(userId, "好，恢复正常主动频率啦～");
+    try {
+ 
+      await sendPrivate(userId, "好，恢复正常主动频率啦～");
+ 
+      _finP("succeeded", { reason: "command" });
+      return;
+ 
+    } catch (_cse) {
+ 
+      _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+ 
+      return;
+ 
+    }
   }
   if (["多陪我", "多聊", "频繁点", "多主动", "多找我"].includes(_prefCmd)) {
     setProactivePref(userId, "high"); 
-    return sendPrivate(userId, "好呀，我会更常主动找你的～");
+    try {
+ 
+      await sendPrivate(userId, "好呀，我会更常主动找你的～");
+ 
+      _finP("succeeded", { reason: "command" });
+      return;
+ 
+    } catch (_cse) {
+ 
+      _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+ 
+      return;
+ 
+    }
   }
-  if (text === "/开评论" || text === "/开启评论") { setQzoneComment(userId, true);  return sendPrivate(userId, "好，以后你发新说说我会自动评论～（想关就说 /关评论）"); }
-  if (text === "/关评论" || text === "/关闭评论") { setQzoneComment(userId, false);  return sendPrivate(userId, "好，我不再自动评论你的空间啦～"); }
+  if (text === "/开评论" || text === "/开启评论") { setQzoneComment(userId, true);  try {
+    await sendPrivate(userId, "好，以后你发新说说我会自动评论～（想关就说 /关评论）");
+    _finP("succeeded", { reason: "command" });
+      return;
+  } catch (_cse) {
+    _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+    return;
+  } }
+  if (text === "/关评论" || text === "/关闭评论") { setQzoneComment(userId, false);  try {
+    await sendPrivate(userId, "好，我不再自动评论你的空间啦～");
+    _finP("succeeded", { reason: "command" });
+      return;
+  } catch (_cse) {
+    _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+    return;
+  } }
   if (text === "/看空间" || text.startsWith("/看空间 ") || text === "/看看空间") {
     
     const arg = text.replace(/^\/(看空间|看看空间)\s*/, "").trim();
     let target = userId;
-    if (arg && /^\d{5,12}$/.test(arg)) { if (!master) return sendPrivate(userId, "只有主人能看别人的空间哦～"); target = Number(arg); }
+    if (arg && /^\d{5,12}$/.test(arg)) { if (!master) try {
+   await sendPrivate(userId, "只有主人能看别人的空间哦～");
+   _finP("succeeded", { reason: "command" });
+      return;
+ } catch (_cse) {
+   _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+   return;
+ } target = Number(arg); }
     try {
       const { list } = await checkUserSpace(target);
-      if (!list.length) return sendPrivate(userId, "这个空间还没有说说哦～");
+      if (!list.length) try {
+   await sendPrivate(userId, "这个空间还没有说说哦～");
+   _finP("succeeded", { reason: "command" });
+      return;
+ } catch (_cse) {
+   _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+   return;
+ }
       const top = list.slice(0, 5).map((m, i) => `${i + 1}. ${String(m.content || "").slice(0, 50)}（${m.comment_num} 评论）`).join("\n");
-      return sendPrivate(userId, `空间最近说说：\n${top}`);
-    } catch (e) { return sendPrivate(userId, "查看空间失败：" + e.message.slice(0, 120)); }
+      try {
+
+        await sendPrivate(userId, `空间最近说说：\n${top}`);
+
+        _finP("succeeded", { reason: "command" });
+      return;
+
+      } catch (_cse) {
+
+        _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+
+        return;
+
+      }
+    } catch (e) { try {
+   await sendPrivate(userId, "查看空间失败：" + e.message.slice(0, 120));
+   _finP("succeeded", { reason: "command" });
+      return;
+ } catch (_cse) {
+   _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+   return;
+ } }
   }
   if (text === "/评论" || text.startsWith("/评论 ")) {
     
@@ -2535,25 +2792,83 @@ async function handlePrivateMessage(event) {
     const n = /^\d+$/.test(arg) ? parseInt(arg, 10) : 1;
     try {
       const { list } = await checkUserSpace(userId);
-      if (!list.length) return sendPrivate(userId, "你的空间还没有说说哦～");
+      if (!list.length) try {
+   await sendPrivate(userId, "你的空间还没有说说哦～");
+   _finP("succeeded", { reason: "command" });
+      return;
+ } catch (_cse) {
+   _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+   return;
+ }
       const idx = (n >= 1 && n <= list.length) ? n - 1 : 0;
       const settings = resolveChatSettings();
       const c = await generateQzoneComment(list[idx].content, settings);
-      if (!c) return sendPrivate(userId, "我一时想不出评论啦～");
+      if (!c) try {
+   await sendPrivate(userId, "我一时想不出评论啦～");
+   _finP("succeeded", { reason: "command" });
+      return;
+ } catch (_cse) {
+   _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+   return;
+ }
       await commentQzone(list[idx].tid, c, userId);
-      return sendPrivate(userId, `已评论第 ${idx + 1} 条：${c}`);
-    } catch (e) { return sendPrivate(userId, "评论失败：" + e.message.slice(0, 120)); }
+      try {
+
+        await sendPrivate(userId, `已评论第 ${idx + 1} 条：${c}`);
+
+        _finP("succeeded", { reason: "command" });
+      return;
+
+      } catch (_cse) {
+
+        _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+
+        return;
+
+      }
+    } catch (e) { try {
+   await sendPrivate(userId, "评论失败：" + e.message.slice(0, 120));
+   _finP("succeeded", { reason: "command" });
+      return;
+ } catch (_cse) {
+   _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+   return;
+ } }
   }
   if (host && host.commandRegistry.size) {
     for (const [key, c] of host.commandRegistry) {
-      try {
-        if (c.regex && c.regex.test(text)) {
-          if (!cmdAllowed(userId, key)) { await sendPrivate(userId, "（这个只有主人能用哦～）"); return; }
-          const r = await c.handler({ userId, text, master, call });
-          if (r != null) await sendPrivate(userId, String(r));
-          return;
+      if (!c.regex || !c.regex.test(text)) continue;
+      if (!cmdAllowed(userId, key)) {
+        try {
+          await sendPrivate(userId, "（这个只有主人能用哦～）");
+          _finP("succeeded", { reason: "command_denied", command: key });
+        } catch (e) {
+          _finP("unknown", { reason: "command_delivery", command: key, last_error: String((e && e.message) || e).slice(0, 120) });
         }
-      } catch (e) { log("warn", `插件命令 ${key} 失败: ${e.message.slice(0, 120)}`); }
+        return;
+      }
+      /* 插件命令可能有副作用：先持久化 handler_started；执行/ACK 结果不明时只标 unknown，绝不自动重放。 */
+      try {
+        if (_crApi && _eidP) _crApi.updateStage(_eidP, "handler_started", { reason: "plugin_command", command: key });
+      } catch (e) {
+        log("warn", `插件命令 ${key} 入状态失败，已阻止执行: ${String((e && e.message) || e).slice(0, 120)}`);
+        return;
+      }
+      let r;
+      try {
+        r = await c.handler({ userId, text, master, call });
+      } catch (e) {
+        log("warn", `插件命令 ${key} 失败: ${String((e && e.message) || e).slice(0, 120)}`);
+        _finP("unknown", { reason: "plugin_command_result_unknown", command: key, last_error: String((e && e.message) || e).slice(0, 120) });
+        return;
+      }
+      try {
+        if (r != null) await sendPrivate(userId, String(r));
+        _finP("succeeded", { reason: "plugin_command", command: key });
+      } catch (e) {
+        _finP("unknown", { reason: "command_delivery", command: key, last_error: String((e && e.message) || e).slice(0, 120) });
+      }
+      return;
     }
   }
   if (text === "/help" || text === "帮助") {
@@ -2561,9 +2876,40 @@ async function handlePrivateMessage(event) {
     const cmds = master
       ? "/重置 清空聊天记忆\n/记忆 看我记住了你什么\n/忘记 <词> 删记忆\n/清空记忆 全部忘记\n/称呼 <QQ> <称呼> 给别人定称呼\n/状态 查看配置\n/进化 手动探索一次\n/进化提案 查看待处理大改动"
       : "/叫我 <称呼> 让我这样称呼你（不能叫主人）\n/称呼 看我当前怎么称呼你\n/重置 清空我们的聊天";
-    return sendPrivate(userId, `你好呀${master ? "主人" : ""}～我是大肥鱼！\n可以直接和我聊天，问天气、查资讯都能联网搜哦\n${cmds}${master ? "\n\n小技巧：在桌宠聊天里发「发QQ：内容」，我就能把话发到你的QQ上～" : ""}`);
+    try {
+
+      await sendPrivate(userId, `你好呀${master ? "主人" : ""}～我是大肥鱼！\n可以直接和我聊天，问天气、查资讯都能联网搜哦\n${cmds}${master ? "\n\n小技巧：在桌宠聊天里发「发QQ：内容」，我就能把话发到你的QQ上～" : ""}`);
+
+      _finP("succeeded", { reason: "command" });
+      return;
+
+    } catch (_cse) {
+
+      _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+
+      return;
+
+    }
   }
-  if (text === "/reset" || text === "/重置") { saveSession(userId, []);  return sendPrivate(userId, "好哦，聊天记忆已清空～"); }
+  if (text === "/reset" || text === "/重置") {
+    const _crR = host && apiOf("conversationRecovery");
+    if (_crR && typeof _crR.resetScope === "function") { try { _crR.resetScope("user:" + userId); } catch (e) { log("warn", "重置屏障失败: " + String((e && e.message) || e).slice(0, 100)); } }
+    try { saveSession(userId, []); } catch (_se) { log("warn", "重置清空会话历史写盘失败: " + String((_se && _se.message) || _se).slice(0, 100)); }
+    try {
+
+      await sendPrivate(userId, "好哦，聊天记忆已清空～");
+
+      _finP("succeeded", { reason: "command" });
+      return;
+
+    } catch (_cse) {
+
+      _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+
+      return;
+
+    }
+  }
   /* /叫我 /称呼 已迁移为插件 appellations */
   /* 屏蔽/解除已迁移为 Agent 工具 mute_user / unmute_user */
   /* 记一下 已迁移为 Agent 工具 add_wish */
@@ -2576,56 +2922,240 @@ async function handlePrivateMessage(event) {
     const pText = !isFinite(pInt) ? "不主动" : `${Math.round(pInt / 60000)} 分钟`;
     const prefLine = `主动聊天偏好：${pPref}（间隔约 ${pText}）`;
     if (!master) {
-      return sendPrivate(userId, `我现在称呼你为「${call}」\n对你的好感度：${Math.round(fv)}/100\n${prefLine}`);
+      try {
+
+        await sendPrivate(userId, `我现在称呼你为「${call}」\n对你的好感度：${Math.round(fv)}/100\n${prefLine}`);
+
+        _finP("succeeded", { reason: "command" });
+      return;
+
+      } catch (_cse) {
+
+        _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+
+        return;
+
+      }
     }
     const s = resolveChatSettings();
     const ws = (cfg.chat && cfg.chat.web_search && cfg.chat.web_search.enabled) ? "开启（" + ((cfg.chat.web_search.engine || "bing") === "baidu" ? "百度" : "必应") + "）" : "关闭";
     const keyState = apiKey ? `已连接（Key 长度 ${apiKey.length}）` : "未配置 API Key";
     const pr = (cfg.proactive && cfg.proactive.enabled) ? `开启（沉默${cfg.proactive.silence_minutes || 120}分 + ${cfg.proactive.morning_greet || "08:00"}/${cfg.proactive.night_greet || "23:00"}）` : "关闭";
-    return sendPrivate(userId, `角色：大肥鱼（女仆）\n模型：${s.model}\n联网搜索：${ws}\n主动搭话：${pr}\n当前情绪：${moodLabel()}\n对${call}的好感度：${Math.round(fv)}/100\n${prefLine}\n${budgetLine()}\n密钥：${keyState}`);
+    try {
+
+      await sendPrivate(userId, `角色：大肥鱼（女仆）\n模型：${s.model}\n联网搜索：${ws}\n主动搭话：${pr}\n当前情绪：${moodLabel()}\n对${call}的好感度：${Math.round(fv)}/100\n${prefLine}\n${budgetLine()}\n密钥：${keyState}`);
+
+      _finP("succeeded", { reason: "command" });
+      return;
+
+    } catch (_cse) {
+
+      _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+
+      return;
+
+    }
   }
   if (text === "/token" || text === "/用量" || text === "/token用量" || text === "/查询token") {
     
-    return sendPrivate(userId, usageLine());
+    try {
+
+    
+      await sendPrivate(userId, usageLine());
+
+    
+      _finP("succeeded", { reason: "command" });
+      return;
+
+    
+    } catch (_cse) {
+
+    
+      _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+
+    
+      return;
+
+    
+    }
   }
   if (text === "/记忆" || text === "/memory") {
-    if (!master) {  return sendPrivate(userId, "记忆管理只有主人能做哦～"); }
+    if (!master) {  try {
+    await sendPrivate(userId, "记忆管理只有主人能做哦～");
+    _finP("succeeded", { reason: "command" });
+      return;
+  } catch (_cse) {
+    _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+    return;
+  } }
     
     const items = loadMemories(userId);
-    if (!items.length) return sendPrivate(userId, "我还没记住什么关于主人的事呢～多和我聊聊吧！");
+    if (!items.length) try {
+   await sendPrivate(userId, "我还没记住什么关于主人的事呢～多和我聊聊吧！");
+   _finP("succeeded", { reason: "command" });
+      return;
+ } catch (_cse) {
+   _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+   return;
+ }
     const list = items.slice(-30).map((m, i) => `${i + 1}. ${m.content}`).join("\n");
-    return sendPrivate(userId, `我记住的关于主人的事（共 ${items.length} 条，显示最近 30 条）：\n${list}`);
+    try {
+
+      await sendPrivate(userId, `我记住的关于主人的事（共 ${items.length} 条，显示最近 30 条）：\n${list}`);
+
+      _finP("succeeded", { reason: "command" });
+      return;
+
+    } catch (_cse) {
+
+      _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+
+      return;
+
+    }
   }
   if (text.startsWith("/忘记") || text.startsWith("/forget")) {
-    if (!master) {  return sendPrivate(userId, "记忆管理只有主人能做哦～"); }
+    if (!master) {  try {
+    await sendPrivate(userId, "记忆管理只有主人能做哦～");
+    _finP("succeeded", { reason: "command" });
+      return;
+  } catch (_cse) {
+    _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+    return;
+  } }
     const kw = text.replace(/^\/(忘记|forget)\s*/i, "").trim();
-    if (!kw) {  return sendPrivate(userId, "用法：/忘记 <关键词>，会删除所有包含该关键词的记忆。"); }
+    if (!kw) {  try {
+    await sendPrivate(userId, "用法：/忘记 <关键词>，会删除所有包含该关键词的记忆。");
+    _finP("succeeded", { reason: "command" });
+      return;
+  } catch (_cse) {
+    _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+    return;
+  } }
     const items = loadMemories(userId);
     const kept = items.filter((m) => !m.content.includes(kw));
     saveMemories(userId, kept);
     
-    return sendPrivate(userId, `已忘记 ${items.length - kept.length} 条包含「${kw}」的记忆～`);
+    try {
+
+    
+      await sendPrivate(userId, `已忘记 ${items.length - kept.length} 条包含「${kw}」的记忆～`);
+
+    
+      _finP("succeeded", { reason: "command" });
+      return;
+
+    
+    } catch (_cse) {
+
+    
+      _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+
+    
+      return;
+
+    
+    }
   }
   if (text === "/清空记忆" || text === "/clearmem" || text === "/清空記憶") {
-    if (!master) {  return sendPrivate(userId, "记忆管理只有主人能做哦～"); }
+    if (!master) {  try {
+    await sendPrivate(userId, "记忆管理只有主人能做哦～");
+    _finP("succeeded", { reason: "command" });
+      return;
+  } catch (_cse) {
+    _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+    return;
+  } }
     saveMemories(userId, []);
     
-    return sendPrivate(userId, "好哦主人，关于你的记忆我已全部清空～");
+    try {
+
+    
+      await sendPrivate(userId, "好哦主人，关于你的记忆我已全部清空～");
+
+    
+      _finP("succeeded", { reason: "command" });
+      return;
+
+    
+    } catch (_cse) {
+
+    
+      _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+
+    
+      return;
+
+    
+    }
   }
   if (text === "/余额" || text === "/查余额" || text === "/balance") {
     
     const b = await fetchBalance();
-    if (!b) return sendPrivate(userId, "余额查询失败啦，稍后再试～");
-    return sendPrivate(userId, `账户余额：¥${b.total}\n（充值 ¥${b.topped} / 赠送 ¥${b.granted}）`);
+    if (!b) try {
+   await sendPrivate(userId, "余额查询失败啦，稍后再试～");
+   _finP("succeeded", { reason: "command" });
+      return;
+ } catch (_cse) {
+   _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+   return;
+ }
+    try {
+
+      await sendPrivate(userId, `账户余额：¥${b.total}\n（充值 ¥${b.topped} / 赠送 ¥${b.granted}）`);
+
+      _finP("succeeded", { reason: "command" });
+      return;
+
+    } catch (_cse) {
+
+      _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+
+      return;
+
+    }
   }
   if (text === "/截图" || text === "/截屏" || text === "/看看屏幕") {
-    if (!master) {  return sendPrivate(userId, "只有主人能让我截图哦～"); }
+    if (!master) {  try {
+    await sendPrivate(userId, "只有主人能让我截图哦～");
+    _finP("succeeded", { reason: "command" });
+      return;
+  } catch (_cse) {
+    _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+    return;
+  } }
     
     const fp = await captureScreen();
-    if (!fp) {  return sendPrivate(userId, "截图失败啦，稍后再试～"); }
+    if (!fp) {  try {
+    await sendPrivate(userId, "截图失败啦，稍后再试～");
+    _finP("succeeded", { reason: "command" });
+      return;
+  } catch (_cse) {
+    _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+    return;
+  } }
     await onebotSend("send_msg", { message_type: "private", user_id: Number(userId), message: [{ type: "image", data: { file: "file:///" + fp.replace(/\\/g, "/") } }] });
     
-    return sendPrivate(userId, "喏，这就是你的屏幕～");
+    try {
+
+    
+      await sendPrivate(userId, "喏，这就是你的屏幕～");
+
+    
+      _finP("succeeded", { reason: "command" });
+      return;
+
+    
+    } catch (_cse) {
+
+    
+      _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+
+    
+      return;
+
+    
+    }
   }
   /* /目标 已迁移为插件 goals */
   /* 我的目标是 已迁移为 Agent 工具 set_goal */
@@ -2646,23 +3176,27 @@ async function handlePrivateMessage(event) {
       
       sendPrivate(userId, "呜…刚才手滑了：" + String(e.message).slice(0, 100)).catch(() => {});
     }
-    /* 技能规则也算"处理过了"：不标记已读的话，补回漏消息会把它当成漏消息重放，导致回两遍 */
-    saveSeenMsg(userId, msgTime);
+    /* 技能规则也算"处理过了"：游标标记已处理，补回漏消息不会重放 */
+    _markScanned("private", userId, event.message_id, msgTime);
+    _markCompleted("private", userId, event.message_id, msgTime);
     if (msgTime) saveMsgTime(userId, msgTime);
+    _finP("succeeded", { reason: "skill_rule" });
     return;
   }
-  if (!apiKey) {  return sendPrivate(userId, "呜…还没配置 DeepSeek API Key，我先开不了口啦。"); }
+  if (!apiKey) { _finP("intentional_no_reply", { reason: "no_api_key" }); return sendPrivate(userId, "呜…还没配置 DeepSeek API Key，我先开不了口啦。"); }
   // 闲聊：防抖合并（等用户说完再一起回）
-  enqueuePrivateChat(userId, text, parsed.images, voiceRequested, msgTime);
+  enqueuePrivateChat(userId, text, parsed.images, voiceRequested, msgTime, _eidP);
 }
 
 /* ---------------- 闲聊防抖合并 ---------------- */
 const DEBOUNCE_MS = 20000;   // 最后一条消息后等 20 秒（可在 QQ 上调 qq.debounce_ms）
 const MAX_WAIT_MS = 40000;   // 连发时最多等 40 秒（qq.max_wait_ms）
 const pendingChat = new Map();
-function enqueuePrivateChat(userId, text, images, voiceRequested, msgTime) {
+function enqueuePrivateChat(userId, text, images, voiceRequested, msgTime, eventId) {
   let p = pendingChat.get(userId);
-  if (!p) { p = { texts: [], images: [], voice: false, firstTs: Date.now(), timer: null, msgTime: 0 }; pendingChat.set(userId, p); }
+  if (!p) { p = { texts: [], images: [], voice: false, firstTs: Date.now(), timer: null, msgTime: 0, eventIds: [] }; pendingChat.set(userId, p); }
+  if (eventId) p.eventIds.push(eventId);
+  if (eventId) { try { const _crQ = host && apiOf("conversationRecovery"); if (_crQ) _crQ.updateStage(eventId, "debouncing"); } catch (e) {} }
   p.texts.push(text);
   if (images && images.length) p.images = p.images.concat(images);
   if (voiceRequested) p.voice = true;
@@ -2685,16 +3219,22 @@ function firePrivateChat(userId) {
   const combined = texts.length > 1
     ? texts.map((t, i) => `${i + 1}. ${t}`).join("\n") + "\n（以上是对方连续发的几条消息，请当作同一段话一起回应）"
     : texts[0];
-  processPrivateChat(userId, combined, p.images, p.voice, p.msgTime);
+  const _crF = host && apiOf("conversationRecovery");
+  const _job = () => processPrivateChat(userId, combined, p.images, p.voice, p.msgTime, p.eventIds || []);
+  if (_crF && typeof _crF.withScopeLock === "function") { _crF.withScopeLock("user:" + userId, _job).catch(() => {}); }
+  else { _job(); }
 }
 
-async function processPrivateChat(userId, text, images, voiceRequested, msgTime) {
+async function processPrivateChat(userId, text, images, voiceRequested, msgTime, eventIds) {
+  const _crP = host && apiOf("conversationRecovery");
+  const _evIds = Array.isArray(eventIds) ? eventIds : [];
+  const _pMark = (st, patch) => { if (_crP && _evIds.length) { for (const _eid of _evIds) { try { _crP.updateStage(_eid, st, patch); } catch (e) {} } } };
   const master = isMaster(userId);
   const call = resolveCall(userId);
   applyStatusRule(userId, text);
   const cooldown = ((cfg.qq && cfg.qq.cooldown_seconds) || 1.5) * 1000;
   const last = lastReplyAt.get(userId) || 0;
-  if (Date.now() - last < cooldown) return;
+  if (Date.now() - last < cooldown) { _pMark("intentional_no_reply", { reason: "cooldown" }); return; }
   const lastMsgT = (loadMsgTimes())[String(userId)] || 0;
   const gapMs = (lastMsgT && msgTime) ? (msgTime - lastMsgT) * 1000 : 0;
   if (gapMs > 60000) log("info", `时间差 user=${userId}: ${formatGap(gapMs)}`);
@@ -2823,8 +3363,10 @@ async function processPrivateChat(userId, text, images, voiceRequested, msgTime)
     const _closingOut = _last && _last.role === "assistant" && /(晚安|拜拜|再见|不早了|早点睡|快去睡|去睡吧|好好休息)/.test(String(_last.content || ""));
     if (_closingIn && _closingOut) {
       log("info", `确定性沉默：道别收尾后不再回复（"${_t.slice(0, 20)}"）`);
+      _pMark("intentional_no_reply", { reason: "closing" });
       return;
     }
+    _pMark("model_started");
     if (shouldDeepThink(text)) {
       const _deep = await multiAgentReply(text, settings, persona, call, memories, shortMemories, taskCtx, userId);
       if (_deep) rawReply = _deep;
@@ -2837,20 +3379,55 @@ async function processPrivateChat(userId, text, images, voiceRequested, msgTime)
     if (!rawReply) throw new Error("模型未返回内容");
     const marked = parseStickerMarkers(rawReply);
     const reply = stripStageDirections(marked.cleanText) || marked.cleanText;
+    if (_crP && _evIds.length) { _pMark("reply_prepared"); try { _crP.setReply(_evIds[0], reply); } catch (e) {} }
     /* P1-c 愿望质量门：只有主人 + 带显式信号词的「做不到」回复才记成进化愿望 */
     const _wishSignal = /(帮我|给我|想要|加个|做个|能不能|可以帮我|我想要|给我加|希望.{0,8}(有|能|会)|要是有|要能)/.test(text);
     if (_wishSignal && isMaster(userId) && /做不到|不能|不会|没有这个功能|不支持|办不到|做不了|没这个权限/.test(reply) && String(text).length >= 6) {
       addWish(text, "user-request-unmet");
     }
-    history.push({ role: "user", content: text, ts: Date.now() }, { role: "assistant", content: reply, ts: Date.now() });
-    await maybeRollSummary(userId, history, settings);
-    saveSession(userId, trimHistory(history, settings.history_limit, settings.history_chars));
+    /* v2.2.0：发送与会话提交前复查 epoch（模型执行期间 /重置 会推进 epoch，旧任务不得发送/写回） */
+    if (_crP && _evIds.length && _evIds[0] && typeof _crP.scopeEpoch === "function" && typeof _crP.readEvent === "function") {
+      const _chk = _crP.readEvent(_evIds[0]);
+      if (_chk && _chk.session_epoch != null && _crP.scopeEpoch(_chk.scope) !== _chk.session_epoch) {
+        _pMark("cancelled_by_reset", { reason: "epoch mismatch before send" });
+        return;
+      }
+    }
+    /* v2.2.0：会话历史在发送成功后才写（C15/C16） */
     /* 只发语音模式：本回合有语音要发时不再发文字（避免“文字+语音”两条） */
     const _voiceApi = host && apiOf("voice");
     const _pendingVoice = !!(_voiceApi && _voiceApi.hasPendingVoice && _voiceApi.hasPendingVoice(userId));
     const _voiceOnly = !!(_voiceApi && _voiceApi.voiceOnlyReply && _voiceApi.voiceOnlyReply() && (voiceRequested || _pendingVoice));
-    if (_voiceOnly) log("info", `只发语音（文字已抑制）user=${userId}${_pendingVoice ? "（工具触发）" : "（关键词触发）"}`);
-    else await sendPrivate(userId, reply);
+    const _ak2 = (typeof actionKey === "function") ? actionKey("send", userId, String(text || "").slice(0, 300)) : "";
+    let _tk2 = _ak2;
+    if (_voiceOnly) {
+      log("info", `只发语音（文字已抑制）user=${userId}${_pendingVoice ? "（工具触发）" : "（关键词触发）"}`);
+      _pMark("send_started");
+      try { await sendVoice(userId, reply); }
+      catch (_ve) {
+        log("warn", "语音发送失败: " + String(_ve && _ve.message).slice(0, 120));
+        try { await sendPrivate(userId, reply); }
+        catch (_ve2) { _pMark("failed_retryable", { last_error: String(_ve2 && _ve2.message).slice(0, 200) }); throw _ve2; }
+      }
+    } else {
+      _pMark("send_started");
+      if (_ak2 && typeof tryBeginAction === "function") { try { const _t2 = tryBeginAction({ action: "send", key: _ak2, userId: Number(userId) || 0, channel: "private", groupId: 0 }); _tk2 = (_t2 && _t2.key) || _ak2; } catch (e) {} }
+      try { await sendPrivate(userId, reply); if (_ak2 && typeof endAction === "function") { try { endAction(_tk2, { ok: true, summary: "私聊回复发送成功" }); } catch (e) {} } }
+      catch (_se) { if (_ak2 && typeof endAction === "function") { try { endAction(_tk2, { ok: false, summary: "私聊回复发送失败" }); } catch (e) {} } _pMark("failed_retryable", { last_error: String(_se && _se.message).slice(0, 200), send_action_key: _ak2 || undefined }); throw _se; }
+    }
+    /* 发送成功 → 统一 commitSessionEvent 写会话历史（user/assistant 带 event_id、role+event_id 查重幂等）→ 标 succeeded；
+       写盘失败仍标 succeeded（回复已发出），只补历史不重发 */
+    let _histOk = true;
+    try {
+      await commitSessionEvent({ event_id: _evIds[0] || "", channel: "private", user_id: userId, group_id: 0, parsed_input: { text }, reply_prepared: reply });
+      history.push({ role: "user", content: text, ts: Date.now(), event_id: _evIds[0] || "" }, { role: "assistant", content: reply, ts: Date.now(), event_id: _evIds[0] || "" });
+    } catch (_se2) {
+      _histOk = false;
+      _sessionRepairs++;
+      log("warn", "回复已发出但会话历史写盘失败（待修复，只补历史不重发） user=" + userId + " :: " + String(_se2 && _se2.message).slice(0, 120));
+    }
+    await maybeRollSummary(userId, history, settings);
+    _pMark("succeeded", { session_repaired: !_histOk, send_action_key: _tk2 || undefined });
     if (host) host.runHook("reply", { userId, text, reply, channel: "private" });
     saveSeenMsg(userId, Math.floor(Date.now() / 1000));
     if (msgTime) saveMsgTime(userId, msgTime);
@@ -2869,12 +3446,9 @@ async function processPrivateChat(userId, text, images, voiceRequested, msgTime)
         if (s) { try { await sendStickerImage(userId, s); noteStickerSent(_stkKey, s); log("info", `自动表情包 user=${userId}: ${emo.name}→${s.label}`); } catch (e) { log("warn", "表情包发送失败: " + e.message.slice(0, 120)); } }
       }
     }
-    if (voiceRequested && !_pendingVoice) {
+    if (voiceRequested && !_pendingVoice && !_voiceOnly) {
       try { await sendVoice(userId, reply); }
-      catch (e) {
-        log("warn", "语音发送失败: " + e.message.slice(0, 120));
-        if (_voiceOnly) { try { await sendPrivate(userId, reply); } catch (e2) {} }
-      }
+      catch (e) { log("warn", "语音发送失败: " + e.message.slice(0, 120)); }
     }
     
     log("info", `回复私聊 ${userId}，长度 ${reply.length}`);
@@ -2895,10 +3469,11 @@ async function processPrivateChat(userId, text, images, voiceRequested, msgTime)
     }
   } catch (e) {
     log("error", `对话失败 user=${userId}: ${e.message.slice(0, 300)}`);
-    
+    if (_crP && _evIds.length) { const _ce2 = _crP.readEvent(_evIds[0]); if (_ce2 && ["model_started", "reply_prepared", "send_started", "ready", "received", "debouncing"].indexOf(_ce2.stage) >= 0) _pMark("failed_retryable", { last_error: String(e && e.message).slice(0, 200) }); }
     sendPrivate(userId, "呜…刚才脑袋卡住了：" + String(e.message).slice(0, 120)).catch(() => {});
   } finally { busyUsers.delete(userId); }
 }
+
 
 /* ---------------- 群聊：提及触发 + 有趣话题主动插话 ---------------- */
 function isGroupMention(text) {
@@ -2946,10 +3521,12 @@ async function maybeProactiveGroupSpeak(groupId, text, settings) {
 const pendingGroup = new Map();
 const GROUP_DEBOUNCE_MS = 3000;
 const GROUP_MAX_WAIT_MS = 8000;
-function enqueueGroupChat(groupId, userId, text, images, msgTime, direct, senderName) {
+function enqueueGroupChat(groupId, userId, text, images, msgTime, direct, senderName, eventId) {
   const key = "g" + groupId + "_" + userId;
   let p = pendingGroup.get(key);
-  if (!p) { p = { texts: [], images: [], firstTs: Date.now(), timer: null, groupId, userId, msgTime, direct: false }; pendingGroup.set(key, p); }
+  if (!p) { p = { texts: [], images: [], firstTs: Date.now(), timer: null, groupId, userId, msgTime, direct: false, eventIds: [] }; pendingGroup.set(key, p); }
+  if (eventId) p.eventIds.push(eventId);
+  if (eventId) { try { const _crQ = host && apiOf("conversationRecovery"); if (_crQ) _crQ.updateStage(eventId, "debouncing"); } catch (e) {} }
   /* P1-e：记住发言人名字（防抖合并期间取第一个有名字的） */
   if (senderName) p.senderName = p.senderName || senderName;
   if (msgTime) p.msgTime = msgTime;
@@ -2972,10 +3549,16 @@ function fireGroupChat(key) {
   const combined = texts.length > 1
     ? texts.map((t, i) => `${i + 1}. ${t}`).join("\n") + "\n（以上是对方连续发的几条消息，请当作同一段话一起回应）"
     : (texts[0] || "");
-  processGroupChat(p.groupId, p.userId, combined, p.images, p.msgTime, p.direct, p.senderName || "");
+  const _crG = host && apiOf("conversationRecovery");
+  const _jobG = () => processGroupChat(p.groupId, p.userId, combined, p.images, p.msgTime, p.direct, p.senderName || "", p.eventIds || []);
+  if (_crG && typeof _crG.withScopeLock === "function") { _crG.withScopeLock("group:" + p.groupId, _jobG).catch(() => {}); }
+  else { _jobG(); }
 }
-async function processGroupChat(groupId, userId, text, images, msgTime, direct, senderName) {
-  if (busyUsers.has(userId)) { enqueueGroupChat(groupId, userId, text, images, msgTime, direct, senderName); return; }
+async function processGroupChat(groupId, userId, text, images, msgTime, direct, senderName, eventIds) {
+  const _crP = host && apiOf("conversationRecovery");
+  const _evIds = Array.isArray(eventIds) ? eventIds : [];
+  const _pMark = (st, patch) => { if (_crP && _evIds.length) { for (const _eid of _evIds) { try { _crP.updateStage(_eid, st, patch); } catch (e) {} } } };
+  if (busyUsers.has(userId)) { enqueueGroupChat(groupId, userId, text, images, msgTime, direct, senderName, undefined); return; }
   busyUsers.add(userId);
   try {
     
@@ -3028,15 +3611,14 @@ async function processGroupChat(groupId, userId, text, images, msgTime, direct, 
     const gCtx = [GROUP_DIRECTIVE, gInfoCtx, timeCtx, gMemberCtx, gLogCtx, gMemeCtx, _gLifeCtx, _gWeatherCtx, _gTeachCtx, "注意：有些事是对方在私聊里告诉你的，别在群里随便说。"].filter(Boolean).join("\n") || undefined;
     /* R1：群聊 max_tokens 上限由 buildPersonContext 统一处理 */
     setActivity("在群里陪" + gCall + "聊天");
+    _pMark("model_started");
     const gRes = await agentChatOnce(_histForChat, text, buildPersonContext({ sender: userId, room: groupId, channel: "group" }, { taskCtx: gCtx, messageId: GROUP_LAST_MSGID.get(Number(groupId) + "_" + Number(userId)) }));
     const rawReply = gRes && gRes.reply;
     const reply = stripStageDirections(rawReply) || rawReply;
-    if (reply) {
-      const _uMsg = { role: "user", content: text, ts: Date.now() };
-      if (_sn) _uMsg.name = _sn;
-      history.push(_uMsg, { role: "assistant", content: reply, ts: Date.now() });
-      await maybeRollSummary(gKey, history, settings);
-      saveSession("g" + groupId + "_" + userId, trimHistory(history, settings.history_limit, settings.history_chars));
+    if (_crP && _evIds.length) { _pMark("reply_prepared"); try { _crP.setReply(_evIds[0], reply); } catch (e) {} }
+    if (!reply) {
+      _pMark("intentional_no_reply", { reason: "empty_reply" });
+    } else {
       const qq = cfg.qq || {};
       const split = !!qq.split_reply;
       const segGap = evolvePref("reply_gap_ms", qq.reply_gap_ms || 1200);
@@ -3045,13 +3627,39 @@ async function processGroupChat(groupId, userId, text, images, msgTime, direct, 
       const _atApi = host && apiOf("groupChat");
       const _atMode = _atApi ? _atApi.atMode() : "on_at";
       const _atFirst = _atMode === "always" ? true : (_atMode === "never" ? false : !!direct);
-      for (let i = 0; i < segs.length; i++) {
-        const msg = (i === 0 && _atFirst)
-          ? [{ type: "at", data: { qq: String(userId) } }, { type: "text", data: { text: " " + segs[i] } }]
-          : [{ type: "text", data: { text: segs[i] } }];
-        await onebotSend("send_msg", { message_type: "group", group_id: Number(groupId), message: msg });
-        if (i < segs.length - 1) await sleep(split ? segGap : 300);
+      /* v2.2.0：发送与会话提交前复查 epoch（模型执行期间 /重置 会推进 epoch，旧任务不得发送/写回） */
+      if (_crP && _evIds.length && _evIds[0] && typeof _crP.scopeEpoch === "function" && typeof _crP.readEvent === "function") {
+        const _chkG = _crP.readEvent(_evIds[0]);
+        if (_chkG && _chkG.session_epoch != null && _crP.scopeEpoch(_chkG.scope) !== _chkG.session_epoch) {
+          _pMark("cancelled_by_reset", { reason: "epoch mismatch before send" });
+          return;
+        }
       }
+      _pMark("send_started");
+      try {
+        for (let i = 0; i < segs.length; i++) {
+          const msg = (i === 0 && _atFirst)
+            ? [{ type: "at", data: { qq: String(userId) } }, { type: "text", data: { text: " " + segs[i] } }]
+            : [{ type: "text", data: { text: segs[i] } }];
+          await onebotSend("send_msg", { message_type: "group", group_id: Number(groupId), message: msg });
+          if (i < segs.length - 1) await sleep(split ? segGap : 300);
+        }
+      } catch (_gse) { _pMark("failed_retryable", { last_error: String(_gse && _gse.message).slice(0, 200) }); throw _gse; }
+      /* v2.2.0：全部发送成功后才写会话历史（C17 部分分条不记全成功）；写盘失败不得标 succeeded */
+      let _ghistOk = true;
+      try {
+        await commitSessionEvent({ event_id: _evIds[0] || "", channel: "group", user_id: userId, group_id: groupId, parsed_input: { text }, reply_prepared: reply });
+        const _uMsg = { role: "user", content: text, ts: Date.now(), event_id: _evIds[0] || "" };
+        if (_sn) _uMsg.name = _sn;
+        history.push(_uMsg, { role: "assistant", content: reply, ts: Date.now(), event_id: _evIds[0] || "" });
+      } catch (_gse3) {
+        _ghistOk = false;
+        _sessionRepairs++;
+        log("warn", "群回复已发出但会话历史写盘失败（待修复，只补历史不重发） 群" + groupId + " → " + userId + " :: " + String(_gse3 && _gse3.message).slice(0, 120));
+      }
+      await maybeRollSummary(gKey, history, settings);
+      const _gAk2 = (typeof actionKey === "function") ? actionKey("send", userId, String(text || "").slice(0, 300)) : "";
+      _pMark("succeeded", { session_repaired: !_ghistOk, send_action_key: _gAk2 || undefined });
       log("info", `回复群消息 群${groupId} → ${userId}，长度 ${reply.length}，分 ${segs.length} 条`);
       logJsonl("replies.jsonl", { ts: Date.now(), userId, channel: "group", groupId, text: String(reply || "").slice(0, 500) });
       /* 群聊也能自动配表情包（之前 sendStickerImage 只支持私聊） */
@@ -3068,9 +3676,13 @@ async function processGroupChat(groupId, userId, text, images, msgTime, direct, 
       /* 群聊记忆提炼已由插件 memory 的 reply 钩子接管 */
     }
     
-  } catch (e) { log("error", `群聊失败: ${e.message.slice(0, 200)}`);  }
+  } catch (e) {
+    log("error", `群聊失败: ${e.message.slice(0, 200)}`);
+    if (_crP && _evIds.length) { const _ce2 = _crP.readEvent(_evIds[0]); if (_ce2 && ["model_started", "reply_prepared", "send_started", "ready", "received", "debouncing"].indexOf(_ce2.stage) >= 0) _pMark("failed_retryable", { last_error: String(e && e.message).slice(0, 200) }); }
+  }
   finally { busyUsers.delete(userId); }
 }
+
 
 /* 群里这条消息要不要回：@了她 / 叫了名字 / 刚@过她的人在延续对话
  * atOthers：这条消息 @ 了哪些别人（不含她自己）
@@ -3101,6 +3713,7 @@ async function judgeGroupAddressed(text, atOthers, settings) {
 }
 
 async function handleGroupMessage(event) {
+  if (Number(event.self_id)) _lastSelfId = Number(event.self_id);
   if (!(cfg.qq && cfg.qq.respond_to_groups)) return;
   if (!Array.isArray(event.message)) return;
   const atSelf = event.message.some((s) => s && s.type === "at" && String(s.data && s.data.qq) === String(event.self_id));
@@ -3119,6 +3732,16 @@ async function handleGroupMessage(event) {
   /* 对话延续：刚 @ 过她的人，5 分钟内继续说 → 当作对话继续，直接回复（不走 6% 概率） */
   const _gid = Number(event.group_id);
   const _uid = Number(event.user_id);
+  /* WP2：群消息先入收件箱（重复投递拦截），再走回复判定 */
+  const _crG = host && apiOf("conversationRecovery");
+  let _eidG = "";
+  const _finG = (_st, _patch) => { if (_crG && _eidG) { try { _crG.updateStage(_eidG, _st, _patch); } catch (e) {} } };
+  if (_crG) {
+    _eidG = _crG.eventIdFor("group", _uid, _gid, String(event.message_id || ""));
+    const _oldG = _eidG ? _crG.readEvent(_eidG) : null;
+    if (_oldG && _oldG.stage !== "failed_retryable" && _oldG.stage !== "dead") { log("info", `重复投递（已处理/处理中）跳过 群${_gid} ${_uid}:${event.message_id}`); return; }
+    _crG.recordEvent({ channel: "group", userId: _uid, groupId: _gid, messageId: String(event.message_id || ""), sourceTs: Number(event.time) || 0, rawEvent: event, parsedInput: String(text || "").slice(0, 500) });
+  }
   /* 这条消息 @ 了哪些别人（不含她自己） */
   const _atOthers = (parsed.ats || []).filter((q) => q && String(q) !== String(event.self_id) && String(q) !== "all");
   const _gApi = host && apiOf("groupChat");
@@ -3131,6 +3754,7 @@ async function handleGroupMessage(event) {
     const _forMe = await judgeGroupAddressed(text, _atOthers, _pSet);
     if (!_forMe) {
       log("info", `群对话延续-判定为跟别人说，不接 群${_gid} 用户${_uid}：${String(text).slice(0, 30)}`);
+      _finG("intentional_no_reply", { reason: "not_addressed" });
       return;
     }
     log("info", `群对话延续-判定为跟她说 群${_gid} 用户${_uid}：${String(text).slice(0, 30)}`);
@@ -3146,16 +3770,16 @@ async function handleGroupMessage(event) {
     log("info", `群闲聊 群${_gid} 用户${_uid}：${String(text).slice(0, 30)}（未@她，按概率决定是否插话）`);
     const pSettings = resolveChatSettings();
     const speak = await maybeProactiveGroupSpeak(Number(event.group_id), text, pSettings);
-    if (!speak) return;
+    if (!speak) { _finG("intentional_no_reply", { reason: "proactive_skipped" }); return; }
     lastInteractionTs = Date.now();
     await onebotSend("send_msg", { message_type: "group", group_id: Number(event.group_id), message: speak });
     log("info", `群主动插话 群${event.group_id}：${speak.slice(0, 40)}`);
     return;
   }
-  if (!text && !parsed.images.length) return;
+  if (!text && !parsed.images.length) { _finG("intentional_no_reply", { reason: "empty" }); return; }
   lastInteractionTs = Date.now();
   const userId = Number(event.user_id);
-  if (!isMaster(userId) && isMuted(userId)) return;
+  if (!isMaster(userId) && isMuted(userId)) { _finG("intentional_no_reply", { reason: "muted" }); return; }
   log("info", `收到群消息 群${event.group_id} 用户${userId}，文本 ${text.length} 字，图片 ${parsed.images.length} 张`);
   logJsonl("messages.jsonl", { userId, channel: "group", groupId: event.group_id, text: String(text || "").slice(0, 500), images: parsed.images.length });
   const _sn = event.sender ? String(event.sender.card || event.sender.nickname || "").slice(0, 20) : "";
@@ -3163,7 +3787,7 @@ async function handleGroupMessage(event) {
   /* 自动学群梗：「X 的意思是 Y」这类说法 */
   try { apiOf("groupInfo").detectGroupMeme(event.group_id, text, userId); } catch (e) {}
   apiOf("groupInfo").recordGroupLog(event.group_id, userId, _sn, text);
-  enqueueGroupChat(Number(event.group_id), userId, text, parsed.images, Number(event.time) || 0, !!(atSelf || mentioned), _sn);
+  enqueueGroupChat(Number(event.group_id), userId, text, parsed.images, Number(event.time) || 0, !!(atSelf || mentioned), _sn, _eidG);
   if (event.message_id) GROUP_LAST_MSGID.set(Number(event.group_id) + "_" + userId, String(event.message_id));
 }
 
@@ -3207,7 +3831,7 @@ function connect() {
   try {
     ws = new WebSocket(url);
     wsState = { state: "connecting", since: Date.now(), lastError: "" };
-    ws.onopen = () => { resetWsDelay(); wsState = { state: "open", since: Date.now(), lastError: "" }; log("info", "OneBot WS 已连接"); };
+    ws.onopen = () => { resetWsDelay(); wsState = { state: "open", since: Date.now(), lastError: "" }; log("info", "OneBot WS 已连接"); _resumePreparedReplies().then((x) => { if (x > 0) log("info", "续发已备好的回复 " + x + " 条（reply_prepared 不重调模型）"); }).catch((e) => log("warn", "续发失败: " + String((e && e.message) || e).slice(0, 100))); };
     ws.onerror = (e) => { wsState.lastError = String((e && (e.message || e.type)) || "unknown"); log("warn", "OneBot WS 错误: " + (e.message || e.type || "unknown")); };
     ws.onclose = () => { const d = nextWsDelay(); wsState = { state: "closed", since: Date.now(), lastError: wsState.lastError }; log("warn", `OneBot WS 断开，${Math.round(d / 1000)} 秒后重连`); reconnectTimer = setTimeout(connect, d); };
     ws.onmessage = (ev) => {
@@ -3241,7 +3865,7 @@ function withTimeout(p, ms) {
 }
 
 /* 用 Momo 的大脑回桌宠的一句话 */
-async function petChat(petMessages) {
+async function petChat(petMessages, eventId) {
   const master = Number((cfg.qq && cfg.qq.master_user) || 0);
   const arr = Array.isArray(petMessages) ? petMessages : [];
   const lastUser = [...arr].reverse().find((m) => m && m.role === "user");
@@ -3259,11 +3883,49 @@ async function petChat(petMessages) {
   /* E3：把桌宠这轮对话落进 pet 会话文件，供 QQ 侧的跨通道镜头读取 */
   try {
     const _pHis = loadSession("pet" + master);
-    _pHis.push({ role: "user", content: userText.slice(0, 2000), ts: Date.now() });
-    _pHis.push({ role: "assistant", content: reply.slice(0, 2000), ts: Date.now() });
-    saveSession("pet" + master, trimHistory(_pHis, 40, 24000));
+    /* WP4：同一 pet 事件重试不重复追加会话（event_id 幂等守卫） */
+    const _dupEv = !!eventId && _pHis.length >= 2 && _pHis[_pHis.length - 2] && _pHis[_pHis.length - 2].event_id === eventId;
+    if (!_dupEv) {
+      _pHis.push({ role: "user", content: userText.slice(0, 2000), ts: Date.now(), event_id: eventId || undefined, channel: "pet" });
+      _pHis.push({ role: "assistant", content: reply.slice(0, 2000), ts: Date.now(), event_id: eventId || undefined, channel: "pet" });
+      saveSession("pet" + master, trimHistory(_pHis, 40, 24000));
+    }
   } catch (e) {}
   return reply || "（嗯……我在想）";
+}
+
+/* WP4：桌宠幂等完成器 —— 同 event_id 重试直接取回已存响应，不重调模型 */
+async function petCompletion(msgs, eventId) {
+  const _m = Number((cfg.qq && cfg.qq.master_user) || 0);
+  const cr = _recoverApi();
+  const _runModel = async (fullId) => {
+    const _t = await withTimeout(petChat(msgs, fullId), 30000);
+    if (cr && fullId) {
+      try { cr.setReply(fullId, _t); } catch (e) {}
+      try { cr.updateStage(fullId, "succeeded", { responded_at: Date.now() }); } catch (e) {}
+    }
+    return _t;
+  };
+  if (!eventId || !cr) return { text: await _runModel(null), cached: false, processing: false };
+  const fullId = cr.eventIdFor("pet", _m, 0, String(eventId));
+  const ex = cr.readEvent(fullId);
+  if (ex) {
+    if (ex.stage === "succeeded" && typeof ex.reply_prepared === "string" && ex.reply_prepared) {
+      return { text: ex.reply_prepared, cached: true, processing: false };
+    }
+    const _running = new Set(["received", "debouncing", "ready", "model_started", "handler_started", "reply_prepared", "send_started"]);
+    if (_running.has(ex.stage)) return { text: "", cached: false, processing: true };
+  }
+  try { cr.recordEvent({ channel: "pet", userId: _m, messageId: String(eventId) }); } catch (e) { throw new Error("桌宠事件写盘失败: " + String((e && e.message) || e)); }
+  try { cr.updateStage(fullId, "ready"); } catch (e) { throw new Error("桌宠事件状态写盘失败: " + String((e && e.message) || e)); }
+  try { cr.updateStage(fullId, "handler_started"); } catch (e) { throw new Error("桌宠事件状态写盘失败: " + String((e && e.message) || e)); }
+  try {
+    const text = await _runModel(fullId);
+    return { text, cached: false, processing: false };
+  } catch (e) {
+    try { cr.updateStage(fullId, "failed_retryable", { last_error: String((e && e.message) || e).slice(0, 200) }); } catch (e2) {}
+    throw e;
+  }
 }
 
 function startPetApi() {
@@ -3322,11 +3984,26 @@ function startPetApi() {
       try { payload = JSON.parse(body || "{}"); } catch (e) {}
       const msgs = Array.isArray(payload.messages) ? payload.messages : [];
       const wantStream = !!payload.stream;
+      /* WP4：桌宠事件身份（JSON 顶层 momo_event_id 或 X-Momo-Event-Id 头），旧客户端无 ID 走 legacy 弱保证 */
+      const _eid = String((payload && payload.momo_event_id) || req.headers["x-momo-event-id"] || "").trim();
+      /* WP5：恢复服务未就绪前不接受新请求，明确 starting 而非半初始化执行 */
+      if (_boot.stage !== "ready" && _boot.stage !== "degraded") { _json(503, { error: { message: "starting: " + _boot.stage } }); return; }
       let text = "";
-      try { text = await withTimeout(petChat(msgs), 30000); }
+      let _processing = false;
+      try {
+        const _res = await petCompletion(msgs, _eid || null);
+        if (_res.processing) _processing = true; else text = _res.text;
+      }
       catch (e) {
         text = e && String(e.message).indexOf("timeout") >= 0 ? "（刚刚想太久了，等会儿再聊这个好不好）" : "（我这边卡了一下，你再说一遍？）";
         log("warn", "桌宠联脑失败: " + String(e && e.message).slice(0, 100));
+      }
+      if (_processing) {
+        try {
+          res.writeHead(202, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ object: "chat.completion.processing", event_id: _eid, status: "processing" }));
+        } catch (e) {}
+        return;
       }
       const id = "chatcmpl-" + Date.now().toString(36);
       try {
@@ -3352,6 +4029,225 @@ function startPetApi() {
   return srv;
 }
 
+/* WP5：启动阶段状态 + 启动恢复清单（连续存在底座 II） */
+let _boot = { stage: "core_initializing", bootId: "boot-" + Date.now().toString(36), startedAt: Date.now() };
+let _openRec = 0;
+let _sessionRepairs = 0;
+function _bootStage(st) { _boot.stage = st; log("info", "启动阶段 → " + st); }
+function _bootStatus() { return _boot.stage; }
+function _startupChecklist(status) {
+  const out = {
+    boot_id: _boot.bootId, base_version: BASE_VERSION, started_at: _boot.startedAt, finished_at: Date.now(), status,
+    plugins: { expected: 0, loaded: (host && host.plugins) ? host.plugins.length : 0 },
+    inbox: { received: 0, resumed: 0, interrupted: 0, unknown: 0, dead: 0 },
+    actions: { open_reconciled: _openRec, unknown: 0 },
+    memory_ingest: { pending: 0, failed: 0 },
+    digest: { pending: [], stale: [], dead: [] },
+    cursors: { private: {}, group: {}, gap_suspected: 0 },
+    session_repairs: { assistant_restored: 0, failed: 0, total_uncommitted: 0 },
+    errors: [],
+  };
+  try {
+    const _cr = _recoverApi();
+    if (_cr) {
+      if (typeof _cr.inboxStats === "function") { const st = _cr.inboxStats(); out.inbox.received = st.received || 0; out.inbox.dead = st.dead || 0; }
+      if (typeof _cr.cursorState === "function") {
+        const c = _cr.cursorState() || {};
+        out.cursors.private = c.private || {}; out.cursors.group = c.groups || c.group || {};
+        let g = 0; const _all = Object.assign({}, c.private || {}, c.groups || c.group || {});
+        for (const k of Object.keys(_all)) if (_all[k] && _all[k].gap_suspected) g++;
+        out.cursors.gap_suspected = g;
+      }
+      if (typeof _cr.scanInbox === "function") {
+        try {
+          const all = _cr.scanInbox({});
+          out.inbox.interrupted = all.filter((e) => e.stage === "interrupted").length;
+          out.inbox.unknown = all.filter((e) => e.stage === "unknown").length;
+          out.inbox.dead = all.filter((e) => e.stage === "dead").length;
+          out.session_repairs.total_uncommitted = all.filter((e) => e.stage === "succeeded" && (!e.session_user_committed || !e.session_assistant_committed)).length;
+        } catch (e2) { /* 保持默认 0 */ }
+      }
+    }
+    const _md = apiOf("memoryDigest");
+    if (_md && typeof _md.digestStatus === "function") { const d = _md.digestStatus(); out.digest = { pending: d.pending || [], stale: d.stale || [], dead: d.dead || [] }; }
+    const _mem = apiOf("memory");
+    if (_mem && _mem.memoryOps && typeof _mem.memoryOps.status === "function") { const m = _mem.memoryOps.status(); out.memory_ingest = { pending: m.pending || 0, failed: (m.failed || 0) + (m.dead || 0) }; }
+  } catch (e) { out.errors.push("checklist: " + String((e && e.message) || e).slice(0, 80)); }
+  return out;
+}
+function _writeStartupRecovery(status, extras) {
+  const m = _startupChecklist(status);
+  if (extras && typeof extras === "object") {
+    if (typeof extras.resumed === "number") m.inbox.resumed = extras.resumed;
+  }
+  try { writeJsonAtomic(path.join(DATA_DIR, "startup-recovery.json"), m); }
+  catch (e) { m.status = "degraded"; m.errors.push("manifest write failed: " + String((e && e.message) || e).slice(0, 80)); log("warn", "启动恢复清单写盘失败: " + String((e && e.message) || e)); }
+  return m;
+}
+/* 启动续跑：received/debouncing/ready 事件重新入队（reply_prepared 由 OneBot 就绪后续发） */
+function _resumeQueue() {
+  const _cr4 = _recoverApi();
+  if (!_cr4) return 0;
+  let evs;
+  try { evs = _cr4.scanInbox({}).filter((e) => (e.stage === "received" || e.stage === "debouncing" || e.stage === "ready") && !String(e.event_id || "").startsWith("legacy:")); } catch (e) { return 0; }
+  let n = 0;
+  for (const ev of evs) {
+    try {
+      /* 桌宠是同步 HTTP 请求，没有可由启动流程主动补发的通道；转为可由同 event_id 客户端重试，绝不转入 QQ。 */
+      if (ev.channel === "pet") {
+        try { _cr4.updateStage(ev.event_id, "failed_retryable", { reason: "pet_client_retry_required", last_error: "桌宠请求中断，等待客户端显式重试" }); } catch (e2) {}
+        continue;
+      }
+      let text = "";
+      const pi = ev.parsed_input;
+      if (typeof pi === "string") text = pi; else if (pi && typeof pi.text === "string") text = pi.text;
+      if (!text && ev.raw_event) { const rw = ev.raw_event || {}; text = String(rw.raw_message || rw.message || "").trim(); }
+      if (!text) continue;
+      if (ev.stage === "ready") { try { _cr4.updateStage(ev.event_id, "received"); } catch (e2) {} }
+      if (ev.channel === "group") enqueueGroupChat(Number(ev.group_id), Number(ev.user_id), text, [], Number(ev.source_ts) || 0, false, "", ev.event_id);
+      else enqueuePrivateChat(Number(ev.user_id), text, [], false, Number(ev.source_ts) || 0, ev.event_id);
+      n++;
+    } catch (e) { log("warn", "续跑入队失败 " + String(ev.event_id || "?") + ": " + String((e && e.message) || e).slice(0, 100)); }
+  }
+  return n;
+}
+/* 续发已备好的回复（reply_prepared）：不重调模型；发送前检查 epoch 屏障；失败标 failed_retryable */
+async function _resumePreparedReplies() {
+  const _cr3 = _recoverApi();
+  if (!_cr3) return 0;
+  let evs;
+  try {
+    /* QQ 私聊/群聊同回复重试，不调模型；桌宠只能由客户端显式重试，不得转投 QQ。unknown/interrupted 禁重放。 */
+    evs = _cr3.scanInbox({}).filter((e) => e.channel !== "pet" && (e.stage === "reply_prepared" || e.stage === "failed_retryable") && typeof e.reply_prepared === "string" && e.reply_prepared);
+  } catch (e) { return 0; }
+  let n = 0;
+  for (const ev of evs) {
+    const scope = ev.scope || (ev.channel === "group" ? "group:" + ev.group_id : (ev.channel === "pet" ? "pet:" + ev.user_id : "user:" + ev.user_id));
+    try { const cur = _cr3.scopeEpoch ? _cr3.scopeEpoch(scope) : 1; if (Number(ev.session_epoch || 1) !== cur) { try { _cr3.updateStage(ev.event_id, "cancelled_by_reset", { reason: "epoch mismatch at resume" }); } catch (e2) {} continue; } } catch (e2) {}
+    const _job = async () => {
+      /* 重新读事件：并发恢复下同一事件只发一次 */
+      const cur = _cr3.readEvent(ev.event_id);
+      if (!cur) return;
+      if (cur.stage === "succeeded" || cur.stage === "send_started") return;
+      /* 发送前持久化 send_started + 事件专属 action key（写盘失败不得发送） */
+      let _ak = "";
+      try { _ak = (typeof actionKey === "function") ? actionKey("resume_reply", Number(ev.user_id) || 0, String(ev.event_id || "")) : ""; } catch (e2) {}
+      try { _cr3.updateStage(ev.event_id, "send_started", { send_action_key: _ak || undefined }); } catch (e2) { return; }
+      try {
+        if (ev.channel === "group") { await onebotSend("send_msg", { message_type: "group", group_id: Number(ev.group_id), message: ev.reply_prepared }); }
+        else { await sendPrivate(Number(ev.user_id), ev.reply_prepared); }
+      } catch (err) {
+        try { _cr3.updateStage(ev.event_id, "failed_retryable", { last_error: String((err && err.message) || err).slice(0, 200) }); } catch (e3) {}
+        return;
+      }
+      /* 成功后：统一 commitSessionEvent 幂等补写（role+event_id 查重）→ send_started→succeeded */
+      let _histOk2 = true;
+      try {
+        await commitSessionEvent({ event_id: ev.event_id || "", channel: ev.channel === "group" ? "group" : "private", user_id: Number(ev.user_id) || 0, group_id: Number(ev.group_id) || 0, parsed_input: ev.parsed_input, reply_prepared: ev.reply_prepared });
+      } catch (e4) { _histOk2 = false; log("warn", "续发后会话补写失败 " + String(ev.event_id || "?") + ": " + String((e4 && e4.message) || e4).slice(0, 120)); }
+      try { _cr3.updateStage(ev.event_id, "succeeded", { responded_at: Date.now(), session_repaired: !_histOk2 }); } catch (e3) {}
+      if (!_histOk2) _sessionRepairs++;
+    };
+    if (typeof _cr3.withScopeLock === "function") { try { await _cr3.withScopeLock(scope, _job); } catch (e2) {} }
+    else { try { await _job(); } catch (e2) {} }
+    n++;
+  }
+  return n;
+}
+
+/* 统一会话提交：按 channel 选 key（QQ 私聊 user<uid> / 群 g<gid>_<uid> / 桌宠 pet<uid>），
+   user/assistant 条目带 event_id，写前按 role+event_id 查重，saveSession 成功后才 markCommitted；绝不发送。 */
+async function commitSessionEvent(ev, opts) {
+  const _o = opts || {};
+  const cr = _recoverApi();
+  const uid = Number(ev.user_id || 0);
+  const gid = Number(ev.group_id || 0);
+  const channel = ev.channel === "pet" ? "pet" : (ev.channel === "group" ? "group" : "private");
+  const key = channel === "group" ? ("g" + gid + "_" + uid) : (channel === "pet" ? ("pet" + uid) : String(uid));
+  const eid = String(ev.event_id || "");
+  const utxt = (ev.parsed_input && (typeof ev.parsed_input === "string" ? ev.parsed_input : ev.parsed_input.text)) || "";
+  const rtxt = String(ev.reply_prepared || "");
+  const hist = loadSession(key);
+  const hasRole = (role) => eid && hist.some((h) => h && h.role === role && h.event_id === eid);
+  let wrote = 0;
+  if (utxt && !hasRole("user")) { hist.push({ role: "user", content: String(utxt).slice(0, 500), ts: Date.now(), event_id: eid }); wrote++; }
+  if (rtxt && !hasRole("assistant")) { hist.push({ role: "assistant", content: String(rtxt).slice(0, 2000), ts: Date.now(), event_id: eid }); wrote++; }
+  if (!wrote) {
+    /* 历史已存在（或无可写内容）：直接确认 committed 标志，不重复写盘 */
+    if (cr && eid) { try { if (utxt) cr.markCommitted(eid, "user"); if (rtxt) cr.markCommitted(eid, "assistant"); } catch (e) {} }
+    return { wrote: 0, histOk: true, key };
+  }
+  try {
+    saveSession(key, trimHistory(hist, 40, 24000));
+  } catch (e) {
+    if (_o.countRepair) { try { _sessionRepairs++; } catch (_) {} }
+    throw e;
+  }
+  if (cr && eid) { try { if (utxt) cr.markCommitted(eid, "user"); if (rtxt) cr.markCommitted(eid, "assistant"); } catch (e) {} }
+  return { wrote, histOk: true, key };
+}
+
+/* D：succeeded 但会话未提交的事件，启动时幂等补写会话历史（只补不重发；统一走 commitSessionEvent 幂等） */
+async function _repairSessions() {
+  const _cr5 = _recoverApi();
+  if (!_cr5) return 0;
+  let evs;
+  try { evs = _cr5.scanInbox({}).filter((e) => e.stage === "succeeded" && typeof e.reply_prepared === "string" && e.reply_prepared.length > 0 && (!e.session_user_committed || !e.session_assistant_committed)); } catch (e) { return 0; }
+  let n = 0;
+  for (const ev of evs) {
+    try {
+      await commitSessionEvent({ event_id: ev.event_id || "", channel: ev.channel, user_id: ev.user_id, group_id: ev.group_id, parsed_input: ev.parsed_input, reply_prepared: ev.reply_prepared }, { countRepair: true });
+      n++;
+    } catch (e) { log("warn", "会话补写失败 " + String(ev.event_id || "?") + ": " + String((e && e.message) || e).slice(0, 100)); }
+  }
+  if (n > 0) log("info", "启动会话修复：补写 " + n + " 条（只补历史不重发）");
+  return n;
+}
+
+/* 阶段二：插件就绪后才允许 OneBot 连接 / 桌宠接口 / 补消息定时器（WP5 顺序） */
+async function _bootStage2() {
+  _bootStage("plugins_loaded");
+  let _reconciled = 0;
+  try {
+    const _cr = _recoverApi();
+    if (_cr && typeof _cr.reconcileOnBoot === "function") { const r = _cr.reconcileOnBoot(); _reconciled = (r && r.interrupted || 0) + (r && r.unknown || 0); log("info", "收件箱对账：interrupted " + (r.interrupted || 0) + " / unknown " + (r.unknown || 0) + " / 待续跑 " + (r.resumed || 0)); }
+  } catch (e) { log("warn", "收件箱对账失败: " + String((e && e.message) || e).slice(0, 120)); }
+  _bootStage("recovery_reconcile_done");
+  /* v2.2.0 返修：先真正续跑再写清单（resumed 必须是真实入队数，ready 不得写在安全续跑之前） */
+  let _nq = 0;
+  try {
+    _nq = _resumeQueue();
+    if (_nq > 0) log("info", "启动续跑：重新入队 " + _nq + " 条（received/debouncing/ready 持久事件，决策 1：重启自动续跑）");
+  } catch (e) { log("warn", "启动续跑入队失败: " + String((e && e.message) || e).slice(0, 120)); }
+  let _nrep = 0;
+  try { _nrep = await _repairSessions(); } catch (e) { log("warn", "会话补写异常: " + String((e && e.message) || e).slice(0, 120)); }
+  /* D：启动清单状态按收件箱推导（不硬编码 ready：有 pending/interrupted/unknown 就降级 degraded） */
+  let _listStatus = "ready";
+  try {
+    const _crx = _recoverApi();
+    if (_crx && typeof _crx.inboxStats === "function") {
+      const _is = _crx.inboxStats();
+      if ((_is.pending || 0) > 0 || (_is.interrupted || 0) > 0 || (_is.unknown || 0) > 0 || (_is.dead || 0) > 0) _listStatus = "degraded";
+    }
+  } catch (e) {}
+  const _m = _writeStartupRecovery(_listStatus, { resumed: _nq, session_repairs: _nrep });
+  if (_m.status !== "ready") { _bootStage("degraded"); log("warn", "启动恢复清单异常，降级 degraded（见 startup-recovery.json）"); } else { _bootStage("safe_resume"); }
+  connect();
+  _bootStage("onebot_connecting");
+  try { startPetApi(); } catch (e) { log("warn", "桌宠联脑接口启动异常: " + String((e && e.message) || e).slice(0, 100)); }
+  _bootStage("catchup_enabled");
+  setInterval(heartbeat, 1000);
+  setInterval(mindLoop, MIND_TICK_MS);
+  setTimeout(mindLoop, 60000);
+  setInterval(catchUpMissedMessages, 5 * 60000);
+  setTimeout(catchUpMissedMessages, 15000);
+  try {
+    log("info", `空闲心跳已并入主时钟（唤醒间隔 ≥${mindCfg("min_wake_gap_min", 10)} 分钟，每小时 ≤${mindCfg("max_per_hour", 3)} 次）`);
+    setTimeout(mindPulseTick, 8000);
+  } catch (e) { log("warn", "空闲心跳启动失败: " + String((e && e.message) || e).slice(0, 100)); }
+  _bootStage("ready");
+}
+
 log("info", `== dsh-pet-qq-bridge v${BASE_VERSION} 启动 ==`);
 if (!resolveApiKey()) { log("warn", "未能读取 API Key（已启动 60 秒定时重读，读到即自愈）"); startApiKeyWatchdog(); }
 loadProactiveState();
@@ -3363,24 +4259,10 @@ const split0 = (cfg.qq && cfg.qq.split_reply) ? `拆条≤${cfg.qq.split_max_cha
 const pr0 = (cfg.proactive && cfg.proactive.enabled) ? `主动搭话(沉默${cfg.proactive.silence_minutes || 120}分+${cfg.proactive.morning_greet || "08:00"}/${cfg.proactive.night_greet || "23:00"})` : "主动搭话关";
 const vis0 = (cfg.chat && cfg.chat.vision && cfg.chat.vision.enabled === false) ? "关" : "开";
 log("info", `模型=${s0.model} 接口=${s0.base_url} 联网=${ws0} 回复=${split0} ${pr0} 看图=${vis0} ${budgetLine()}`);
-/* 阶段一：重启对账——running/结果不明的行动标 unknown，绝不盲目重放 */
-try { const _rec = reconcileOpenActions(); if (_rec > 0) log("warn", `重启对账完成：${_rec} 条中断行动已标记 unknown（不重放）`); } catch (e) {}
-connect();
-/* 桌宠联脑接口（本地 OpenAI 兼容） */
-try { startPetApi(); } catch (e) { log("warn", "桌宠联脑接口启动异常: " + String(e.message).slice(0, 100)); }
-/* 情绪衰减已迁移到框架服务 mood 的 timer 钩子（骨骼方案 S3） */
-/* 空闲认知心跳：已合并进 heartbeat 主时钟（每 60 tick 记一次），此处只做启动热身 */
-try {
-  log("info", `空闲心跳已并入主时钟（唤醒间隔 ≥${mindCfg("min_wake_gap_min", 10)} 分钟，每小时 ≤${mindCfg("max_per_hour", 3)} 次）`);
-  setTimeout(mindPulseTick, 8000);
-} catch (e) { log("warn", "空闲心跳启动失败: " + String(e.message).slice(0, 100)); }
-/* 空间保底自查已迁移到插件 qzone 定时钩子 */
-setInterval(heartbeat, 1000);
-/* 浅心跳已迁移到插件 proactive 的 timer 钩子 */
-setInterval(mindLoop, MIND_TICK_MS);
-setTimeout(mindLoop, 60000);
-setInterval(catchUpMissedMessages, 5 * 60000);
-setTimeout(catchUpMissedMessages, 15000);
+/* 阶段一：重启对账——running/结果不明的行动标 unknown，绝不盲目重放（只读，不发消息） */
+_bootStage("recovery_reconcile");
+try { _openRec = reconcileOpenActions(); if (_openRec > 0) log("warn", `重启对账完成：${_openRec} 条中断行动已标记 unknown（不重放）`); } catch (e) {}
+/* OneBot 连接 / 桌宠接口 / 定时器全部延后到插件就绪后的阶段二（见 _bootStage2） */
 /* 记忆固化定时器已迁移到插件 memory 的 timer 钩子 */
 /* 提醒/目标计划/生日检查定时器已迁移到插件 timer 钩子 */
 // 每日复盘（小结）已并入「晚间播报」插件 evening-report.js，此处不再单独定时
@@ -3434,4 +4316,6 @@ host.loadPlugins();
 host.runHook("startup", {});
 host.watchPlugins();
 log("info", `插件平台就绪：${host.plugins.length} 个插件（工具 ${host.toolRegistry.size} 个 / 命令 ${host.commandRegistry.size} 个）`);
+/* WP5：阶段二——收件箱对账 → 恢复清单 → 防抖续跑 → OneBot → 桌宠 → 补消息定时器 → ready */
+_bootStage2().catch((e) => { log("warn", "启动阶段二失败: " + String((e && e.message) || e).slice(0, 120)); _bootStage("degraded"); try { _writeStartupRecovery("degraded"); } catch (e2) {} });
 

@@ -278,6 +278,25 @@ async function consolidateAllMemories() {
 }
 
 
+/* WP5：只读状态（启动恢复清单用，绝不改变 v2.1 提交流程） */
+function status() {
+  const out = { pending: 0, failed: 0, dead: 0, exchanges: 0 };
+  try {
+    for (const uid of _listQueuedUids()) {
+      const q = _loadQueue(uid);
+      if (q) {
+        out.exchanges += (q.exchanges || []).length;
+        for (const j of q.jobs || []) {
+          if (j.status === "dead_letter") out.dead++;
+          else if (j.status === "failed") out.failed++;
+          else out.pending++;
+        }
+      }
+    }
+  } catch (e) { out.error = String((e && e.message) || e).slice(0, 80); }
+  return out;
+}
+
 module.exports = {
   name: "memory",
   displayName: "记忆",
@@ -286,9 +305,9 @@ module.exports = {
   permissions: ["DATA_DIR", "apiKey", "completeOnce", "config", "loadMemories", "loadShortMemories", "log", "parseMemoryJson", "reasonComplete", "recordAction", "resolveCall", "saveMemories", "saveShortMemories", "sendPrivate", "settings"],
   version: "1.2.0",
   init(ctx) { _ctx = ctx; _queues.clear(); _sched = null; },
-  apiSpec: {"memoryOps":{"dropAgentDeeds":{"input":"","output":"","sideEffect":""},"mergeMemories":{"input":"","output":"","sideEffect":""},"pruneMemories":{"input":"","output":"","sideEffect":""},"consolidateUserMemories":{"input":"","output":"","sideEffect":""}}},
+  apiSpec: {"memoryOps":{"dropAgentDeeds":{"input":"","output":"","sideEffect":""},"mergeMemories":{"input":"","output":"","sideEffect":""},"pruneMemories":{"input":"","output":"","sideEffect":""},"consolidateUserMemories":{"input":"","output":"","sideEffect":""},"status":{"input":"","output":"","sideEffect":""}}},
 
-  api: { memoryOps: { dropAgentDeeds, mergeMemories, pruneMemories, consolidateUserMemories } },
+  api: { memoryOps: { dropAgentDeeds, mergeMemories, pruneMemories, consolidateUserMemories, status } },
   __test: { bufferExchange, processJob, applyResult, mergeMemories, fingerprint, dropAgentDeeds, normChannel, consolidateUserMemories, _loadQueue, _persistQueue, _loadSched, _san, MAX_ATTEMPTS },
   tools: [
     {

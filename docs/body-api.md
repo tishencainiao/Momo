@@ -103,8 +103,14 @@ Invoke-RestMethod -Uri http://127.0.0.1:4010/status -Headers $h
 Invoke-RestMethod -Uri http://127.0.0.1:4010/cmd/say -Method Post -Headers $h -Body (@{text="你好呀"} | ConvertTo-Json)
 ```
 
-## 6. 安全红线
+## 6. 桌宠联脑幂等契约（大脑 3999 /v1/chat/completions，v2.2.0 起）
+1. 请求带 `momo_event_id`（JSON 顶层字段）或 `X-Momo-Event-Id` 头：同 ID 重试会直接返回已生成的同一响应，不会重复调用模型/工具。
+2. 同 ID 仍在处理中时返回 `202 {object:"chat.completion.processing", event_id, status:"processing"}`。
+3. 不带 ID 的旧客户端照常回复，但不承诺幂等（不把「相同内容」误判为「同一事件」）。
+4. 未来聊天 UI 接入约定：每次新输入生成一个 UUID 作为 `momo_event_id`，重试沿用同一 ID。
+5. 当前 PySide6 桌宠没有聊天面板（聊天走大脑/QQ），此契约为大脑侧能力；契约实现与测试见 `test/pet-idempotent.js`。
 
+## 7. 安全红线
 1. 只绑 `127.0.0.1`，不提供任何公网能力。
 2. token 每次启动前都要求存在（缺失会自动生成），请求恒定时间比对。
 3. 身体**没有**执行外部命令、读写任意文件的接口——它只能说话、播动画、移动、显隐。大脑那边才是能力边界所在。

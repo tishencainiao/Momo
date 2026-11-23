@@ -96,8 +96,7 @@ async function probe() {
     else setSnap("ledger", { status: ores.count > 0 ? "stale" : "fresh", since: now, evidence: ores.count > 0 ? ("行动账本有 " + ores.count + " 条未闭环（下次重启会转 unknown）") : "行动账本无遗留 open" });
   } catch (e) {}
   try {
-    const outs = typeof _ctx.loadToolOutcomes === "function" ? _ctx.loadToolOutcomes(60) : [];
-    const recent = outs.filter((o) => o && now - (o.ts || 0) < 3600e3);
+    const outs = typeof _ctx.loadToolOutcomes === "function" ? _ctx.loadToolOutcomes(60) : [];    const recent = outs.filter((o) => o && now - (o.ts || 0) < 3600e3);
     /* A20：按「每个工具的最新一次结果」判断恢复——同一工具先失败后成功 = 已恢复；
      * A 工具失败、B 工具成功不能把 A 算恢复；最新结果 unknown 仍不得显示 fresh。 */
     const latest = new Map();
@@ -118,6 +117,27 @@ async function probe() {
     }
     setSnap("tools", { status: ts, since: now, evidence: ev });
   } catch (e) {}
+  /* WP5：会话恢复服务（收件箱 pending/interrupted/unknown/gap 不得全 fresh） */
+  try {
+    const cr = _ctx.getApi("conversationRecovery");
+    if (cr && typeof cr.inboxStats === "function") {
+      const st = cr.inboxStats() || {};
+      const pend = Number(st.pending) || 0;
+      const dead = Number(st.dead) || 0;
+      if (pend > 0 || dead > 0) setSnap("conversation", { status: "degraded", since: now, evidence: "会话收件箱存在 " + pend + " 条未完成 / " + dead + " 条死事件（重启后可对账或续跑）" });
+      else setSnap("conversation", { status: "fresh", since: now, evidence: "会话收件箱无未完成事件" });
+    } else setSnap("conversation", { status: "unknown", since: 0, evidence: "会话恢复服务未加载" });
+  } catch (e) {}
+  /* WP5：启动恢复清单（startup-recovery.json：状态非 ready 不得显示健康） */
+  try {
+    const p = path.join(_ctx.DATA_DIR, "startup-recovery.json");
+    if (!fs.existsSync(p)) setSnap("startupRecovery", { status: "unknown", since: 0, evidence: "尚无启动恢复清单（插件就绪后生成）" });
+    else {
+      const m = JSON.parse(fs.readFileSync(p, "utf8")) || {};
+      if (m.status === "ready") setSnap("startupRecovery", { status: "fresh", since: now, evidence: "启动恢复清单 ready（boot " + String(m.boot_id || "").slice(0, 12) + "）" });
+      else setSnap("startupRecovery", { status: "degraded", since: now, evidence: "启动恢复清单状态 " + String(m.status || "未知") + (m.errors && m.errors.length ? "：" + String(m.errors[0]).slice(0, 60) : "") });
+    }
+  } catch (e) { setSnap("startupRecovery", { status: "unknown", since: now, evidence: "启动恢复清单不可读：" + String((e && e.message) || e).slice(0, 60) }); }
 }
 
 function openCount() {
@@ -132,7 +152,7 @@ function openCount() {
 
 function allSnapshot() {
   const now = Date.now();
-  return ["onebot", "body", "embed", "budget", "ledger", "tools", "perception", "digest"].map((k) => {
+  return ["onebot", "body", "embed", "budget", "ledger", "tools", "perception", "digest", "conversation", "startupRecovery"].map((k) => {
     const s = Object.assign({ name: k }, getSnap(k));
     /* WP4：fresh 必须是「最近」的成功信号；快照超过 SNAP_STALE_MS 没重探 → 降级 stale，绝不保留过期 fresh */
     if (s.status === "fresh" && now - (s.updatedAt || 0) > SNAP_STALE_MS) {
@@ -151,7 +171,7 @@ module.exports = {
   system: true,
   userScoped: false,   // 纯系统级：只读探活，不按人处理数据/发消息
   requires: [],
-  version: "1.2.1",
+  version: "1.2.2",
   apiSpec: {
     health: {
       snapshot: { input: "无", output: "能力状态数组", sideEffect: "只读" },
@@ -180,6 +200,31 @@ module.exports = {
         const lines = allSnapshot().map((s) => `· ${s.name}: ${s.status} — ${s.evidence}`);
         _ctx.sendPrivate(msg.userId, "体检报告：\n" + lines.join("\n"));
       }).catch(() => {});
+    },
+  }, {
+    key: "/恢复",
+    regex: /^\/恢复/,
+    handler(msg) {
+      if (!_ctx.isMaster(msg.userId)) { _ctx.sendPrivate(msg.userId, "（恢复清单只有主人能看哦）"); return; }
+      try {
+        const lines = ["恢复清单（只读）："];
+        const p = path.join(_ctx.DATA_DIR, "startup-recovery.json");
+        if (fs.existsSync(p)) {
+          const m = JSON.parse(fs.readFileSync(p, "utf8")) || {};
+          lines.push(`· 启动：${m.status || "未知"}（v${m.base_version || "?"}，boot ${String(m.boot_id || "").slice(0, 12)}）`);
+          lines.push(`· 行动账本对账：${Number(m.actions && m.actions.open_reconciled) || 0} 条 running→unknown`);
+          lines.push(`· 记忆摄入：pending ${Number(m.memory_ingest && m.memory_ingest.pending) || 0} / failed ${Number(m.memory_ingest && m.memory_ingest.failed) || 0}`);
+          lines.push(`· 消化：pending ${(m.digest && m.digest.pending || []).length} / stale ${(m.digest && m.digest.stale || []).length} / dead ${(m.digest && m.digest.dead || []).length}`);
+          lines.push(`· 补消息游标 gap：${Number(m.cursors && m.cursors.gap_suspected) || 0}`);
+          if (m.errors && m.errors.length) lines.push(`· 异常：${m.errors.map((x) => String(x).slice(0, 60)).join("；")}`);
+        } else lines.push("· 尚无启动恢复清单");
+        const cr = _ctx.getApi("conversationRecovery");
+        if (cr && typeof cr.inboxStats === "function") {
+          const st = cr.inboxStats() || {};
+          lines.push(`· 会话收件箱：未完成 ${Number(st.pending) || 0} / 死事件 ${Number(st.dead) || 0}`);
+        }
+        _ctx.sendPrivate(msg.userId, lines.join("\n"));
+      } catch (e) { _ctx.sendPrivate(msg.userId, "恢复清单读取失败：" + String((e && e.message) || e).slice(0, 80)); }
     },
   }],
   hooks: {

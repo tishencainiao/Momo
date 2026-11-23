@@ -31,11 +31,14 @@ check("pro 命中价 0.022*7.2", Math.abs(bc.pro_input_hit_cny_per_m - 0.1584) <
 check("dailyCny() 读配置", B.dailyCny() === 1);
 check("peak_x2 默认开", bc.peak_x2 === true);
 
-/* recordSpend：flash 价 vs pro 价（非高峰，mult=1） */
+/* recordSpend：flash 价 vs pro 价（非高峰，mult=1）——固定时钟，避免高峰时段用例漂移 */
+const RealDate = Date;
+global.Date = class extends RealDate { constructor(...a) { super(...(a.length ? a : [1600000000000])); } static now() { return 1600000000000; } };
 const b1 = B.recordSpend("chat", 1e6, 0, 0, 0, false);
 const c1 = b1.spent_cny;
 const b2 = B.recordSpend("reason", 0, 0, 1e6, 0, true);
 const c2 = b2.spent_cny - b1.spent_cny;
+global.Date = RealDate;
 check("flash 1M miss ≈ 1.08", Math.abs(c1 - 1.08) < 1e-6);
 check("pro 1M hit ≈ 0.1584", Math.abs(c2 - 0.1584) < 1e-6);
 check("tokens_hit 累计", b2.tokens_hit === 1e6);

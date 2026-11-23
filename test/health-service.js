@@ -244,6 +244,54 @@ check("contextProvider：全 fresh/unknown 不注入；有异常才注入", asyn
   assert.ok(dirty.includes("【健康】") && dirty.includes("onebot:offline"), "有异常应注入：" + dirty);
 });
 
+check("WP5：conversation/startupRecovery 快照与 /恢复 命令", async () => {
+  const bodyApi = { status: async () => ({ data: { ok: true, pid: 1, visible: true } }) };
+  const c = mkCtx({
+    getApi: (ns) => {
+      if (ns === "body") return bodyApi;
+      if (ns === "budget") return { isBudgetExhausted: () => false, budgetTier: () => "full" };
+      if (ns === "conversationRecovery") return { inboxStats: () => ({ pending: 1, dead: 0 }) };
+      return null;
+    },
+  });
+  mod.init(c);
+  await mod.__test.probe();
+  const conv = mod.__test._snap.conversation;
+  assert.strictEqual(conv.status, "degraded", "pending>0 → degraded");
+  assert.ok(conv.evidence.includes("未完成"), "证据含未完成事件");
+  const sr = mod.__test._snap.startupRecovery;
+  assert.strictEqual(sr.status, "unknown", "无清单文件 → unknown");
+  // 写清单 status=ready → fresh
+  fs.writeFileSync(path.join(c.DATA_DIR, "startup-recovery.json"), JSON.stringify({ boot_id: "b1", status: "ready", errors: [] }));
+  await mod.__test.probe();
+  assert.strictEqual(mod.__test._snap.startupRecovery.status, "fresh", "清单 ready → fresh");
+  // 清单 degraded → degraded
+  fs.writeFileSync(path.join(c.DATA_DIR, "startup-recovery.json"), JSON.stringify({ boot_id: "b1", status: "degraded", errors: ["写盘失败"] }));
+  await mod.__test.probe();
+  const srd = mod.__test._snap.startupRecovery;
+  assert.strictEqual(srd.status, "degraded", "清单非 ready → degraded");
+  assert.ok(srd.evidence.includes("写盘失败"), "证据带 errors[0]");
+  // /恢复 命令（master-only 只读）
+  const cmd = mod.commands.find((x) => x.key === "/恢复");
+  assert.ok(cmd, "/恢复 命令存在");
+  let sent = "";
+  cmd.handler({ userId: 1, text: "/恢复" });
+  assert.strictEqual(c.lastSend, undefined, "master 同步无 lastSend 直发");
+  // 用 sendPrivate 捕获
+  c.sendPrivate = (u, t) => { sent = t; };
+  mod.init(c);
+  cmd.handler({ userId: 1, text: "/恢复" });
+  await new Promise((r) => setTimeout(r, 30));
+  assert.ok(sent.includes("恢复清单"), "/恢复 输出清单：" + sent.slice(0, 60));
+  assert.ok(sent.includes("degraded") || sent.includes("异常"), "清单带异常状态");
+  let guest = "";
+  c.sendPrivate = (u, t) => { guest = t; };
+  mod.init(c);
+  cmd.handler({ userId: 2, text: "/恢复" });
+  assert.ok(guest.includes("只有主人"), "非主人被拒");
+  mod.init(c); // 恢复
+});
+
 _chain.then(() => {
   console.log("\n" + pass + "/" + n + " 通过" + (pass === n ? "" : "（有失败）"));
   process.exit(pass === n ? 0 : 1);
