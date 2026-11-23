@@ -22,8 +22,9 @@
 > v1.46.2 起按月份拆分：明细在 `docs/changelog/<年>-<月>.md`，本文件只留规则与索引。
 > 较早版本的完整正文可直接读对应月份文件，或 `git log`。
 
-### 2026-11（142 个版本）→ [docs/changelog/2026-11.md](docs/changelog/2026-11.md)
+### 2026-11（143 个版本）→ [docs/changelog/2026-11.md](docs/changelog/2026-11.md)
 
+| v2.2.1 | 2026-11-23 | /预算 命令（主人调生活费双写立即生效：原子落盘 config.json+内存 cfg 同步+留痕；方案 A） |
 | v2.2.0 | 2026-11-22 | 「连续存在底座 II：会话与跨渠道恢复」（Kimi v2.2.0 总计划 WP0–WP6 全量落地，未 commit/tag/重启/发布，等主人拍板）：WP1 事件身份+持久收件箱（新插件 conversation-recovery：统一事件键 qq:private/qq:group/pet、每事件原子文件 data/conversation-inbox/、状态机 received→…→succeeded 与 interrupted/unknown/dead/cancelled_by_reset、scope 串行、epoch 屏障、重启对账不重放）；WP2 实时路径接入（私聊/群聊先入箱再处理、重复投递拦截、发送成功才写会话历史、失败 failed_retryable 不写历史）；WP3 补消息游标重做（scanned/completed 分离、event_id 收件箱去重、legacy_floor 旧 seen-msg 只读、截断标 gap_suspected、溢出进待确认清单、群只补 @self）；WP4 桌宠幂等（momo_event_id/X-Momo-Event-Id、成功缓存直回、处理中 202、legacy 弱保证、pet 会话同事件只记一次）；WP5 启动阶段化（插件就绪→收件箱对账→启动清单 data/startup-recovery.json→防抖续跑→OneBot/桌宠/定时器、503 就绪门、health 加 conversation+startupRecovery 信号、/恢复 只读命令）；测试 85→91（新增 conversation-red、conversation-recovery、conversation-flow、catchup-cursor、pet-idempotent、startup-recovery），52 插件 |
 | v2.1.0 | 2026-11-22 | 「连续存在底座 I」（Kimi v2.1.0 总计划 WP0–WP6 全量落地，未 commit/tag/重启/发布，等主人拍板）：WP1 记忆摄入持久化与幂等恢复（memory v1.2.0：入队即落盘 data/ingest/queue-<uid>.json、同 scope 3 段组批、processJob 状态机 pending→result_ready→done、失败退避×2 封顶、崩溃重启 result_ready 幂等、固化调度时间持久化）；WP2 长期记忆作用域统一（私聊/群/桌宠三域，filterMemoriesForGroup 严格同群、digestText 按 channel/groupId 注入、global 只放行 public_self）；WP3 消化证据链（digest.py schema:2：S_ 稳定源键 sha1(kind|scope|text)、validate_topics 伪造/跨 scope/subject 冲突拒提交、读侧 topicActive fail-closed——旧位置号 A1/R1/M1 不再当凭据、编辑/遗忘立即失效且重启不复活）；WP4 消化事务提交（manifest 状态机+source_revision 跳过、write_bucket tmp+os.replace 原子替换、部分失败保留 last known good、RESULT+退出码 0/2/1、runDigest 全成功才记凭据、health 消化源四态）；WP5 启动连续性（启动提示诚实化：新进程非新人格、不编造中断期间信息）；测试 81→85（新增 memory-ingest、digest-py、digest-txn），51 插件。预发布热修：搜索砍词退化检测与重试链（search v1.3.0——必应偶发把长查询砍成头两字、返回百科 stub/垃圾站群，新增 isStubDominated 2 字滑窗判定，退化时切头 2 字重试至多 2 次，重试仍退化返回空数组不喂垃圾，修「猫咪翻车现场」类查询） |
 

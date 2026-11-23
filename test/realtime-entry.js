@@ -56,7 +56,7 @@ function mkRealCr(dir, failWrite) {
 
 function mkSandbox(cr, over) {
   const o = over || {};
-  const calls = { sent: [], proc: [], hooks: [] };
+  const calls = { sent: [], proc: [], hooks: [], cfgWrites: [], actions: [] };
   const api = cr.api.conversationRecovery;
   const sandbox = {
     console, process, Buffer, setTimeout, clearTimeout, Date, JSON, Math, Number, String, Promise,
@@ -68,6 +68,9 @@ function mkSandbox(cr, over) {
       apiOf: (ns) => (ns === "conversationRecovery" ? api : null),
     },
     cfg: { qq: { allowed_users: o.allowed || [U], master_user: U } },
+    CFG_FILE: path.join(os.tmpdir(), "momo-rt-cfg-" + Date.now() + "-" + Math.random().toString(36).slice(2) + ".json"),
+    writeFileAtomic: (f, c) => { calls.cfgWrites.push({ f, c }); fs.writeFileSync(f, c); },
+    recordAction: (e) => { calls.actions.push(e); },
     isMaster: (u) => Number(u) === U,
     resolveCall: () => "主人",
     isMuted: o.isMuted || (() => false),
@@ -178,6 +181,34 @@ check("E5 重启重复投递不复活", async () => {
 });
 
 // E6：静态断言——两入口 enqueue 传 eventId
+// E7：/预算 命令 → 写盘+内存 cfg 同步更新+留痕+终态（主人）
+check("E7 /预算 命令双写立即生效", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "momo-re7-"));
+  const cr = mkRealCr(dir);
+  const { sandbox, calls } = mkSandbox(cr);
+  vm.runInContext(SEG_H + "\nthis.__handle = handlePrivateMessage;", sandbox);
+  const ev = { user_id: U, self_id: 100000004, message_id: "m7", time: 1600000000, raw_message: "/预算 2.5", message: [{ type: "text", data: { text: "/预算 2.5" } }] };
+  await sandbox.__handle(ev);
+  const wrote = calls.cfgWrites.length === 1 && JSON.parse(calls.cfgWrites[0].c).budget.daily_cny === 2.5;
+  const mem = Number(sandbox.cfg.budget && sandbox.cfg.budget.daily_cny) === 2.5;
+  const ack = calls.sent.some((s) => s.t.includes("2.5"));
+  const logged = calls.actions.some((a) => a.action === "set_budget" && a.ok === true);
+  const st = sandbox.apiOf("conversationRecovery").readEvent("qq:private:" + U + ":m7");
+  return wrote && mem && ack && logged && !!(st && st.stage === "succeeded");
+});
+
+// E8：/预算 非主人 → 拒绝且不写盘不改 cfg
+check("E8 /预算 非主人拒绝", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "momo-re8-"));
+  const cr = mkRealCr(dir);
+  const U2 = 100000002;
+  const { sandbox, calls } = mkSandbox(cr, { allowed: [U, U2] });
+  vm.runInContext(SEG_H + "\nthis.__handle = handlePrivateMessage;", sandbox);
+  const ev = { user_id: U2, self_id: 100000004, message_id: "m8", time: 1600000000, raw_message: "/预算 9", message: [{ type: "text", data: { text: "/预算 9" } }] };
+  await sandbox.__handle(ev);
+  return calls.cfgWrites.length === 0 && !sandbox.cfg.budget && calls.sent.some((s) => s.t.includes("只有主人"));
+});
+
 check("E6 静态：私聊/群入口 enqueue 传 eventId", () => {
   return IDX.includes("enqueuePrivateChat(userId, text, parsed.images, voiceRequested, msgTime, _eidP)")
     && IDX.includes("enqueueGroupChat(Number(event.group_id), userId, text, parsed.images, Number(event.time) || 0, !!(atSelf || mentioned), _sn, _eidG)");

@@ -349,7 +349,7 @@ const { STYLE_DIRECTIVE, GROUP_DIRECTIVE, SITUATION_QQ, SITUATION_DESKTOP, situa
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "2.2.0";
+const BASE_VERSION = "2.2.1";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -3087,6 +3087,32 @@ async function handlePrivateMessage(event) {
       return;
 
     
+    }
+  }
+  if (text === "/预算" || text.startsWith("/预算 ")) {
+    const _barg = text.replace(/^\/预算\s*/, "").trim();
+    const _bamt = parseFloat(_barg);
+    try {
+      if (!master) {
+        await sendPrivate(userId, "生活费只有主人能调哦～");
+        _finP("succeeded", { reason: "command" });
+        return;
+      }
+      if (!(_bamt > 0) || _bamt > 50) {
+        await sendPrivate(userId, "金额不对哦，给个正数吧（比如 /预算 2），一次最多调 50 元～");
+        _finP("succeeded", { reason: "command" });
+        return;
+      }
+      const _ncfg = Object.assign({}, cfg, { budget: Object.assign({}, cfg.budget || {}, { daily_cny: _bamt }) });
+      writeFileAtomic(CFG_FILE, JSON.stringify(_ncfg, null, 2));   // 先落盘成功再改内存，失败时两者一致
+      cfg = _ncfg;
+      recordAction({ action: "set_budget", ok: true, summary: "生活费调到 ¥" + _bamt + "/天" });
+      await sendPrivate(userId, "收到～生活费已经调到 ¥" + _bamt + "/天啦，今天开始就按这个数算");
+      _finP("succeeded", { reason: "command" });
+      return;
+    } catch (_cse) {
+      _finP("unknown", { reason: "command_delivery", last_error: String(_cse && _cse.message).slice(0, 120) });
+      return;
     }
   }
   if (text === "/余额" || text === "/查余额" || text === "/balance") {
