@@ -349,7 +349,7 @@ const { STYLE_DIRECTIVE, GROUP_DIRECTIVE, SITUATION_QQ, SITUATION_DESKTOP, situa
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "2.2.2";
+const BASE_VERSION = "2.2.3";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -1000,10 +1000,29 @@ const AGENT_TOOLS = [
       parameters: { type: "object", properties: { limit: { type: "number", description: "看最近几条，默认 10" } } },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "set_budget",
+      description: "调整主人的每日生活费预算（DeepSeek API 花费上限，元/天）。当主人说「把生活费改成 X 元」「生活费调到 X」「今天多给我点钱」之类的话时调用。只有主人能改，其他人调用会被拒绝。",
+      parameters: { type: "object", properties: { amount: { type: "number", description: "新的每日预算金额（元），大于 0 且不超过 50" } }, required: ["amount"] },
+    },
+  },
 /* 电脑工具已迁移为插件 pc-tools */
 /* 自我内省/愿望工具已迁移为插件 evolution */
 ];
 /* 自我内省文本构建已迁移到插件 evolution */
+/* v2.2.3：set_budget 自然语言工具与 /预算 命令共用的双写逻辑（模块级，agentChatOnce 工具循环可调） */
+function applyBudgetChange(amount, uid) {
+  const a = Number(amount);
+  if (!(a > 0) || a > 50) return { ok: false, msg: "金额不对哦，给个正数吧（比如 2），一次最多调 50 元～" };
+  if (!isMaster(uid)) return { ok: false, msg: "生活费只有主人能调哦～" };
+  const ncfg = Object.assign({}, cfg, { budget: Object.assign({}, cfg.budget || {}, { daily_cny: a }) });
+  writeFileAtomic(CFG_FILE, JSON.stringify(ncfg, null, 2));   // 先落盘成功再改内存，失败时两者一致
+  cfg = ncfg;
+  recordAction({ action: "set_budget", ok: true, summary: "生活费调到 ¥" + a + "/天" });
+  return { ok: true, msg: "收到～生活费已经调到 ¥" + a + "/天啦，今天开始就按这个数算" };
+}
 async function agentToolCall(messages, settings, tools, think, tier) {
   const endpoint = settings.base_url.replace(/\/+$/, "") + "/v1/chat/completions";
   // 思考开关：闲聊关（省钱快），复杂判断开（想清楚再答）；预算降级最后一档强制关
@@ -1339,6 +1358,11 @@ async function agentChatOnce(history, userText, pctx) {
             const histArgs = JSON.parse(tc.function.arguments || "{}");
             result = apiOf("mind").mindHistoryText(Number(histArgs.limit) || 10);
             _toolOk = true;
+          } else if (tc.function.name === "set_budget") {
+            const args = JSON.parse(tc.function.arguments || "{}");
+            const r = applyBudgetChange(args.amount, userId);
+            result = r.msg;
+            _toolOk = r.ok;
           }
         } catch (e) { result = "工具执行失败: " + String(e.message).slice(0, 100); _toolOk = false; }
         const _rStr = String(result == null ? "" : result);
@@ -3093,21 +3117,8 @@ async function handlePrivateMessage(event) {
     const _barg = text.replace(/^\/预算\s*/, "").trim();
     const _bamt = parseFloat(_barg);
     try {
-      if (!master) {
-        await sendPrivate(userId, "生活费只有主人能调哦～");
-        _finP("succeeded", { reason: "command" });
-        return;
-      }
-      if (!(_bamt > 0) || _bamt > 50) {
-        await sendPrivate(userId, "金额不对哦，给个正数吧（比如 /预算 2），一次最多调 50 元～");
-        _finP("succeeded", { reason: "command" });
-        return;
-      }
-      const _ncfg = Object.assign({}, cfg, { budget: Object.assign({}, cfg.budget || {}, { daily_cny: _bamt }) });
-      writeFileAtomic(CFG_FILE, JSON.stringify(_ncfg, null, 2));   // 先落盘成功再改内存，失败时两者一致
-      cfg = _ncfg;
-      recordAction({ action: "set_budget", ok: true, summary: "生活费调到 ¥" + _bamt + "/天" });
-      await sendPrivate(userId, "收到～生活费已经调到 ¥" + _bamt + "/天啦，今天开始就按这个数算");
+      const _r = applyBudgetChange(_bamt, userId);
+      await sendPrivate(userId, _r.msg);
       _finP("succeeded", { reason: "command" });
       return;
     } catch (_cse) {

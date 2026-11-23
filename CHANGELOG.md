@@ -22,8 +22,9 @@
 > v1.46.2 起按月份拆分：明细在 `docs/changelog/<年>-<月>.md`，本文件只留规则与索引。
 > 较早版本的完整正文可直接读对应月份文件，或 `git log`。
 
-### 2026-11（144 个版本）→ [docs/changelog/2026-11.md](docs/changelog/2026-11.md)
+### 2026-11（145 个版本）→ [docs/changelog/2026-11.md](docs/changelog/2026-11.md)
 
+| v2.2.3 | 2026-11-23 | set_budget 自然语言工具（主人专用）：QQ 上说「生活费改成 X 元」即可调预算，与 /预算 命令共用 applyBudgetChange 双写逻辑；test/realtime-entry.js E9/E10 |
 | v2.2.2 | 2026-11-23 | 修复：闲聊回复尾部 saveSeenMsg 残留调用（WP3 删函数漏网，回复已发出后抛 ReferenceError 导致误报「对话失败」）→ 改 _markScanned 语义对齐；test/dedup.js 加「全文件无 saveSeenMsg 残留」静态断言 |
 | v2.2.1 | 2026-11-23 | /预算 命令（主人调生活费双写立即生效：原子落盘 config.json+内存 cfg 同步+留痕；方案 A） |
 | v2.2.0 | 2026-11-22 | 「连续存在底座 II：会话与跨渠道恢复」（Kimi v2.2.0 总计划 WP0–WP6 全量落地，未 commit/tag/重启/发布，等主人拍板）：WP1 事件身份+持久收件箱（新插件 conversation-recovery：统一事件键 qq:private/qq:group/pet、每事件原子文件 data/conversation-inbox/、状态机 received→…→succeeded 与 interrupted/unknown/dead/cancelled_by_reset、scope 串行、epoch 屏障、重启对账不重放）；WP2 实时路径接入（私聊/群聊先入箱再处理、重复投递拦截、发送成功才写会话历史、失败 failed_retryable 不写历史）；WP3 补消息游标重做（scanned/completed 分离、event_id 收件箱去重、legacy_floor 旧 seen-msg 只读、截断标 gap_suspected、溢出进待确认清单、群只补 @self）；WP4 桌宠幂等（momo_event_id/X-Momo-Event-Id、成功缓存直回、处理中 202、legacy 弱保证、pet 会话同事件只记一次）；WP5 启动阶段化（插件就绪→收件箱对账→启动清单 data/startup-recovery.json→防抖续跑→OneBot/桌宠/定时器、503 就绪门、health 加 conversation+startupRecovery 信号、/恢复 只读命令）；测试 85→91（新增 conversation-red、conversation-recovery、conversation-flow、catchup-cursor、pet-idempotent、startup-recovery），52 插件 |

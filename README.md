@@ -5,7 +5,7 @@
 - **底座**：Node.js 22+（当前 24），**主体零 npm 依赖**，只用内置模块 + `node:sqlite`；唯一可选依赖 `@huggingface/transformers`（语义嵌入，npmmirror 安装）
 - **协议端**：SnowLuma（NapCatQQ Desktop 组件），OneBot v11
 - **规模**：52 个插件 / 75 个工具 / 32 个命令
-- **版本**：当前 **v2.2.2**（详见 [CHANGELOG.md](CHANGELOG.md) 顶部索引）
+- **版本**：当前 **v2.2.3**（详见 [CHANGELOG.md](CHANGELOG.md) 顶部索引）
 
 ## 文件都在哪
 

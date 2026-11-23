@@ -40,6 +40,7 @@ const U = 100000001;
 const SEG_H = extractFn(IDX, "async function handlePrivateMessage(event) {");
 const SEG_E = extractFn(IDX, "function enqueuePrivateChat(userId, text, images, voiceRequested, msgTime, eventId) {");
 const SEG_F = extractFn(IDX, "function firePrivateChat(userId) {");
+const SEG_AB = extractFn(IDX, "function applyBudgetChange(amount, uid) {");
 
 function mkRealCr(dir, failWrite) {
   const store = {
@@ -186,7 +187,7 @@ check("E7 /预算 命令双写立即生效", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "momo-re7-"));
   const cr = mkRealCr(dir);
   const { sandbox, calls } = mkSandbox(cr);
-  vm.runInContext(SEG_H + "\nthis.__handle = handlePrivateMessage;", sandbox);
+  vm.runInContext(SEG_H + "\n" + SEG_AB + "\nthis.__handle = handlePrivateMessage;", sandbox);
   const ev = { user_id: U, self_id: 100000004, message_id: "m7", time: 1600000000, raw_message: "/预算 2.5", message: [{ type: "text", data: { text: "/预算 2.5" } }] };
   await sandbox.__handle(ev);
   const wrote = calls.cfgWrites.length === 1 && JSON.parse(calls.cfgWrites[0].c).budget.daily_cny === 2.5;
@@ -203,7 +204,7 @@ check("E8 /预算 非主人拒绝", async () => {
   const cr = mkRealCr(dir);
   const U2 = 100000002;
   const { sandbox, calls } = mkSandbox(cr, { allowed: [U, U2] });
-  vm.runInContext(SEG_H + "\nthis.__handle = handlePrivateMessage;", sandbox);
+  vm.runInContext(SEG_H + "\n" + SEG_AB + "\nthis.__handle = handlePrivateMessage;", sandbox);
   const ev = { user_id: U2, self_id: 100000004, message_id: "m8", time: 1600000000, raw_message: "/预算 9", message: [{ type: "text", data: { text: "/预算 9" } }] };
   await sandbox.__handle(ev);
   return calls.cfgWrites.length === 0 && !sandbox.cfg.budget && calls.sent.some((s) => s.t.includes("只有主人"));
@@ -212,6 +213,31 @@ check("E8 /预算 非主人拒绝", async () => {
 check("E6 静态：私聊/群入口 enqueue 传 eventId", () => {
   return IDX.includes("enqueuePrivateChat(userId, text, parsed.images, voiceRequested, msgTime, _eidP)")
     && IDX.includes("enqueueGroupChat(Number(event.group_id), userId, text, parsed.images, Number(event.time) || 0, !!(atSelf || mentioned), _sn, _eidG)");
+});
+
+// v2.2.3：自然语言 set_budget 工具（行为：模块级 applyBudgetChange；静态：工具定义+循环分支）
+check("E9 applyBudgetChange 双写（主人/非主人/非法金额）", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "momo-re9-"));
+  const cr = mkRealCr(dir);
+  const { sandbox, calls } = mkSandbox(cr);
+  vm.runInContext(SEG_AB + "\nthis.__ab = applyBudgetChange;", sandbox);
+  const r1 = sandbox.__ab(2.5, U);            // 主人
+  const r2 = sandbox.__ab(9, 100000002);     // 非主人
+  const r3 = sandbox.__ab(0, U);              // 非法金额
+  const r4 = sandbox.__ab(80, U);             // 超上限
+  const wrote = calls.cfgWrites.length === 1 && JSON.parse(calls.cfgWrites[0].c).budget.daily_cny === 2.5;
+  const mem = Number(sandbox.cfg.budget && sandbox.cfg.budget.daily_cny) === 2.5;
+  const logged = calls.actions.some((a) => a.action === "set_budget" && a.ok === true);
+  return r1.ok === true && r2.ok === false && r2.msg.includes("只有主人")
+    && r3.ok === false && r4.ok === false && wrote && mem && logged;
+});
+
+check("E10 静态：set_budget 工具定义+工具循环分支", () => {
+  const i1 = IDX.indexOf('name: "set_budget"');
+  const hasDesc = IDX.slice(i1, i1 + 400).includes("只有主人能改");
+  const hasBranch = IDX.includes('tc.function.name === "set_budget"')
+    && IDX.includes("applyBudgetChange(args.amount, userId)");
+  return i1 > 0 && hasDesc && hasBranch;
 });
 
 _chain.then(() => {
