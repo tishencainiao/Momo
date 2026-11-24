@@ -233,7 +233,15 @@ check("WP4：消化健康 digestStatus → fresh/degraded/stale/unknown", async 
 check("contextProvider：全 fresh/unknown 不注入；有异常才注入", async () => {
   const bodyApi = { status: async () => ({ data: { ok: true, pid: 1, visible: true } }) };
   const c2 = mkCtx({
-    getApi: (ns) => (ns === "body" ? bodyApi : ns === "budget" ? { isBudgetExhausted: () => false, budgetTier: () => "full" } : null),
+    getApi: (ns) => {
+      if (ns === "body") return bodyApi;
+      if (ns === "budget") return { isBudgetExhausted: () => false, budgetTier: () => "full" };
+      if (ns === "actionIntents") return { health: () => ({ pending: 0, unknown: 0 }) };
+      if (ns === "continuity") return { health: () => ({ beliefs: 0, contested: 0, degraded: "" }) };
+      if (ns === "autonomy") return { status: () => ({ level: 2, degraded: "" }) };
+      if (ns === "life") return { status: () => ({ day: "2026-01-02", phase: "day", goals: 3, degraded: "" }) };
+      return null;
+    },
   });
   mod.init(c2);
   await mod.__test.probe();

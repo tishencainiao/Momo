@@ -249,7 +249,10 @@ function handleBodyEvent(name, data) {
     return;
   }
   else if (name === "lock") sense.locked = !!d.locked;
-  else if (name === "dnd") sense.dnd = !!d.active;
+  else if (name === "dnd" || name === "dnd_state") {
+    sense.dnd = !!d.active;
+    if (sense.dnd) sense.foreground = { title: "", app: "", pid: 0 };
+  }
   else if (name === "click") {
     sense.lastClickAt = now;
     // 被摸头也是互动：心情微涨、无聊度下降（20 秒内最多算一次，防连点刷）
@@ -350,7 +353,7 @@ function senseText() {
     bits.push("主人可能离开了，键鼠已经 " + Math.round(sense.idle_s / 60) + " 分钟没动");
   }
   if (sense.locked) bits.push("屏幕锁着");
-  if (sense.foreground && sense.foreground.app) {
+  if (!sense.dnd && sense.foreground && sense.foreground.app) {
     const t = String(sense.foreground.title || "").slice(0, 40);
     bits.push("前台是 " + sense.foreground.app.replace(/\.exe$/i, "") + (t ? "（" + t + "）" : ""));
   }

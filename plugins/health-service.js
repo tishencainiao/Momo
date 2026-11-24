@@ -138,6 +138,31 @@ async function probe() {
       else setSnap("startupRecovery", { status: "degraded", since: now, evidence: "启动恢复清单状态 " + String(m.status || "未知") + (m.errors && m.errors.length ? "：" + String(m.errors[0]).slice(0, 60) : "") });
     }
   } catch (e) { setSnap("startupRecovery", { status: "unknown", since: now, evidence: "启动恢复清单不可读：" + String((e && e.message) || e).slice(0, 60) }); }
+  /* v3.0.0：自主行动新增服务必须可见，不能静默失效后继续行动。 */
+  try {
+    const ai = _ctx.getApi("actionIntents");
+    const h = ai && ai.health ? ai.health() : null;
+    if (!h) setSnap("actionIntents", { status: "unknown", since: 0, evidence: "行动意图服务未加载" });
+    else setSnap("actionIntents", { status: h.unknown ? "degraded" : (h.pending ? "stale" : "fresh"), since: now, evidence: `行动意图 pending=${h.pending || 0} unknown=${h.unknown || 0}` });
+  } catch (e) { setSnap("actionIntents", { status: "degraded", since: now, evidence: "行动意图健康读取失败" }); }
+  try {
+    const c = _ctx.getApi("continuity");
+    const h = c && c.health ? c.health() : null;
+    if (!h) setSnap("continuity", { status: "unknown", since: 0, evidence: "连续存在服务未加载" });
+    else setSnap("continuity", { status: h.degraded ? "degraded" : (h.contested ? "stale" : "fresh"), since: now, evidence: h.degraded || `认识=${h.beliefs} contested=${h.contested} slow=${h.slow_traits}` });
+  } catch (e) { setSnap("continuity", { status: "degraded", since: now, evidence: "连续存在健康读取失败" }); }
+  try {
+    const a = _ctx.getApi("autonomy");
+    const h = a && a.status ? a.status() : null;
+    if (!h) setSnap("autonomy", { status: "degraded", since: now, evidence: "自主策略未加载，自修改必须审批" });
+    else setSnap("autonomy", { status: h.degraded ? "degraded" : "fresh", since: now, evidence: h.degraded || `自主等级 ${h.level}` });
+  } catch (e) { setSnap("autonomy", { status: "degraded", since: now, evidence: "自主策略读取失败" }); }
+  try {
+    const l = _ctx.getApi("life");
+    const h = l && l.status ? l.status() : null;
+    if (!h) setSnap("life", { status: "degraded", since: now, evidence: "生活节律未加载，自主外发应停止" });
+    else setSnap("life", { status: h.degraded ? "degraded" : "fresh", since: now, evidence: h.degraded || `${h.day} ${h.phase}，日目标 ${h.goals} 件` });
+  } catch (e) { setSnap("life", { status: "degraded", since: now, evidence: "生活节律读取失败" }); }
 }
 
 function openCount() {
@@ -152,7 +177,7 @@ function openCount() {
 
 function allSnapshot() {
   const now = Date.now();
-  return ["onebot", "body", "embed", "budget", "ledger", "tools", "perception", "digest", "conversation", "startupRecovery"].map((k) => {
+  return ["onebot", "body", "embed", "budget", "ledger", "tools", "perception", "digest", "conversation", "startupRecovery", "actionIntents", "continuity", "autonomy", "life"].map((k) => {
     const s = Object.assign({ name: k }, getSnap(k));
     /* WP4：fresh 必须是「最近」的成功信号；快照超过 SNAP_STALE_MS 没重探 → 降级 stale，绝不保留过期 fresh */
     if (s.status === "fresh" && now - (s.updatedAt || 0) > SNAP_STALE_MS) {

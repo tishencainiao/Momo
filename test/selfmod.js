@@ -46,6 +46,10 @@ plugin.init({
   formatGap: () => "",
   dayStr: () => "2026-11-01",
   textSimilar: (a, b) => String(a) === String(b),
+  actionKey: (...parts) => require("crypto").createHash("sha1").update(parts.join("|")).digest("hex").slice(0, 20),
+  tryBeginAction: (m) => ({ key: m.key, acquired: true }),
+  endAction: () => true,
+  restartProcess: () => { killed++; },
 });
 
 let pass = 0, fail = 0;

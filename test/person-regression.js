@@ -27,7 +27,7 @@ T("分人守则 §9 → doctor 强制 userScoped 声明", doc.includes("userScop
 /* E1~E5 变聪明五件（2026-11-18 方案 M1） */
 T("E1 → think 阈值放宽（20 字/8 字问句）", idx.includes("t.length >= 20") && idx.includes("t.length >= 8"));
 T("E1 → 连续第 3 轮强制思考", idx.includes("thinkStreak") && idx.includes("_consec >= 3"));
-T("E1 → daily_cny 2", (() => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, "..", "config.json"), "utf8")).budget.daily_cny === 2; } catch (e) { return false; } })());
+T("E1 → 生活费配置存在且为正数（不绑定用户当日额度）", (() => { try { const n = Number(JSON.parse(fs.readFileSync(path.join(__dirname, "..", "config.json"), "utf8")).budget.daily_cny); return Number.isFinite(n) && n > 0; } catch (e) { return false; } })());
 T("E2 → premise 纠正置顶注入", idx.includes("premiseReminders") && idx.includes("【主人纠正过你的话（最高优先，别犯第二次）】") && idx.includes('from === "premise"'));
 T("E3 → 跨通道镜头装配", idx.includes("channelLens") && idx.includes("【你们在 QQ 里最近聊的") && idx.includes("【你们在桌宠窗口里最近聊的"));
 T("E3 → 桌宠对话落盘 pet 会话", idx.includes('loadSession("pet" + master)'));

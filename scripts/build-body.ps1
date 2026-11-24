@@ -2,13 +2,13 @@
   把「身体」打包成独立 exe（PyInstaller onedir，无控制台窗口）
 
   用法：
-    powershell -File scripts\build-body.ps1              # 打包到 body\dist\MomoBody\
+    powershell -File scripts\build-body.ps1              # 打包到 body\dist\Momo\
     powershell -File scripts\build-body.ps1 -Clean       # 先清掉旧的 build/dist
 
   说明：
     - 只打 Python 代码 + PySide6 运行时；**素材不进包**（359MB），
       打包版靠 body\config.json 里的 assets_dir 指到素材目录（或把 assets 拷到 exe 同级）。
-    - 打包完可跑 `body\dist\MomoBody\MomoBody.exe --selftest` 验证（退出码 0 = 通过）。
+    - 打包完可跑 `body\dist\Momo\Momo.exe --selftest` 验证（退出码 0 = 通过）。
 #>
 param(
     [switch]$Clean
@@ -21,18 +21,29 @@ $dist = Join-Path $body "dist"
 $build = Join-Path $body "build"
 
 if ($Clean) {
-    foreach ($p in @($dist, $build, (Join-Path $body "MomoBody.spec"))) {
+    foreach ($p in @($dist, $build, (Join-Path $body "Momo.spec"))) {
         if (Test-Path $p) { Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue }
     }
     Write-Host "已清理旧的 build/dist"
 }
 
 Write-Host "开始打包（第一次要 1~3 分钟）…"
-& python -m PyInstaller `
+$pythonExe = (Get-Command python -ErrorAction SilentlyContinue).Source
+if ($pythonExe) {
+    & $pythonExe -c "import PySide6" 2>$null
+    if ($LASTEXITCODE -ne 0) { $pythonExe = $null }
+}
+if (-not $pythonExe) {
+    $candidate = Join-Path $env:LOCALAPPDATA "Programs\Python\Python313\python.exe"
+    if (Test-Path $candidate) { $pythonExe = $candidate }
+}
+if (-not $pythonExe) { throw "找不到带 PySide6 的 Python；请先按 body/requirements.txt 准备构建环境。" }
+& $pythonExe -m PyInstaller `
+    --clean `
     --noconfirm `
     --windowed `
     --onedir `
-    --name MomoBody `
+    --name Momo `
     --distpath $dist `
     --workpath $build `
     --specpath $body `
@@ -49,7 +60,7 @@ Write-Host "开始打包（第一次要 1~3 分钟）…"
 
 if ($LASTEXITCODE -ne 0) { throw "打包失败（exit $LASTEXITCODE）" }
 
-$exe = Join-Path $dist "MomoBody\MomoBody.exe"
+$exe = Join-Path $dist "Momo\Momo.exe"
 if (-not (Test-Path $exe)) { throw "没找到产物：$exe" }
 
 # 把配置放到 exe 旁边（素材不打包，所以 assets_dir 必须指到真实素材目录）

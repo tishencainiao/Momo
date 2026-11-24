@@ -40,7 +40,7 @@ const U = 100000001;
 const SEG_H = extractFn(IDX, "async function handlePrivateMessage(event) {");
 const SEG_E = extractFn(IDX, "function enqueuePrivateChat(userId, text, images, voiceRequested, msgTime, eventId) {");
 const SEG_F = extractFn(IDX, "function firePrivateChat(userId) {");
-const SEG_AB = extractFn(IDX, "function applyBudgetChange(amount, uid) {");
+const SEG_AB = extractFn(IDX, "function applyBudgetChange(amount, uid, source) {");
 
 function mkRealCr(dir, failWrite) {
   const store = {
@@ -62,11 +62,11 @@ function mkSandbox(cr, over) {
   const sandbox = {
     console, process, Buffer, setTimeout, clearTimeout, Date, JSON, Math, Number, String, Promise,
     module: { exports: {} }, fs, path, os,
-    apiOf: (ns) => (ns === "conversationRecovery" ? api : null),
+    apiOf: (ns) => (ns === "conversationRecovery" ? api : ns === "budget" ? { budgetLevel: () => ({ daily: 2.5, spent: 0, ratio: 1, level: "rich" }) } : null),
     host: {
       hookLists: { private_message: o.hooks || [] },
       commandRegistry: { size: 0 },
-      apiOf: (ns) => (ns === "conversationRecovery" ? api : null),
+      apiOf: (ns) => (ns === "conversationRecovery" ? api : ns === "budget" ? { budgetLevel: () => ({ daily: 2.5, spent: 0, ratio: 1, level: "rich" }) } : null),
     },
     cfg: { qq: { allowed_users: o.allowed || [U], master_user: U } },
     CFG_FILE: path.join(os.tmpdir(), "momo-rt-cfg-" + Date.now() + "-" + Math.random().toString(36).slice(2) + ".json"),
@@ -101,6 +101,7 @@ function mkSandbox(cr, over) {
     DEBOUNCE_MS: 20000,
     MAX_WAIT_MS: 40000,
   };
+  sandbox.DATA_DIR = path.dirname(sandbox.CFG_FILE);
   vm.createContext(sandbox);
   vm.runInContext(SEG_E + "\n" + SEG_F + "\nthis.__enq = enqueuePrivateChat; this.__fire = firePrivateChat;", sandbox);
   return { sandbox, calls, api };

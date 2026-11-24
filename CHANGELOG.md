@@ -22,8 +22,9 @@
 > v1.46.2 起按月份拆分：明细在 `docs/changelog/<年>-<月>.md`，本文件只留规则与索引。
 > 较早版本的完整正文可直接读对应月份文件，或 `git log`。
 
-### 2026-11（145 个版本）→ [docs/changelog/2026-11.md](docs/changelog/2026-11.md)
+### 2026-11（147 个版本）→ [docs/changelog/2026-11.md](docs/changelog/2026-11.md)
 
+| v3.0.0 | 2026-11-23 | 「连续存在与受限自主生长」单一总计划连续实施：持久行动意图+失败关闭/安全恢复，stable 证据消化为 scope 隔离认识+core/slow/fast 分层自我与修订链，每日最多 3 目标/6 次内部动作+夜间/反馈冷却，自主等级 0/1/2+低风险自动/高风险审批或禁止，evolution 隔离 manifest 冒烟+行动闭环+watch 失败回滚；旧行动账本写盘失败零发送、路径穿越反例修复；新增 4 框架服务与 4 测试文件，全量 98/98、check.js 56 绿 0 黄 0 红；主刀自测完成，待 DSH 与真实启动验证，未 commit/tag/重启/发布 |
 | v2.2.3 | 2026-11-23 | set_budget 自然语言工具（主人专用）：QQ 上说「生活费改成 X 元」即可调预算，与 /预算 命令共用 applyBudgetChange 双写逻辑；test/realtime-entry.js E9/E10 |
 | v2.2.2 | 2026-11-23 | 修复：闲聊回复尾部 saveSeenMsg 残留调用（WP3 删函数漏网，回复已发出后抛 ReferenceError 导致误报「对话失败」）→ 改 _markScanned 语义对齐；test/dedup.js 加「全文件无 saveSeenMsg 残留」静态断言 |
 | v2.2.1 | 2026-11-23 | /预算 命令（主人调生活费双写立即生效：原子落盘 config.json+内存 cfg 同步+留痕；方案 A） |

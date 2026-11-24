@@ -85,6 +85,7 @@ function collect(kind, now) {
 
   const actions = readJsonl(path.join(DATA(), "actions.jsonl"), 20000).filter((a) => tsOf(a.ts) >= start);
   const budget = readJson(path.join(DATA(), "budget.json"), {}) || {};
+  const budgetAdjustments = _ctx.getApi("budget").budgetAdjustments(start);
   const daily = _ctx.getApi("budget").dailyCny();
   const bodyEvents = readJsonl(path.join(DATA(), "body-events.jsonl"), 20000).filter((e) => tsOf(e.ts) >= start);
   const headpat = readJson(path.join(DATA(), "headpat.json"), {}) || {};
@@ -94,7 +95,7 @@ function collect(kind, now) {
 
   return {
     kind, start, now,
-    recentJournal, adopted, proposals, actions, budget, daily, bodyEvents, headpat, goals, wishes, mind,
+    recentJournal, adopted, proposals, actions, budget, budgetAdjustments, daily, bodyEvents, headpat, goals, wishes, mind,
   };
 }
 
@@ -121,6 +122,7 @@ async function buildReport(st) {
     facts.push(`自己已经想通/改好的小事：${st.adopted.join("；") || "（还没有）"}`);
     facts.push(`提交了、等你点头的想法：${st.proposals.join("；") || "（还没有）"}`);
     facts.push(`生活费：花了 ¥${spent.toFixed(3)}，日预算 ¥${st.daily.toFixed(3)}，还剩 ¥${remain.toFixed(3)}`);
+    if (st.budgetAdjustments && st.budgetAdjustments.length) facts.push("本周期生活费调整：" + st.budgetAdjustments.map((e) => `从 ¥${e.previous.toFixed(2)} 调到 ¥${e.daily.toFixed(2)}`).join("；"));
     facts.push(`桌宠窗口：被点 ${clicks} 次、自己找事做 ${selfPlay} 次、走动 ${walks} 次${hp != null ? `、累计被摸头 ${hp} 次` : ""}`);
     if (gs.length) facts.push(`目标：${gs.map((g) => String(g).slice(0, 30)).join("；")}`);
     if (ws.length) facts.push(`想要/想干的：${ws.slice(-3).map((w) => String(w.text || w.title || w).slice(0, 30)).join("；")}`);

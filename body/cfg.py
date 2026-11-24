@@ -17,7 +17,26 @@ def _base_dir() -> str:
 
 
 BODY_DIR = _base_dir()
-ROOT_DIR = os.path.dirname(BODY_DIR)                       # Momo 仓库根（打包后是 exe 的上级）
+
+
+def _root_dir() -> str:
+    """寻找真正的大脑根目录，避免 dist/Momo/Momo.exe 把数据写到 dist/data。"""
+    if os.environ.get("MOMO_ROOT"):
+        return os.path.abspath(os.environ["MOMO_ROOT"])
+    if not getattr(sys, "frozen", False):
+        return os.path.dirname(BODY_DIR)
+    cur = BODY_DIR
+    for _ in range(6):
+        if os.path.isfile(os.path.join(cur, "index.js")) and os.path.isdir(os.path.join(cur, "plugins")):
+            return cur
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            break
+        cur = parent
+    return BODY_DIR                       # 便携包未带大脑时仍可读身体；主界面会提示大脑不可用
+
+
+ROOT_DIR = _root_dir()
 # 允许用环境变量指定数据目录（打包版放在别处跑时很有用）
 DATA_DIR = os.environ.get("MOMO_BODY_DATA") or os.path.join(ROOT_DIR, "data")
 CONFIG_PATH = os.environ.get("MOMO_BODY_CONFIG") or os.path.join(BODY_DIR, "config.json")
@@ -45,8 +64,13 @@ DEFAULTS = {
     "api_enabled": True,             # 关掉就只显示、不接受任何指令
     "away_after_s": 180,             # 键鼠空闲超过多少秒算「主人不在电脑前」
     "sense_interval_ms": 5000,       # 感官采样间隔
+    "window_title_enabled": True,     # 默认仅当前前台窗口标题，不保存长期历史
+    "screenshot_enabled": False,      # 截图默认完全关闭；免打扰时也强制关闭
+    "brain_url": "http://127.0.0.1:3999",
+    "manage_brain_on_launch": True,   # 双击应用时由现有守护启动隐藏大脑
     "dnd_manual": False,             # 手动免打扰（快捷键/托盘/设置页可切）
     "dnd_auto": True,                # 自动免打扰时段
+    "weather_city": "北京",           # 主界面天气卡片城市
     "dnd_from": "23:00",
     "dnd_to": "08:00",
     "log_level": "info",

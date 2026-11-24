@@ -3,6 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
+const vm = require("vm");
 let _ctx = null;
 let evolve = {};
 
@@ -75,11 +76,11 @@ function loadProposals() {
 function selfStatusText(userId) {
   const e = _ctx.getEmotion();
   const b = _ctx.loadBudget();
-  const bc = _ctx.getApi("budget").budgetCfg();
+  const daily = Number(_ctx.getApi("budget").dailyCny()) || 1;
   const st = _ctx.loadMindState();
   const thoughts = (st.thoughts || []).slice(-3).map((x) => (typeof x === "string" ? x : (x && x.text) || "")).filter(Boolean).join("；");
-  const pct = Math.round((b.spent_cny || 0) / bc.dailyCny() * 100);
-  return `情绪：${e.name}（强度 ${Math.round(e.intensity * 100)}/100）；心情：${Math.round(_ctx.getMood())}/100；无聊度：${Math.round(_ctx.getBoredom())}/100；对对方好感度：${Math.round(_ctx.getFavor(userId))}/100；今日生活费：¥${(b.spent_cny || 0).toFixed(3)}/${bc.dailyCny()}（${pct}%）；最近念头：${thoughts || "（无）"}`;
+  const pct = Math.round((b.spent_cny || 0) / daily * 100);
+  return `情绪：${e.name}（强度 ${Math.round(e.intensity * 100)}/100）；心情：${Math.round(_ctx.getMood())}/100；无聊度：${Math.round(_ctx.getBoredom())}/100；对对方好感度：${Math.round(_ctx.getFavor(userId))}/100；今日生活费：¥${(b.spent_cny || 0).toFixed(3)}/${daily}（${pct}%）；最近念头：${thoughts || "（无）"}`;
 }
 function selfLogText(limit) {
   try {
@@ -522,7 +523,7 @@ const SM_FROZEN_FILE = () => path.join(_ctx.DATA_DIR, "evolve-frozen.flag");
 function isFrozen() { try { return fs.existsSync(SM_FROZEN_FILE()); } catch (e) { return false; } }
 function setFrozen(on) { try { if (on) { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeFileAtomic(SM_FROZEN_FILE(), "1"); } else { fs.unlinkSync(SM_FROZEN_FILE()); } } catch (e) {} }
 function loadSmWatch() { try { return JSON.parse(fs.readFileSync(path.join(_ctx.DATA_DIR, "selfmodify-watch.json"), "utf8")); } catch (e) { return null; } }
-function saveSmWatch(w) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(path.join(_ctx.DATA_DIR, "selfmodify-watch.json"), w); } catch (e) {} }
+function saveSmWatch(w) { try { fs.mkdirSync(_ctx.DATA_DIR, { recursive: true }); _ctx.writeJsonAtomic(path.join(_ctx.DATA_DIR, "selfmodify-watch.json"), w); return true; } catch (e) { return false; } }
 function clearSmWatch() { try { fs.unlinkSync(path.join(_ctx.DATA_DIR, "selfmodify-watch.json")); } catch (e) {} }
 function notifyMaster(text) {
   try {
@@ -606,6 +607,12 @@ async function generatePluginCode(goalDesc) {
 function validatePluginCode(code, name) {
   if (!/^self-[a-z0-9-]{1,30}$/.test(name)) return { ok: false, msg: "插件名不合法（必须 self-小写单词）" };
   if (!/module\.exports\s*=/.test(code)) return { ok: false, msg: "缺少 module.exports" };
+  const reqs = [];
+  const reqRe = /require\s*\(\s*["']([^"']+)["']\s*\)/g;
+  let rm;
+  while ((rm = reqRe.exec(code))) reqs.push(rm[1]);
+  const badReq = reqs.find((r) => !["fs", "path"].includes(r));
+  if (badReq) return { ok: false, msg: "包含未允许依赖（" + badReq + "），仅允许 fs/path" };
   if (code.includes("process.exit")) return { ok: false, msg: "不允许 process.exit" };
   /* 阶段二（Kimi 审查）：审批前绝不执行生成代码——只做文本黑名单 + node --check 静态检查。
    * 正则不是安全边界（真隔离需进程权限模型），它只是第一道粗筛；真正的边界是
@@ -624,6 +631,45 @@ function validatePluginCode(code, name) {
   } catch (e) { msg = "校验异常: " + String(e.message).slice(0, 150); }
   try { fs.unlinkSync(tmp); } catch (e) {}
   return { ok, msg };
+}
+/* 低风险自动前隔离 manifest 冒烟：只加载模块形状，不执行 init/tools/hooks；
+ * fs 仅映射到 DATA_DIR/selfmod-sandbox，process/网络/外部模块不可见。它不是通用恶意代码沙箱。 */
+function sandboxPluginManifest(code, name) {
+  const root = path.resolve(_ctx.DATA_DIR, "selfmod-sandbox");
+  const scoped = (f) => {
+    const p = path.resolve(root, String(f || "sandbox-file"));
+    const rel = path.relative(root, p);
+    if (rel.startsWith("..") || path.isAbsolute(rel)) throw new Error("sandbox path denied");
+    return p;
+  };
+  const safeFs = {
+    existsSync: (f) => { try { return fs.existsSync(scoped(f)); } catch (e) { return false; } },
+    mkdirSync: (f, o) => { const p = scoped(f); return fs.mkdirSync(p, o); },
+    readFileSync: (f, o) => fs.readFileSync(scoped(f), o),
+    writeFileSync: (f, t, o) => { const p = scoped(f); fs.mkdirSync(path.dirname(p), { recursive: true }); return fs.writeFileSync(p, t, o); },
+    unlinkSync: (f) => fs.unlinkSync(scoped(f)),
+  };
+  const moduleBox = { exports: {} };
+  const box = {
+    module: moduleBox, exports: moduleBox.exports, require: (id) => {
+      if (id === "fs") return safeFs;
+      if (id === "path") return path;
+      throw new Error("sandbox require denied: " + id);
+    },
+    console: { log() {}, info() {}, warn() {}, error() {} },
+    Buffer, Date, JSON, Math, Number, String, Boolean, Array, Object, RegExp, Map, Set, Promise,
+    setTimeout: () => { throw new Error("sandbox timer denied"); },
+    setInterval: () => { throw new Error("sandbox timer denied"); },
+  };
+  try {
+    vm.createContext(box);
+    new vm.Script(String(code || ""), { filename: name + ".sandbox.js" }).runInContext(box, { timeout: 1000 });
+    const m = moduleBox.exports;
+    if (!m || m.name !== name || typeof m.init !== "function") return { ok: false, msg: "manifest 名称/init 不完整" };
+    if (m.tools !== undefined && !Array.isArray(m.tools)) return { ok: false, msg: "manifest tools 非数组" };
+    if (m.commands !== undefined && !Array.isArray(m.commands)) return { ok: false, msg: "manifest commands 非数组" };
+    return { ok: true, msg: "隔离 manifest 冒烟通过" };
+  } catch (e) { return { ok: false, msg: "隔离冒烟失败: " + String((e && e.message) || e).slice(0, 120) }; }
 }
 /* ---- 能力扫描：新插件默认不许主动发消息（这是最大的口子） ---- */
 const DANGEROUS_APIS = ["sendPrivate", "sendGroup", "recordAndSend", "onebotSend", "sendStickerImage"];
@@ -684,11 +730,29 @@ function proposalCountThisMonth() {
 const PROPOSAL_FILE = () => path.join(_ctx.SELF_DIR, "selfmod-proposals.json");
 function loadSelfProposals() { try { return JSON.parse(fs.readFileSync(PROPOSAL_FILE(), "utf8")); } catch (e) { return []; } }
 function saveSelfProposals(arr) { try { fs.mkdirSync(_ctx.SELF_DIR, { recursive: true }); _ctx.writeJsonAtomic(PROPOSAL_FILE(), arr.slice(-10)); } catch (e) {} }
-function requireApproval() { try { const v = _ctx.getSetting ? _ctx.getSetting("evolve.require_approval", true) : true; return v !== false; } catch (e) { return true; } }
+function restartForValidation() {
+  try {
+    if (typeof _ctx.restartProcess === "function") return _ctx.restartProcess();
+    return spawnSync("taskkill", ["/PID", String(process.pid), "/F"], { windowsHide: true });
+  } catch (e) { return null; }
+}
+function requireApproval(decision) {
+  try { const v = _ctx.getSetting ? _ctx.getSetting("evolve.require_approval", null) : null; if (v === true) return true; } catch (e) {}
+  /* 服务缺失或不确定一律审批；evolve.require_approval=false 也不能绕过 autonomy 的高风险门禁。 */
+  return decision ? !decision.allowed : true;
+}
+function selfModDecision(caps, name, sandboxOk) {
+  try {
+    const au = _ctx.getApi("autonomy");
+    if (!au || !au.authorize) return { allowed: false, requiresApproval: true, reason: "autonomy_unavailable" };
+    return au.authorize({ kind: "selfmod", risk: caps.length ? "high" : "low", caps, target: name + ".js", validation: { static_ok: true, sandbox_ok: sandboxOk === true } });
+  } catch (e) { return { allowed: false, requiresApproval: true, reason: "autonomy_error" }; }
+}
 
 async function selfModify(goalDesc, source) {
   if (isFrozen()) return { ok: false, msg: "自我进化已冻结" };
   if (_ctx.isBudgetExhausted()) return { ok: false, msg: "预算不足，先不折腾自己" };
+  try { const au = _ctx.getApi("autonomy"); if (au && au.status && au.status().level === 0) return { ok: false, msg: "自主行动已暂停" }; } catch (e) {}
   /* P2-c：月度配额 */
   if (proposalCountThisMonth() >= MONTHLY_PROPOSAL_CAP) {
     _ctx.log("info", `自修改-配额拦截: ${String(goalDesc).slice(0, 60)}`);
@@ -717,10 +781,14 @@ async function selfModify(goalDesc, source) {
   const dest = path.join(_ctx.DATA_DIR, "..", "plugins", name + ".js");
   if (fs.existsSync(dest)) return { ok: false, msg: `插件 ${name} 已存在，换个别名` };
 
-  /* 能力扫描 */
+  /* 能力扫描 + 隔离 manifest 冒烟；冒烟不过不得写生产目录。 */
   const caps = scanCapabilities(code);
-  /* 需要审批：只存提案，不写文件 */
-  if (requireApproval()) {
+  const smoke = sandboxPluginManifest(code, name);
+  if (!smoke.ok) { journalAppend({ type: "selfmodify", goal: String(goalDesc).slice(0, 60), status: "rejected", reason: smoke.msg }); return { ok: false, msg: smoke.msg }; }
+  const decision = selfModDecision(caps, name, smoke.ok);
+  if (!decision.allowed && !decision.requiresApproval) return { ok: false, msg: "自主策略拒绝：" + decision.reason };
+  /* 需要审批：只存提案，不写文件；低风险且验证充分才可走自动路径。 */
+  if (requireApproval(decision)) {
     const arr = loadSelfProposals();
     const p = {
       id: "sm" + Date.now().toString(36),
@@ -734,6 +802,8 @@ async function selfModify(goalDesc, source) {
       allow_send: false,
       status: "pending",
       source: source || "auto",
+      validation: { static_ok: true, sandbox_ok: true },
+      decision_reason: decision.reason || "approval_required",
     };
     arr.push(p);
     saveSelfProposals(arr);
@@ -746,14 +816,24 @@ async function selfModify(goalDesc, source) {
     notifyMaster(`${head}（插件名 ${name}；${capText}；${riskText}；代码 ${code.length} 字已通过校验）\n\n批准发「/批准self ${p.id}」，不要就发「/拒绝self ${p.id}」（24 小时后作废）；想看技术细节发「/提案 ${p.id}」。`);
     return { ok: true, pending: true, awaiting: true, id: p.id, msg: `提案 ${p.id} 已生成，等主人批准（${caps.length ? "含敏感能力" : "无敏感能力"}）` };
   }
+  const masterUin = Number((_ctx.config.qq && _ctx.config.qq.master_user) || 0);
+  if (typeof _ctx.actionKey !== "function" || typeof _ctx.tryBeginAction !== "function" || typeof _ctx.endAction !== "function") return { ok: false, msg: "行动账本不可用，已阻止自动写入生产插件" };
+  const applyKey = _ctx.actionKey("selfmodify_apply", name, code);
+  const acquired = _ctx.tryBeginAction({ key: applyKey, action: "selfmodify_apply", userId: masterUin, channel: "private", risk: "low", action_class: "non_idempotent", detail: "自动写入自建插件 " + name });
+  if (!acquired.acquired) return { ok: false, msg: "相同自修改正在执行，未重复写入" };
   try {
     _ctx.writeFileAtomic(dest, code);
-    saveSmWatch({ file: dest, name, ts: Date.now(), status: "pending", goal: String(goalDesc).slice(0, 80), source: source || "auto", until: Date.now() + 24 * 3600e3 });
+    if (!saveSmWatch({ file: dest, name, ts: Date.now(), status: "pending", goal: String(goalDesc).slice(0, 80), source: source || "auto", until: Date.now() + 24 * 3600e3 })) throw new Error("回滚观察记录写入失败");
+    _ctx.endAction(applyKey, { ok: true, summary: "自建插件已写入并建立回滚观察" });
     journalAppend({ type: "selfmodify", goal: String(goalDesc).slice(0, 60), status: "pending", plugin: name });
     _ctx.log("info", `自修改已写入 plugins/${name}.js，准备重启验证`);
-    try { spawnSync("taskkill", ["/PID", String(process.pid), "/F"], { windowsHide: true }); } catch (e) {}
+    try { restartForValidation(); } catch (e) {}
     return { ok: true, pending: true, msg: `已写入插件 ${name}，正在重启验证` };
-  } catch (e) { return { ok: false, msg: "写入失败: " + String(e.message).slice(0, 120) }; }
+  } catch (e) {
+    try { if (fs.existsSync(dest)) fs.unlinkSync(dest); } catch (e2) {}
+    _ctx.endAction(applyKey, { ok: false, error: String((e && e.message) || e).slice(0, 120) });
+    return { ok: false, msg: "写入失败: " + String(e.message).slice(0, 120) };
+  }
 }
 
 /* 批准 / 拒绝 / 回滚 */
@@ -773,6 +853,11 @@ function approveOneSelfMod(id) {
   if (isFrozen()) return "（自我进化现在冻着，先解冻）";
   const dest = path.join(_ctx.DATA_DIR, "..", "plugins", p.name + ".js");
   if (fs.existsSync(dest)) return `（插件 ${p.name} 已存在）`;
+  if (typeof _ctx.actionKey !== "function" || typeof _ctx.tryBeginAction !== "function" || typeof _ctx.endAction !== "function") return "（行动账本不可用，已阻止批准写入）";
+  const applyKey = _ctx.actionKey("selfmodify_apply", p.id, p.name);
+  const acquired = _ctx.tryBeginAction({ key: applyKey, action: "selfmodify_apply", userId: Number((_ctx.config.qq && _ctx.config.qq.master_user) || 0), channel: "private", risk: p.risk === "high" ? "high" : "low", action_class: "non_idempotent", detail: "批准写入自建插件 " + p.name });
+  if (!acquired.acquired) return "（相同自修改正在执行，未重复写入）";
+  let wrote = false;
   try {
     /* Kimi 返修4：发送权限双检——审批许可(p.allow_send) + manifest 声明，两者一致才放行。
      * 批准时按 p.allow_send 同步改写生成代码里的 permissions：true 注入 "send"、false 剥掉 "send"。 */
@@ -800,7 +885,7 @@ function approveOneSelfMod(id) {
     saveSmWatch({ file: dest, name: p.name, ts: Date.now(), status: "pending", goal: p.goal, source: "approved", allow_send: !!p.allow_send, until: Date.now() + 24 * 3600e3 });
     journalAppend({ type: "selfmodify", goal: p.goal, status: "approved", plugin: p.name });
     _ctx.log("info", `自修改已批准：${p.name}，准备重启`);
-    setTimeout(() => { try { spawnSync("taskkill", ["/PID", String(process.pid), "/F"], { windowsHide: true }); } catch (e) {} }, 800);
+    setTimeout(() => { try { restartForValidation(); } catch (e) {} }, 800);
     return `已批准「${p.goal}」，写入 plugins/${p.name}.js，马上重启验证`;
   } catch (e) { return "（写入失败：" + String(e.message).slice(0, 80) + "）"; }
 }
@@ -829,7 +914,7 @@ function rollbackSelf(name) {
     journalAppend({ type: "selfmodify", goal: "手动回滚", status: "rolled-back-manual", plugin: n });
     recordSelfFailure(n, "手动回滚", "主人手动下架");
     _ctx.log("info", `手动回滚自建插件：${n}`);
-    setTimeout(() => { try { spawnSync("taskkill", ["/PID", String(process.pid), "/F"], { windowsHide: true }); } catch (e) {} }, 800);
+    setTimeout(() => { try { restartForValidation(); } catch (e) {} }, 800);
     return `已删除 ${n}，马上重启`;
   } catch (e) { return "（删除失败：" + String(e.message).slice(0, 80) + "）"; }
 }
@@ -926,7 +1011,7 @@ module.exports = {
   permissions: ["BASE_VERSION", "DATA_DIR", "SELF_DIR", "addMood", "bingSearch", "budgetCfg", "canAfford", "completeOnce", "config", "formatResults", "getBoredom", "getEmotion", "getFavor", "getMood", "getSetting", "isBudgetExhausted", "isMaster", "loadBudget", "loadEvolution", "loadMemories", "loadMindState", "loadSession", "loadShortMemories", "log", "pickStickerByIds", "reasonComplete", "recordAction", "recordAndSend", "registry", "reloadEvolution", "resolveTargetId", "sendPrivate", "sendStickerImage", "settings", "textSimilar"],
   version: "1.1.0",
   settings: [
-    { key: "evolve.require_approval", label: "自我改代码需要我批准", type: "boolean", default: true, desc: "开启后，她写的新插件要先给你看、你批准才生效" },
+    { key: "evolve.require_approval", label: "所有自改都需要批准（包括低风险）", type: "boolean", default: false, desc: "开启后所有新插件都要批准；关闭时按自主等级与风险门禁决定，高风险仍需批准" },
     { key: "evolution.auto_tune", label: "按自评自动调回复参数", type: "boolean", default: false, desc: "关闭时自我评分只记录不自动改 split_cap/reply_gap（默认关，自评不是你的真实反馈）" },
   ],
   init(ctx) { _ctx = ctx; refreshEvolve(); lastWishAttempt = Date.now(); },

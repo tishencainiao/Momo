@@ -30,7 +30,8 @@ function recordAction(entry) {
       const lines = fs.readFileSync(ACTION_LOG_FILE, "utf8").split("\n").filter(Boolean);
       if (lines.length > 600) writeFileAtomic(ACTION_LOG_FILE, lines.slice(-500).join("\n") + "\n");
     } catch (e2) {}
-  } catch (err) { try { log("warn", "写操作记录失败: " + String(err.message).slice(0, 80)); } catch (e3) {} }
+    return true;
+  } catch (err) { try { log("warn", "写操作记录失败: " + String(err.message).slice(0, 80)); } catch (e3) {} return false; }
 }
 function loadActions(n) {
   try {
@@ -54,8 +55,8 @@ function loadActionState() {
   try { return JSON.parse(fs.readFileSync(ACTION_STATE_FILE, "utf8")) || {}; } catch (e) { return {}; }
 }
 function saveActionState(st) {
-  try { fs.mkdirSync(DATA_DIR, { recursive: true }); writeJsonAtomic(ACTION_STATE_FILE, st); }
-  catch (e) { try { log("warn", "写行动状态失败: " + String(e.message).slice(0, 80)); } catch (e2) {} }
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); writeJsonAtomic(ACTION_STATE_FILE, st); return true; }
+  catch (e) { try { log("warn", "写行动状态失败: " + String(e.message).slice(0, 80)); } catch (e2) {} return false; }
 }
 const _busyActions = new Map();   // 进程内行动锁：状态文件异常时兜底防同进程并发重复执行
 function tryBeginAction(meta) {
@@ -84,13 +85,12 @@ function tryBeginAction(meta) {
       idemKey: key,
       attempt_id: key + "-" + now.toString(36),
     };
-    saveActionState(st);
+    if (!saveActionState(st)) return { key, acquired: false, duplicateOf: "state_write_failed" };
     try { _busyActions.set(key, true); } catch (e) {}
     return { key, acquired: true, duplicateOf: "" };
-  } catch (e) { try { log("warn", "tryBeginAction 状态机异常（可用性优先放行）: " + String(e.message).slice(0, 80)); } catch (e2) {} }
-  /* 状态机异常时放行执行（可用性优先），但进程内锁仍占用防同进程重复；账本 endAction 缺 ok 记 unknown */
-  try { _busyActions.set(key, true); } catch (e) {}
-  return { key, acquired: true, duplicateOf: "" };
+  } catch (e) { try { log("warn", "tryBeginAction 状态机异常（失败关闭）: " + String(e.message).slice(0, 80)); } catch (e2) {} }
+  /* 意图不能持久化时不得产生副作用。 */
+  return { key, acquired: false, duplicateOf: "state_unavailable" };
 }
 function beginAction(meta) {
   /* 兼容包装：旧调用只拿 key。新代码请用 tryBeginAction 检查 acquired。 */
@@ -101,7 +101,7 @@ function beginAction(meta) {
     const st = loadActionState();
     st.open = st.open || {};
     const prev = st.open[key];
-    if (prev && prev.status === "running") return key;   // 已在执行
+    if (prev && prev.status === "running") return key;   // 旧兼容接口保留幂等语义；新副作用必须用 tryBeginAction 抢占
     st.open[key] = {
       action: m.action || (prev && prev.action) || "action",
       status: "running",
@@ -115,8 +115,8 @@ function beginAction(meta) {
       fromProposed: !!(prev && prev.status === "proposed"),
       attempt_id: key + "-" + now.toString(36),
     };
-    saveActionState(st);
-  } catch (e) { try { log("warn", "beginAction 失败: " + String(e.message).slice(0, 80)); } catch (e2) {} }
+    if (!saveActionState(st)) throw new Error("行动状态写盘失败，已阻止副作用");
+  } catch (e) { try { log("warn", "beginAction 失败: " + String(e.message).slice(0, 80)); } catch (e2) {} throw e; }
   return key;
 }
 function proposeAction(meta) {
@@ -134,16 +134,16 @@ function proposeAction(meta) {
   return key;
 }
 function cancelAction(key, reason) {
-  /* cancelled：未执行或已取消。只对 open 中 planned/proposed/running 生效，返回是否取消成功 */
-  try { _busyActions.delete(key); } catch (e) {}
+  /* cancelled：未执行或已取消。只有终态与状态都落盘才释放进程内锁。 */
   try {
     const st = loadActionState();
     const op = (st.open && st.open[key]) || null;
     if (!op) return false;
-    recordAction({ action: op.action, status: "cancelled", key: String(key), channel: op.channel, userId: op.userId, groupId: op.groupId, ok: false, error: reason ? String(reason).slice(0, 120) : "已取消", finished_at: Date.now() });
+    const logged = recordAction({ action: op.action, status: "cancelled", key: String(key), channel: op.channel, userId: op.userId, groupId: op.groupId, ok: false, error: reason ? String(reason).slice(0, 120) : "已取消", finished_at: Date.now() });
     delete st.open[key];
-    saveActionState(st);
-    return true;
+    const saved = saveActionState(st);
+    if (logged && saved) { try { _busyActions.delete(key); } catch (e) {} return true; }
+    return false;
   } catch (e) { try { log("warn", "cancelAction 失败: " + String(e.message).slice(0, 80)); } catch (e2) {} return false; }
 }
 function verifyAction(key, res) {
@@ -177,13 +177,13 @@ function verifyAction(key, res) {
 }
 function endAction(key, res) {
   const r = res || {};
-  try { _busyActions.delete(key); } catch (e) {}   // 进程内锁释放（无论记账成败）
+  let persisted = false;
   /* 未明确 ok=false 且未明确 ok=true → unknown（不假装成功） */
   const status = r.ok === true ? "succeeded" : (r.ok === false ? "failed" : "unknown");
   try {
     const st = loadActionState();
-    let op = (st.open && st.open[key]) || null;
-    recordAction(Object.assign({
+    const op = (st.open && st.open[key]) || null;
+    const logged = recordAction(Object.assign({
       action: (op && op.action) || r.action || "action",
       status,
       key: String(key),
@@ -193,10 +193,14 @@ function endAction(key, res) {
       verified: r.verified === true,
       finished_at: Date.now(),
     }, op ? { channel: op.channel, userId: op.userId, groupId: op.groupId, requestedBy: op.requestedBy } : {}));
-    if (op) { delete st.open[key]; saveActionState(st); }
+    persisted = !!logged;
+    if (op) { delete st.open[key]; persisted = saveActionState(st) && persisted; }
     /* 内联验证（工具返回即带凭据的场景）→ 补一条独立 verified 行 */
-    if (r.verified === true) verifyAction(key, { ok: true, eventId: r.verification_event_id, summary: r.summary });
-  } catch (e) { try { log("warn", "endAction 失败: " + String(e.message).slice(0, 80)); } catch (e2) {} }
+    if (persisted && r.verified === true) verifyAction(key, { ok: true, eventId: r.verification_event_id, summary: r.summary });
+  } catch (e) { try { log("warn", "endAction 失败: " + String(e.message).slice(0, 80)); } catch (e2) {} persisted = false; }
+  /* 结算无法持久化时保留进程内锁；重启后 running 仍按 unknown 对账。 */
+  try { if (persisted) _busyActions.delete(key); else if (key) _busyActions.set(key, true); } catch (e) {}
+  return persisted;
 }
 function reconcileOpenActions() {
   /* 重启对账：running/结果不明 → unknown（绝不重放、绝不写成功）；proposed → cancelled（未执行，安全取消） */
@@ -349,7 +353,7 @@ const { STYLE_DIRECTIVE, GROUP_DIRECTIVE, SITUATION_QQ, SITUATION_DESKTOP, situa
 
 /* ---------------- 基础层版本 + 进化层加载器（v1.0.0，基础层唯一通用件） ---------------- */
 // 规则：每次修改 index.js 必须递增本版本号，并在 CHANGELOG.md 记录、在 versions/ 留快照（便于回溯/回滚）
-const BASE_VERSION = "2.2.3";
+const BASE_VERSION = "3.2.0";
 /* 本次进程启动时间：用来告诉她「这次运行了多久」，让她对"被启动"这件事有真实感知 */
 const BOOT_TS = Date.now();
 const SELF_DIR = path.join(__dirname, "self");
@@ -472,7 +476,20 @@ function startApiKeyWatchdog() {
 /* ---------------- 会话存取 ---------------- */
 function sessionPath(userId) { return path.join(SESS_DIR, String(userId) + ".json"); }
 function loadSession(userId) { try { const d = JSON.parse(fs.readFileSync(sessionPath(userId), "utf8")); if (Array.isArray(d.messages)) return d.messages; } catch (e) {} return []; }
-function saveSession(userId, messages) { fs.mkdirSync(SESS_DIR, { recursive: true }); writeJsonAtomic(sessionPath(userId), { updated: Date.now(), messages }); }
+function saveSession(userId, messages) {
+  fs.mkdirSync(SESS_DIR, { recursive: true });
+  writeJsonAtomic(sessionPath(userId), { updated: Date.now(), messages });
+  /* v3.1：只把主人 QQ 私聊与本机桌宠的必要最近对话写入共享空间；群聊/访客不进入。 */
+  try {
+    const raw = String(userId), isPet = raw.startsWith("pet"), uid = Number(isPet ? raw.slice(3) : raw);
+    if (uid && isMaster(uid) && (isPet || raw === String(uid))) {
+      const recent = Array.isArray(messages) ? messages.slice(-2) : [];
+      for (const m of recent) {
+        if (m && (m.role === "user" || m.role === "assistant")) apiOf("companion").recordConversation({ userId: uid, channel: isPet ? "pet" : "private" }, m.role, m.content, m.event_id, m.ts);
+      }
+    }
+  } catch (e) {}
+}
 
 /* ---------------- 会话摘要（L1：滚动压缩长对话，防止超过 40 轮后失忆） ---------------- */
 function summaryFile(userId) { return path.join(SESS_DIR, String(userId) + ".summary.json"); }
@@ -1013,15 +1030,23 @@ const AGENT_TOOLS = [
 ];
 /* 自我内省文本构建已迁移到插件 evolution */
 /* v2.2.3：set_budget 自然语言工具与 /预算 命令共用的双写逻辑（模块级，agentChatOnce 工具循环可调） */
-function applyBudgetChange(amount, uid) {
+function applyBudgetChange(amount, uid, source) {
   const a = Number(amount);
   if (!(a > 0) || a > 50) return { ok: false, msg: "金额不对哦，给个正数吧（比如 2），一次最多调 50 元～" };
   if (!isMaster(uid)) return { ok: false, msg: "生活费只有主人能调哦～" };
+  const previous = Number(cfg.budget && cfg.budget.daily_cny) || 0;
   const ncfg = Object.assign({}, cfg, { budget: Object.assign({}, cfg.budget || {}, { daily_cny: a }) });
   writeFileAtomic(CFG_FILE, JSON.stringify(ncfg, null, 2));   // 先落盘成功再改内存，失败时两者一致
-  cfg = ncfg;
-  recordAction({ action: "set_budget", ok: true, summary: "生活费调到 ¥" + a + "/天" });
-  return { ok: true, msg: "收到～生活费已经调到 ¥" + a + "/天啦，今天开始就按这个数算" };
+  /* 保持 cfg 对象身份：plugin-host 的 core.cfg 与 budget-service 都引用同一对象，不能换成另一份配置。 */
+  for (const k of Object.keys(cfg)) if (!Object.prototype.hasOwnProperty.call(ncfg, k)) delete cfg[k];
+  Object.assign(cfg, ncfg);
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.appendFileSync(path.join(DATA_DIR, "budget-adjustments.jsonl"), JSON.stringify({ ts: Date.now(), previous_daily_cny: previous, daily_cny: a, source: String(source || "chat").slice(0, 30), user_id: Number(uid) || 0 }) + "\n");
+  } catch (e) {}
+  recordAction({ action: "set_budget", ok: true, source: String(source || "chat").slice(0, 30), previous_daily_cny: previous, daily_cny: a, summary: "生活费调到 ¥" + a + "/天" });
+  const level = apiOf("budget").budgetLevel();
+  return { ok: true, msg: "收到～生活费已经调到 ¥" + a + "/天啦，今天开始就按这个数算", budget: level };
 }
 async function agentToolCall(messages, settings, tools, think, tier) {
   const endpoint = settings.base_url.replace(/\/+$/, "") + "/v1/chat/completions";
@@ -1094,7 +1119,7 @@ function buildPersonContext(env, opts) {
     memories = nonGroupMemories(loadMemories(userId));
     shortMemories = nonGroupMemories(pruneShortMemories(userId));
     summaryKey = null;
-    extraInfo = { petMode: true };
+    extraInfo = { petMode: true, channel: "pet" };
   } else {
     memories = nonGroupMemories(loadMemories(userId));
     shortMemories = nonGroupMemories(pruneShortMemories(userId));
@@ -1115,6 +1140,12 @@ function buildPersonContext(env, opts) {
       const _lens = _pet.filter((m) => m && (m.role === "user" || m.role === "assistant")).slice(-3)
         .map((m) => (m.role === "user" ? "主人" : "你") + "：" + String(m.content || "").slice(0, 60)).join("\n");
       if (_lens) channelLens = "【你们在桌宠窗口里最近聊的（刚刚的事，别当没发生过）】\n" + _lens;
+    }
+  } catch (e) {}
+  try {
+    if (isMaster(userId) && ["pet", "private", "proactive"].includes(env.channel)) {
+      const cp = apiOf("companion").promptFor({ userId, channel: env.channel === "proactive" ? "private" : env.channel });
+      if (cp) channelLens = (channelLens ? channelLens + "\n" : "") + cp;
     }
   } catch (e) {}
   return { settings, memories, persona, call, userId, taskCtx, shortMemories, summaryKey, extraInfo, channelLens, channel: env.channel };
@@ -1172,6 +1203,13 @@ async function agentChatOnce(history, userText, pctx) {
   if (_td) _dput("now", _td);
   /* E3：跨通道镜头（QQ↔桌宠最近对话）放【此刻】末尾 */
   if (channelLens) _dput("now", channelLens);
+  try {
+    if (isMaster(userId) && ["pet", "private", "proactive"].includes(pctx.channel)) {
+      const intent = apiOf("companion").intentOf(userText);
+      const rule = { listen: "对方主要在倾诉：先接住感受和具体处境，不急着给方案，不连环提问。", quiet: "对方想安静陪伴：可以很短，不硬找话题，不制造回复义务。", play: "对方想一起玩：优先续接共同活动，遵守活动轮次，不把共同活动变成打卡任务。", solve: "对方要解决问题：聚焦当前问题，给可执行的下一步，不用反问串拖延。", chat: "日常闲聊：允许短回复与自然收尾，围绕共同经历，不查户口。" }[intent];
+      if (rule) _dput("now", "【本次陪伴方式】" + rule);
+    }
+  } catch (e) {}
   try {
     const upMs = Date.now() - BOOT_TS;
     const upTxt = upMs < 10 * 60000
@@ -1284,7 +1322,7 @@ async function agentChatOnce(history, userText, pctx) {
   const budgetOut = isBudgetExhausted();
   /* R2：_tier 已在动态块上方计算（同一调用内不变），此处不再重复 */
   // 预算耗尽时：只封禁花钱/高风险工具，保留本地只读工具（查账单/记忆/待办/体检等不花钱）
-  const CHEAP_TOOLS = new Set(["send_sticker", "budget_view", "memory_view", "list_todo", "birthday_view", "goals_view", "check_balance"]);
+  const CHEAP_TOOLS = new Set(["send_sticker", "budget_view", "memory_view", "list_todo", "birthday_view", "goals_view", "check_balance", "momo_together"]);
   let _toolDefs = host ? (budgetOut ? host.allToolDefs().filter((t) => CHEAP_TOOLS.has(t.function.name)) : host.allToolDefs()) : (budgetOut ? AGENT_TOOLS.filter((t) => t.function.name === "send_sticker") : AGENT_TOOLS);
   /* 桌宠场景：过滤掉只对 QQ 有意义的工具（发消息/拍一拍/群相关） */
   if (_extraInfo && _extraInfo.petMode) _toolDefs = _toolDefs.filter((t) => !PET_EXCLUDE_TOOLS.has(t.function.name));
@@ -1419,7 +1457,8 @@ function notePremiseCorrection(userId, saidText) {
 /* ---------------- 主动搭话生成 ---------------- */
 /* 进行中的发送（key → Promise<result>）：并发同键调用共享同一真实结果（Kimi 三轮） */
 const _sendInFlight = new Map();
-async function recordAndSend(userId, text, skipAudit) {
+async function recordAndSend(userId, text, skipAudit, channel) {
+  const _channel = channel === "pet" ? "pet" : "private";
   /* 发送结果语义（行动结果闭环，Kimi 三轮）：
    * succeeded=本次真实发送成功 / duplicate_succeeded=此前已成功无需重发 / running=另一个执行未决 /
    * failed=明确失败 / unknown=无法确认。调用方只认 succeeded 与 duplicate_succeeded 为「说过」。 */
@@ -1427,11 +1466,11 @@ async function recordAndSend(userId, text, skipAudit) {
   /* 阶段一回归：直发路径（如心流 share_fun）也过审计；经 agentChatOnce 的调用方传 skipAudit=true 防双审 */
   let _out = String(text || "");
   if (!skipAudit) {
-    const _bs = { text: _out, channel: "private", userId: userId || 0, usedTools: [] };
+    const _bs = { text: _out, channel: _channel, userId: userId || 0, usedTools: [] };
     if (host && host.runBeforeSend) host.runBeforeSend(_bs);
     _out = _bs.text;
   }
-  const _key = actionKey("send", userId, _out);
+  const _key = _channel === "pet" ? actionKey("send_pet", userId, _out) : actionKey("send", userId, _out);
   /* ① 已成功过（10 分钟）：duplicate_succeeded（重启后同文也不重发） */
   const _dup = loadActions(60).find((a) => a && a.key === _key && a.status === "succeeded" && (Date.now() - (a.ts || 0) < 10 * 60000));
   if (_dup) { log("info", `recordAndSend 幂等命中 ${_key}（此前已成功）`); return { result: "duplicate_succeeded", key: _key }; }
@@ -1443,16 +1482,26 @@ async function recordAndSend(userId, text, skipAudit) {
     catch (e) { return { result: "unknown", key: _key, error: String((e && e.message) || "") }; }
   }
   /* ③ 抢占失败（同键占用且无线程内 Promise，如重启残留 open/状态异常）→ running：调用方不得写成功 */
-  const _t = tryBeginAction({ action: "send", key: _key, channel: "private", userId, requestedBy: "system", detail: _out.slice(0, 40) });
-  if (!_t.acquired) { log("warn", `recordAndSend 同键占用且结果未决（${_key}）→ running`); return { result: "running", key: _key }; }
+  const _t = tryBeginAction({ action: _channel === "pet" ? "send_pet" : "send", key: _key, channel: _channel, userId, requestedBy: "system", detail: _out.slice(0, 40) });
+  if (!_t.acquired) {
+    const stateFailure = String(_t.duplicateOf || "").startsWith("state_");
+    log("warn", `recordAndSend 未获执行凭据（${_t.duplicateOf || "unknown"}）→ ${stateFailure ? "unavailable" : "running"}`);
+    return { result: stateFailure ? "unavailable" : "running", key: _key, error: stateFailure ? "行动状态不可写，未发送" : "同键执行结果未决" };
+  }
   /* ④ 真正执行：把「发送+记账」包成一个 Promise 共享给并发调用方 */
   const _p = (async () => {
     try {
       let _sent = false, _err = "", _mid = "";
       try {
-        const _ack = await sendPrivate(userId, _out);
-        _sent = true;
-        _mid = (_ack && _ack.data && _ack.data.message_id) ? String(_ack.data.message_id) : (_ack && _ack.message_id) ? String(_ack.message_id) : "";
+        if (_channel === "pet") {
+          const _bodyResult = await apiOf("body").announce(_out);
+          _sent = !!(_bodyResult && _bodyResult.ok);
+          if (!_sent) _err = String((_bodyResult && _bodyResult.error) || "desktop send failed");
+        } else {
+          const _ack = await sendPrivate(userId, _out);
+          _sent = true;
+          _mid = (_ack && _ack.data && _ack.data.message_id) ? String(_ack.data.message_id) : (_ack && _ack.message_id) ? String(_ack.message_id) : "";
+        }
       } catch (e) {
         _err = String((e && e.message) || "send failed");
         log("warn", "recordAndSend 发送失败: " + _err.slice(0, 120));
@@ -1463,10 +1512,10 @@ async function recordAndSend(userId, text, skipAudit) {
       /* P1 返修：发送成功才写会话历史——失败的消息不得像「已经说过」一样进历史 */
       if (_sent) {
         try {
-          const his = loadSession(userId);
-          his.push({ role: "assistant", content: _out, ts: Date.now() });
-          saveSession(userId, trimHistory(his, 40, 24000));
-          saveMsgTime(userId, Math.floor(Date.now() / 1000));   // 主动消息也更新时间戳，避免时间差误判
+          const his = loadSession(_channel === "pet" ? "pet" + userId : userId);
+          his.push({ role: "assistant", content: _out, ts: Date.now(), channel: _channel });
+          saveSession(_channel === "pet" ? "pet" + userId : userId, trimHistory(his, 40, 24000));
+          if (_channel === "private") saveMsgTime(userId, Math.floor(Date.now() / 1000));   // QQ 主动消息更新时间戳
         } catch (e) {}
         return { result: "succeeded", key: _key, messageId: _mid };
       }
@@ -1481,7 +1530,33 @@ async function recordAndSend(userId, text, skipAudit) {
   try { return await _p; } finally { _sendInFlight.delete(_key); }
 }
 
+/* v3.0.0：自主外发必须先有短时效意图并通过生活节律/自主门禁；真实发送仍由 recordAndSend 独占执行。 */
+function beginAutonomousMessage(userId, text, reason, channel) {
+  const _channel = channel === "pet" ? "pet" : "private";
+  const life = host && apiOf("life");
+  const intents = host && apiOf("actionIntents");
+  if (!life || !intents) { log("warn", "自主消息缺少 life/actionIntents，已阻止发送"); return null; }
+  const gate = life.canProactive(userId);
+  if (!gate.ok) { log("info", `自主消息节律拦截 u=${userId}: ${gate.reason}`); return null; }
+  const key = _channel === "pet" ? actionKey("send_pet", userId, text) : actionKey("send", userId, text);
+  const tracked = intents.track({ key, kind: "proactive_send", risk: "low", action_class: "non_idempotent", channel: _channel, userId, reason: String(reason || "主动行动").slice(0, 200), payload_summary: String(text || "").slice(0, 300), valid_until: Date.now() + 10 * 60000, retry_safe: false });
+  if (!tracked.ok || tracked.duplicate) return null;
+  const started = intents.markRunning(key);
+  if (!started.ok) return null;
+  return { life, intents, key, userId: Number(userId), done: false };
+}
+function finishAutonomousMessage(tx, result) {
+  if (!tx || tx.done) return false;
+  tx.done = true;
+  const r = result || { result: "unknown", ok: undefined, error: "empty send result" };
+  const ok = r.result === "succeeded" || r.result === "duplicate_succeeded";
+  tx.intents.settle(tx.key, { result: ok ? "succeeded" : (r.result || "unknown"), ok: ok ? true : (r.result === "failed" ? false : undefined), action_key: r.key || tx.key, evidence: ok ? "recordAndSend 真实成功/幂等成功" : "", error: r.error || "" });
+  tx.life.recordProactiveOutcome(tx.userId, r);
+  return ok;
+}
+
 async function proactiveAgentTurn(userId, intentDesc) {
+  let _autoTx = null;
   if (!apiKey || isBudgetExhausted()) return null;
   try {
     const history = loadSession(userId);
@@ -1494,20 +1569,37 @@ async function proactiveAgentTurn(userId, intentDesc) {
     if (lastProactiveMsg.get(userId) === "[object Object]") lastProactiveMsg.delete(userId);
     /* R0-B：持久化去重——比最近 10 条 + 跨人 6 小时冷却 + sha256 指纹（重启不丢） */
     if (proactiveLoggedDup(userId, reply)) { log("info", `主动搭话内容重复（含跨人冷却），跳过`); return null; }
-    lastProactiveMsg.set(userId, reply);
-    appendProactiveLog(userId, reply);
+    /* 先持久化意图再过真实发送；成功后才写 lastProactiveMsg/proactive-log。 */
+    /* v3.1：普通主动消息只选一个渠道；桌面发送失败只记失败，不立即补发 QQ。 */
+    let _route = { channel: "private" };
+    try {
+      const _st = await apiOf("body").status();
+      const _d = _st && _st.data || {};
+      _route = apiOf("companion").chooseRoute({ userId, channel: "private" }, {
+        connected: !!(_st && _st.status === 200 && _d.ok), visible: _d.visible,
+        presence: _d.presence || "unknown", locked: !!_d.locked, dnd: !!_d.dnd,
+      });
+    } catch (e) {}
+    const _activeChannel = _route && _route.channel === "pet" ? "pet" : "private";
+    _autoTx = beginAutonomousMessage(userId, reply, intentDesc, _activeChannel);
+    if (!_autoTx) return null;
     const stickers = (raw && raw.stickers) || [];
-    /* Kimi 三轮：消费真实发送结果——只有 succeeded / duplicate_succeeded 才记「说过」 */
-    const _sr = await recordAndSend(userId, reply, true);
-    if (!_sr || (_sr.result !== "succeeded" && _sr.result !== "duplicate_succeeded")) {
+    const _sr = await recordAndSend(userId, reply, true, _activeChannel);
+    const _sentOk = finishAutonomousMessage(_autoTx, _sr);
+    if (!_sentOk) {
       log("warn", `主动搭话发送未成功（${(_sr && _sr.result) || "unknown"}），不记已发送`);
       return null;
     }
-    for (const s of stickers.slice(0, 2)) {
+    lastProactiveMsg.set(userId, reply);
+    appendProactiveLog(userId, reply);
+    for (const s of (_activeChannel === "private" ? stickers.slice(0, 2) : [])) {
       try { await sendStickerImage(userId, s); noteStickerSent(stickerSessionKey(userId, 0), s); await sleep(600); } catch (e) { log("warn", "主动搭话表情包发送失败: " + e.message.slice(0, 120)); }
     }
     return reply;
-  } catch (e) { log("warn", "主动搭话(agent)失败: " + e.message.slice(0, 160)); return null; }
+  } catch (e) {
+    if (_autoTx) finishAutonomousMessage(_autoTx, { result: "unknown", ok: undefined, error: String((e && e.message) || e) });
+    log("warn", "主动搭话(agent)失败: " + e.message.slice(0, 160)); return null;
+  }
 }
 
 /* ---------------- 联网搜索 ---------------- */
@@ -2024,8 +2116,11 @@ async function mindLoop() {
     if (!canAfford(costTier)) { log("info", `心智-跳过 ${action}：生活费不足`); continue; }
     const score = apiOf("mind").scoreIntent(it);
     if (score >= SCORE_PUSH) {
-      await runMindAction(action, content, settings, masterUin, now);
-      log("info", `心智-执行 ${action}（分 ${score.toFixed(2)}）`);
+      const _mindIntent = beginMindIntent(action, content, now);
+      if (!_mindIntent) { log("info", `心智-跳过 ${action}：节律/意图门禁未通过`); continue; }
+      const _outcome = await runMindAction(action, content, settings, masterUin, now);
+      const _okMind = finishMindIntent(_mindIntent, _outcome);
+      log("info", `心智-执行 ${action}（分 ${score.toFixed(2)}，结果 ${_okMind ? "成功" : "未确认成功"}）`);
       break;
     } else if (score >= SCORE_QUEUE) {
       if (apiOf("mind").addPendingNudge({ kind: action, content, score })) log("info", `心智-静默准备（分 ${score.toFixed(2)}）: ${content.slice(0, 30)}`);
@@ -2033,8 +2128,34 @@ async function mindLoop() {
   }
 }
 
+/* v3.0.0：心智内部动作同样进入每日节律与持久意图，不允许无限工具循环。 */
+function beginMindIntent(action, content, now) {
+  const life = host && apiOf("life"), intents = host && apiOf("actionIntents");
+  if (!life || !intents) return null;
+  const gate = life.authorizeInternal(action, now);
+  if (!gate.ok) { log("info", `心智节律拦截 ${action}: ${gate.reason}`); return null; }
+  const readOnly = ["search", "view_space", "browse", "read_article", "play_puzzle", "read_buzz"].includes(action);
+  const key = action === "qzone" ? actionKey("qzone_post", String(content || "").slice(0, 80)) : actionKey("mind_action", gate.day, action, String(content || ""));
+  const tracked = intents.track({ key, kind: "mind_" + action, risk: "low", action_class: readOnly ? "read" : "non_idempotent", channel: "local", userId: 0, reason: "心智目标 " + action, payload_summary: String(content || "").slice(0, 300), valid_until: Date.now() + 30 * 60000, retry_safe: readOnly });
+  if (!tracked.ok) return null;
+  if (tracked.duplicate && !(tracked.intent.status === "ready" && tracked.intent.retry_safe)) return null;
+  const started = intents.markRunning(key);
+  if (!started.ok) return null;
+  return { life, intents, key, action, day: gate.day, done: false };
+}
+function finishMindIntent(tx, outcome) {
+  if (!tx || tx.done) return false;
+  tx.done = true;
+  const o = outcome || { ok: undefined, error: "empty mind outcome" };
+  const ok = o.ok === true;
+  tx.intents.settle(tx.key, { result: ok ? "succeeded" : (o.ok === false ? "failed" : "unknown"), ok: o.ok, action_key: tx.key, evidence: o.evidence || o.summary || "", error: o.error || "" });
+  tx.life.recordInternalOutcome(tx.day, tx.action, o, o.evidence || o.summary || o.error || "");
+  return ok;
+}
+
 /* 执行一个心智动作（原 mindLoop 的动作分发） */
 async function runMindAction(action, content, settings, masterUin, now) {
+  let _mindAutoTx = null;
   const _actMap = {
     qzone: "在发空间说说", search: "在上网搜好玩的", view_space: "在看空间动态",
     share_fun: "在给主人找趣图", browse: "在刷视频",
@@ -2048,26 +2169,34 @@ async function runMindAction(action, content, settings, masterUin, now) {
           const _pz = await publishQzone(content);
           log("info", `心智-发空间: ${content.slice(0, 40)}${_pz && _pz.images ? `（配图 ${_pz.images} 张）` : ""}`);
           recordAction({ action: "qzone_post", ok: true }); setActivity("发呆");
+          return { ok: true, evidence: "qzone 发布成功", summary: String(content).slice(0, 120) };
         } catch (e) {
           // 发失败要让她自己知道，否则下次会说「我发过说说」
           log("warn", "心智-发空间失败: " + e.message.slice(0, 100));
           try { const st2 = apiOf("mind").loadMindState(); apiOf("mind").pushThought(st2, "刚才想发的说说没发出去，别当成已经发了"); apiOf("mind").saveMindState(st2); } catch (e2) {}
+          return { ok: false, error: e.message };
         }
       }
+      return { ok: false, error: "qzone 当日次数上限" };
     } else if (action === "search" && content) {
-      try { await exploreFun(content, settings); } catch (e) { log("warn", "心智搜素材失败: " + e.message.slice(0, 120)); }
+      try { await exploreFun(content, settings); return { ok: true, evidence: "exploreFun 完成" }; }
+      catch (e) { log("warn", "心智搜素材失败: " + e.message.slice(0, 120)); return { ok: false, error: e.message }; }
     } else if (action === "view_space") {
       const n = await viewSpaces(settings);
       if (n) log("info", `心智-看空间: 发现 ${n} 条新动态`);
       recordAction({ action: "view_space", ok: true }); setActivity("发呆");
+      return { ok: true, evidence: `查看空间完成，新动态 ${Number(n) || 0} 条` };
     } else if (action === "share_fun") {
       if (masterUin && now - (lastProactiveAt.get(masterUin) || 0) >= proactiveIntervalMs(masterUin)) {
         const img = await fetchFunImage();
         const cap = content || "给你看个好玩的～";
         /* R0-B：心流分享也过持久化去重（跨人冷却） */
-        if (proactiveLoggedDup(masterUin, cap)) { log("info", "心智-分享趣图跳过：内容最近发过"); return; }
+        if (proactiveLoggedDup(masterUin, cap)) { log("info", "心智-分享趣图跳过：内容最近发过"); return { ok: false, error: "duplicate_share" }; }
+        _mindAutoTx = beginAutonomousMessage(masterUin, cap, "心智分享趣图");
+        if (!_mindAutoTx) return { ok: false, error: "autonomous_gate" };
         const _sr = await recordAndSend(masterUin, cap);
-        if (!_sr || (_sr.result !== "succeeded" && _sr.result !== "duplicate_succeeded")) { log("warn", "心智分享趣图发送未成功，不记已分享"); return; }
+        const _shareOk = finishAutonomousMessage(_mindAutoTx, _sr);
+        if (!_shareOk) { log("warn", "心智分享趣图发送未成功，不记已分享"); return { ok: false, error: "share_send_failed" }; }
         appendProactiveLog(masterUin, cap);
         if (img) {
           await onebotSend("send_msg", { message_type: "private", user_id: masterUin, message: [{ type: "image", data: { file: "file:///" + img.replace(/\\/g, "/") } }] }).catch(() => {});
@@ -2076,17 +2205,22 @@ async function runMindAction(action, content, settings, masterUin, now) {
         saveProactiveState();
         log("info", `心智-分享趣图: ${cap.slice(0, 30)}`);
         recordAction({ action: "share_fun", ok: true }); setActivity("发呆");
+        return { ok: true, evidence: "主人私聊分享发送成功", summary: cap };
       }
+      return { ok: false, error: "share_not_due" };
     } else if (action === "reflect") {
       log("info", "心智-选择反思");
       await selfReflection(settings);
+      return { ok: true, evidence: "selfReflection 完成" };
     } else if (action === "evolve") {
       log("info", "心智-选择进化");
       await evolveExplore(settings);
+      return { ok: true, evidence: "evolveExplore 完成" };
     } else if (action === "browse") {
       log("info", "心智-选择刷视频");
       const _bApi = host && apiOf("browse");
-      if (_bApi) { try { await _bApi.browse(settings); recordAction({ action: "browse", ok: true }); setActivity("发呆"); } catch (e) { log("warn", "刷视频失败: " + e.message.slice(0, 120)); } }
+      if (_bApi) { try { await _bApi.browse(settings); recordAction({ action: "browse", ok: true }); setActivity("发呆"); return { ok: true, evidence: "browse 完成" }; } catch (e) { log("warn", "刷视频失败: " + e.message.slice(0, 120)); return { ok: false, error: e.message }; } }
+      return { ok: false, error: "browse unavailable" };
     } else if (action === "read_article") {
       log("info", "心智-选择读一篇文章");
       const _rApi = host && apiOf("read-article");
@@ -2095,8 +2229,10 @@ async function runMindAction(action, content, settings, masterUin, now) {
           const r = await _rApi.readArticle(settings);
           if (r && r.title) queueFunShare(`今天读了《${r.title}》${r.thought ? "，" + String(r.thought).slice(0, 60) : ""}`);
           recordAction({ action: "read_article", ok: true }); setActivity("发呆");
-        } catch (e) { log("warn", "读文章失败: " + e.message.slice(0, 120)); }
+          return { ok: true, evidence: r && r.title ? `阅读《${r.title}》完成` : "readArticle 完成" };
+        } catch (e) { log("warn", "读文章失败: " + e.message.slice(0, 120)); return { ok: false, error: e.message }; }
       }
+      return { ok: false, error: "read_article unavailable" };
     } else if (action === "play_puzzle") {
       log("info", "心智-选择玩数独");
       const _pApi = host && apiOf("puzzle");
@@ -2108,8 +2244,10 @@ async function runMindAction(action, content, settings, masterUin, now) {
             else if (r.ok) queueFunShare(`刚玩了会儿数独，${r.progress}`);
           }
           recordAction({ action: "play_puzzle", ok: true }); setActivity("发呆");
-        } catch (e) { log("warn", "玩数独失败: " + e.message.slice(0, 120)); }
+          return { ok: true, evidence: r && r.progress ? String(r.progress) : "playPuzzle 完成" };
+        } catch (e) { log("warn", "玩数独失败: " + e.message.slice(0, 120)); return { ok: false, error: e.message }; }
       }
+      return { ok: false, error: "puzzle unavailable" };
     } else if (action === "read_buzz") {
       log("info", "心智-选择刷热搜");
       const _zApi = host && apiOf("buzz");
@@ -2118,10 +2256,17 @@ async function runMindAction(action, content, settings, masterUin, now) {
           const r = await _zApi.readBuzz(settings);
           if (r && r.title) queueFunShare(`热搜上「${r.title}」那个，我有点想跟你说${r.view ? "：" + String(r.view).slice(0, 50) : ""}`);
           recordAction({ action: "read_buzz", ok: true }); setActivity("发呆");
-        } catch (e) { log("warn", "刷热搜失败: " + e.message.slice(0, 120)); }
+          return { ok: true, evidence: r && r.title ? `热搜阅读：${r.title}` : "readBuzz 完成" };
+        } catch (e) { log("warn", "刷热搜失败: " + e.message.slice(0, 120)); return { ok: false, error: e.message }; }
       }
+      return { ok: false, error: "buzz unavailable" };
     }
-  } catch (e) { log("warn", "心智动作失败: " + e.message.slice(0, 120)); }
+  } catch (e) {
+    if (_mindAutoTx) finishAutonomousMessage(_mindAutoTx, { result: "unknown", ok: undefined, error: String((e && e.message) || e) });
+    log("warn", "心智动作失败: " + e.message.slice(0, 120));
+    return { ok: undefined, error: e.message };
+  }
+  return { ok: false, error: "unsupported_or_empty_mind_action" };
 }
 
 /* ---- 娱乐产出分享：进静默准备池，一天最多 1 条（她自己决定什么时候提，不许刷屏） ---- */
@@ -3991,6 +4136,66 @@ function startPetApi() {
     }
     /* 插件管理端点（身体面板/体检用，仅本机 127.0.0.1） */
     const _json = (s, b) => { try { res.writeHead(s, { "Content-Type": "application/json; charset=utf-8" }); res.end(JSON.stringify(b)); } catch (e) {} };
+    /* v3.1 桌面应用管理接口：与聊天端口同机，但必须使用独立令牌；绝不把预算/共享空间暴露给普通聊天请求。 */
+    const _appPath = _path.startsWith("/v1/app/") ? _path : "";
+    if (_appPath) {
+      let _expected = "";
+      try {
+        const _tf = path.join(DATA_DIR, "app-token");
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+        if (!fs.existsSync(_tf)) {
+          try { fs.writeFileSync(_tf, crypto.randomBytes(24).toString("hex"), { encoding: "utf8", flag: "wx", mode: 0o600 }); }
+          catch (e) { if (!e || e.code !== "EEXIST") throw e; }
+        }
+        _expected = fs.readFileSync(_tf, "utf8").trim();
+      } catch (e) {}
+      const _ah = String(req.headers.authorization || "");
+      const _got = _ah.toLowerCase().startsWith("bearer ") ? _ah.slice(7).trim() : String(req.headers["x-momo-token"] || "");
+      const _valid = !!_expected && !!_got && _got.length === _expected.length && crypto.timingSafeEqual(Buffer.from(_got), Buffer.from(_expected));
+      if (!_valid) { _json(401, { ok: false, error: "unauthorized" }); return; }
+      const _master = Number((cfg.qq && cfg.qq.master_user) || 0);
+      const _budget = () => { const b = apiOf("budget").budgetLevel(); return { daily_cny: b.daily, spent_cny: b.spent, remaining_cny: Math.max(0, b.daily - b.spent), ratio: b.ratio, level: b.level, tier: apiOf("budget").budgetTier() }; };
+      if (req.method === "GET" && (_appPath === "/v1/app/status" || _appPath === "/v1/app/budget")) {
+        const _hs = apiOf("health"), _lf = apiOf("life");
+        _json(200, { ok: true, version: BASE_VERSION, pid: process.pid, uptime_s: Math.floor(process.uptime()), boot: _boot.stage, autonomy_paused: !!(cfg.life && cfg.life.autonomy_paused), budget: _budget(), health: _hs ? _hs.snapshot() : [], life: _lf ? _lf.status() : null }); return;
+      }
+      if (req.method === "GET" && _appPath === "/v1/app/companion") {
+        _json(200, apiOf("companion").list({ userId: _master, channel: "pet" })); return;
+      }
+      if (req.method === "POST" && (_appPath === "/v1/app/budget" || _appPath === "/v1/app/companion" || _appPath === "/v1/app/autonomy")) {
+        let _raw = "";
+        req.on("data", (c) => { _raw += c; if (_raw.length > 1e6) req.destroy(); });
+        req.on("end", () => {
+          let p = {}; try { p = JSON.parse(_raw || "{}"); } catch (e) { _json(400, { ok: false, error: "bad_json" }); return; }
+          if (_appPath === "/v1/app/autonomy") {
+            try {
+              const ncfg = Object.assign({}, cfg, { life: Object.assign({}, cfg.life || {}, { autonomy_paused: !!p.paused }) });
+              writeFileAtomic(CFG_FILE, JSON.stringify(ncfg, null, 2));
+              Object.assign(cfg, ncfg);
+              recordAction({ action: "autonomy_pause", ok: true, paused: !!p.paused, source: "desktop" });
+              _json(200, { ok: true, autonomy_paused: !!p.paused });
+            } catch (e) { _json(500, { ok: false, error: String(e.message).slice(0, 160) }); }
+            return;
+          }
+          if (_appPath === "/v1/app/budget") {
+            try { const r = applyBudgetChange(p.daily_cny, _master, "desktop"); _json(r.ok ? 200 : 400, Object.assign({}, r, { budget: _budget() })); }
+            catch (e) { _json(500, { ok: false, error: String(e.message).slice(0, 160) }); }
+            return;
+          }
+          const cp = apiOf("companion"), info = { userId: _master, channel: "pet" }, id = p.activity_id, v = p.version;
+          let r;
+          if (p.action === "start") r = cp.start(info, p);
+          else if (p.action === "advance") r = cp.advance(info, id, v, p.input);
+          else if (p.action === "complete_turn") r = cp.completeTurn(info, id, v, p.output);
+          else if (["pause", "resume", "end"].includes(p.action)) r = cp.setState(info, id, v, p.action === "pause" ? "paused" : p.action === "resume" ? "active" : "ended");
+          else if (p.action === "theme") r = cp.changeTheme(info, id, v, p.topic);
+          else r = { ok: false, reason: "invalid_action" };
+          _json(r.ok ? 200 : 409, r);
+        });
+        return;
+      }
+      _json(404, { ok: false, error: "not_found" }); return;
+    }
     if (req.method === "GET" && _path === "/v1/plugins") {
       try {
         const list = (host && host.ctx && host.ctx.registry && host.ctx.registry.list) ? host.ctx.registry.list() : [];
@@ -4082,6 +4287,10 @@ function _startupChecklist(status) {
     digest: { pending: [], stale: [], dead: [] },
     cursors: { private: {}, group: {}, gap_suspected: 0 },
     session_repairs: { assistant_restored: 0, failed: 0, total_uncommitted: 0 },
+    action_intents: { pending: 0, unknown: 0, total: 0 },
+    continuity: { degraded: "", beliefs: 0, contested: 0 },
+    autonomy: { level: 1, degraded: "" },
+    life: { degraded: "", day: "", phase: "unknown", goals: 0 },
     errors: [],
   };
   try {
@@ -4109,6 +4318,14 @@ function _startupChecklist(status) {
     if (_md && typeof _md.digestStatus === "function") { const d = _md.digestStatus(); out.digest = { pending: d.pending || [], stale: d.stale || [], dead: d.dead || [] }; }
     const _mem = apiOf("memory");
     if (_mem && _mem.memoryOps && typeof _mem.memoryOps.status === "function") { const m = _mem.memoryOps.status(); out.memory_ingest = { pending: m.pending || 0, failed: (m.failed || 0) + (m.dead || 0) }; }
+    const _ai = apiOf("actionIntents");
+    if (_ai && typeof _ai.health === "function") { const h = _ai.health(); out.action_intents = { pending: h.pending || 0, unknown: h.unknown || 0, total: h.total || 0 }; if (h.pending || h.unknown) out.status = "degraded"; }
+    const _cont = apiOf("continuity");
+    if (_cont && typeof _cont.health === "function") { const h = _cont.health(); out.continuity = { degraded: h.degraded || "", beliefs: h.beliefs || 0, contested: h.contested || 0 }; if (h.degraded) out.status = "degraded"; }
+    const _auto = apiOf("autonomy");
+    if (_auto && typeof _auto.status === "function") { const h = _auto.status(); out.autonomy = { level: h.level, degraded: h.degraded || "" }; if (h.degraded) out.status = "degraded"; }
+    const _life = apiOf("life");
+    if (_life && typeof _life.status === "function") { const h = _life.status(); out.life = { degraded: h.degraded || "", day: h.day || "", phase: h.phase || "unknown", goals: h.goals || 0 }; if (h.degraded) out.status = "degraded"; }
   } catch (e) { out.errors.push("checklist: " + String((e && e.message) || e).slice(0, 80)); }
   return out;
 }

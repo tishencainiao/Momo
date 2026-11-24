@@ -91,7 +91,12 @@ def main(argv=None) -> int:
 
     if args.selftest:
         import selftest as selftest_mod
-        code = selftest_mod.run(config)
+        try:
+            code = selftest_mod.run(config)
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            code = 1                         # windowed exe 未捕获异常也可能返回 0，必须显式失败
         guard.detach()
         return code
 
@@ -203,7 +208,76 @@ def main(argv=None) -> int:
         else:
             log("系统托盘不可用：关窗即退出")
 
+        # v3.1 应用外壳：主窗口与聊天窗按需创建，身体右键/托盘共用同一入口。
+        from app_window import MainWindow
+        from chat_window import ChatWindow
+        from brain_api import BrainAPI
+        brain_api = BrainAPI(config.get("brain_url") or "http://127.0.0.1:3999")
+        main_win = None
+        chat_win = None
+
+        def _open_chat():
+            nonlocal chat_win
+            if chat_win is None:
+                chat_win = ChatWindow(api=brain_api)
+            chat_win.show()
+            chat_win.raise_()
+            chat_win.activateWindow()
+
+        def _quit_all():
+            from PySide6.QtWidgets import QMessageBox
+            box = QMessageBox()
+            box.setWindowTitle("完全退出 Momo")
+            box.setText("这会停止大脑、守护和桌面身体。\n只想收起界面的话，请直接关闭窗口。")
+            box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            box.setDefaultButton(QMessageBox.No)
+            if box.exec() != QMessageBox.Yes:
+                return
+            if tray is not None:
+                import tray as tray_mod
+                tray_mod.kill_pids(tray_mod.find_supervisor_pids())
+                tray_mod.kill_pids(tray_mod.find_brain_pids())
+            win._quitting = True
+            win._save_geometry()
+            app.quit()
+
+        def _open_main():
+            nonlocal main_win
+            if main_win is None:
+                actions = {
+                    "chat": _open_chat,
+                    "toggle_body": (lambda: _toggle() if tray is not None else (win.hide() if win.isVisible() else win.show())),
+                    "settings": win.open_settings,
+                    "start": (lambda: tray._start_supervisor() if tray is not None else None),
+                    "restart": (lambda: tray._restart_brain() if tray is not None else None),
+                    "stop": (lambda: tray._stop_brain() if tray is not None else None),
+                    "logs": (lambda: tray._open_log() if tray is not None else None),
+                    "quit": _quit_all,
+                }
+                main_win = MainWindow(
+                    actions=actions,
+                    api=brain_api,
+                    get_body_state=lambda: {
+                        "visible": win.isVisible(),
+                        "dnd_manual": bool(getattr(win, "dnd_manual", False)),
+                        "dnd_auto_active": (win.in_dnd() and not bool(getattr(win, "dnd_manual", False))),
+                        "weather_city": str(config.get("weather_city") or "北京"),
+                    },
+                )
+            main_win.show()
+            main_win.raise_()
+            main_win.activateWindow()
+
+        config["_open_chat"] = _open_chat
+        config["_open_main"] = _open_main
+        if tray is not None:
+            tray.main_open.connect(_open_main)
+            tray.chat_open.connect(_open_chat)
+            if config.get("manage_brain_on_launch", True) and not __import__("tray").find_brain_pids():
+                tray._start_supervisor()
+
         win.show()
+        QTimer.singleShot(0, _open_main)
         log("身体已启动：片段 %d 类，缩放 %.2f，托盘 %s，音效 %s" % (
             len(win.clips), win.scale,
             "开" if tray is not None else "关",

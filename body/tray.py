@@ -54,13 +54,14 @@ def _pids(name_like: str, where: str) -> list:
 
 
 def find_brain_pids() -> list:
-    # PowerShell 的 -like 里反斜杠不是转义符，写单个 \ 就是字面量
-    return _pids("node.exe", "$_.CommandLine -like '*Momo\\index.js*'")
+    app = os.path.join(cfg.ROOT_DIR, "index.js").replace("'", "''")
+    return _pids("node.exe", "$_.CommandLine -like '*{0}*'".format(app))
 
 
 def find_supervisor_pids() -> list:
-    # 必须带 -File，否则「正在跑这条查询的 powershell 自己」也会命中
-    return _pids("powershell.exe", "$_.CommandLine -like '*-File*supervise.ps1*'")
+    # 必须同时匹配当前 Momo 根目录，绝不能停掉其他项目的守护。
+    script = os.path.join(cfg.ROOT_DIR, "supervise.ps1").replace("'", "''")
+    return _pids("powershell.exe", "$_.CommandLine -like '*-File*supervise.ps1*' -and $_.CommandLine -like '*{0}*'".format(script))
 
 
 def find_body_pids() -> list:
@@ -87,6 +88,8 @@ class BodyTray(QObject):
     body_quit = Signal()
     volume_changed = Signal(int)
     muted_changed = Signal(bool)
+    main_open = Signal()
+    chat_open = Signal()
 
     def __init__(self, window, sound, icon_path: str, parent=None):
         super().__init__(parent)
@@ -100,40 +103,49 @@ class BodyTray(QObject):
         self.menu = QMenu()
         self.menu.aboutToShow.connect(self._refresh_labels)
 
-        # ---- 状态（只读）----
-        self.act_brain = QAction("大脑：检查中…", self.menu)
+        # ---- 状态（只读，带色点）----
+        self.act_brain = QAction("● 大脑：检查中…", self.menu)
         self.act_brain.setEnabled(False)
         self.menu.addAction(self.act_brain)
-        self.act_body = QAction("身体：显示中", self.menu)
+        self.act_body = QAction("● 身体：显示中", self.menu)
         self.act_body.setEnabled(False)
         self.menu.addAction(self.act_body)
         self.menu.addSeparator()
 
-        # ---- 身体 ----
+        # ---- 常用 ----
+        act_main = QAction("打开 Momo 主界面", self.menu)
+        act_main.triggered.connect(lambda: self.main_open.emit())
+        self.menu.addAction(act_main)
+        act_chat = QAction("和 Momo 聊天", self.menu)
+        act_chat.triggered.connect(lambda: self.chat_open.emit())
+        self.menu.addAction(act_chat)
         self.act_toggle = QAction("隐藏身体", self.menu)
         self.act_toggle.triggered.connect(lambda: self.body_toggle.emit())
         self.menu.addAction(self.act_toggle)
+        self.act_dnd = QAction("免打扰", self.menu, checkable=True)
+        self.act_dnd.setChecked(bool(getattr(window, "dnd_manual", False)))
+        self.act_dnd.toggled.connect(self._toggle_dnd)
+        self.menu.addAction(self.act_dnd)
+        self.menu.addSeparator()
 
-        act_restart_body = QAction("重启身体", self.menu)
-        act_restart_body.triggered.connect(lambda: self.body_restart.emit())
-        self.menu.addAction(act_restart_body)
-
-        # ---- 大脑 ----
-        act_restart_brain = QAction("重启大脑（杀进程，守护自动拉起）", self.menu)
+        # ---- 高级（子菜单）----
+        adv = self.menu.addMenu("高级")
+        act_restart_brain = QAction("重启大脑（守护自动拉起）", adv)
         act_restart_brain.triggered.connect(self._restart_brain)
-        self.menu.addAction(act_restart_brain)
-
-        self.act_stop_brain = QAction("停止大脑（含守护）", self.menu)
+        adv.addAction(act_restart_brain)
+        self.act_stop_brain = QAction("停止大脑（含守护）", adv)
         self.act_stop_brain.triggered.connect(self._stop_brain)
-        self.menu.addAction(self.act_stop_brain)
-
-        # ---- 音效 ----
-        sound_menu = self.menu.addMenu("音效")
+        adv.addAction(self.act_stop_brain)
+        adv.addSeparator()
+        act_restart_body = QAction("重启身体", adv)
+        act_restart_body.triggered.connect(lambda: self.body_restart.emit())
+        adv.addAction(act_restart_body)
+        adv.addSeparator()
+        sound_menu = adv.addMenu("音效")
         self.act_mute = QAction("静音", sound_menu, checkable=True)
         self.act_mute.setChecked(bool(getattr(sound, "muted", False)))
         self.act_mute.toggled.connect(self._on_mute)
         sound_menu.addAction(self.act_mute)
-        sound_menu.addSeparator()
         self.act_audio = QAction("试听 / 重开音频", sound_menu)
         self.act_audio.triggered.connect(self._reinit_audio)
         sound_menu.addAction(self.act_audio)
@@ -142,23 +154,17 @@ class BodyTray(QObject):
             act.setChecked(int(getattr(sound, "volume", 70)) == vol)
             act.triggered.connect(lambda _c=False, v=vol: self._set_volume(v))
             sound_menu.addAction(act)
-
-        self.menu.addSeparator()
-        act_settings = QAction("设置…", self.menu)
+        act_settings = QAction("设置…", adv)
         act_settings.triggered.connect(self._open_settings)
-        self.menu.addAction(act_settings)
-        act_plugins = QAction("插件面板", self.menu)
+        adv.addAction(act_settings)
+        act_plugins = QAction("插件面板", adv)
         act_plugins.triggered.connect(self._open_plugins)
-        self.menu.addAction(act_plugins)
-        self.act_dnd = QAction("免打扰", self.menu, checkable=True)
-        self.act_dnd.setChecked(bool(getattr(window, "dnd_manual", False)))
-        self.act_dnd.toggled.connect(self._toggle_dnd)
-        self.menu.addAction(self.act_dnd)
+        adv.addAction(act_plugins)
 
+        # ---- 底部 ----
         act_log = QAction("查看日志", self.menu)
         act_log.triggered.connect(self._open_log)
         self.menu.addAction(act_log)
-
         act_quit = QAction("退出身体（托盘也会消失）", self.menu)
         act_quit.triggered.connect(lambda: self.body_quit.emit())
         self.menu.addAction(act_quit)
@@ -183,8 +189,22 @@ class BodyTray(QObject):
         def work():
             brain = find_brain_pids()
             sup = find_supervisor_pids()
+            api_text = ""
+            if brain:
+                try:
+                    from brain_api import BrainAPI
+                    url = "http://127.0.0.1:3999"
+                    try:
+                        cfg_dict = getattr(self.window, "cfg", None) or {}
+                        url = cfg_dict.get("brain_url") or url
+                    except Exception:
+                        pass
+                    st = BrainAPI(url, manage=False).status()
+                    api_text = " · 就绪 v%s" % (st.get("version") or "?")
+                except Exception:
+                    api_text = " · API 无响应"
             self._status = {
-                "brain": ("运行中 PID %s" % ",".join(str(p) for p in brain)) if brain else "未运行",
+                "brain": ("运行中 PID %s%s" % (",".join(str(p) for p in brain), api_text)) if brain else "未运行",
                 "supervisor": "守护在" if sup else "无守护",
                 "body": "显示中" if self.window.isVisible() else "已隐藏",
             }
@@ -194,8 +214,15 @@ class BodyTray(QObject):
 
     def _refresh_labels(self) -> None:
         self._status["body"] = "显示中" if self.window.isVisible() else "已隐藏"
-        self.act_brain.setText("大脑：%s（%s）" % (self._status["brain"], self._status["supervisor"]))
-        self.act_body.setText("身体：%s" % self._status["body"])
+        brain_txt = self._status["brain"]
+        dot = "\u25cf "
+        if brain_txt.startswith("未运行"):
+            self.act_brain.setText(dot + "大脑：未运行（%s）" % self._status["supervisor"])
+        elif "API 无响应" in brain_txt:
+            self.act_brain.setText(dot + "大脑：%s" % brain_txt)
+        else:
+            self.act_brain.setText(dot + "大脑：%s（%s）" % (brain_txt, self._status["supervisor"]))
+        self.act_body.setText(dot + "身体：%s" % self._status["body"])
         self.act_toggle.setText("隐藏身体" if self.window.isVisible() else "显示身体")
         try:
             if hasattr(self.act_dnd, "setChecked") and hasattr(self.window, "in_dnd"):

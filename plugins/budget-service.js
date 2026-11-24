@@ -140,6 +140,18 @@ function usageLine() {
   const total = missIn + hitIn + (b.tokens_out || 0);
   return `📊 今日 token 用量：输入 ${missIn}（缓存命中 ${hitIn}，命中率 ${hr}%）/ 输出 ${b.tokens_out || 0}（合计 ${total}）\n生活费：¥${(b.spent_cny || 0).toFixed(3)}/${bc.daily_cny}（${Math.round((b.spent_cny || 0) / bc.daily_cny * 100)}%）\n调用：${detail}`;
 }
+function budgetAdjustments(startTs) {
+  const start = Number(startTs) || 0, out = [];
+  try {
+    for (const line of fs.readFileSync(path.join(_ctx.DATA_DIR, "budget-adjustments.jsonl"), "utf8").split("\n").filter(Boolean).slice(-100)) {
+      try {
+        const e = JSON.parse(line);
+        if (Number(e.ts) >= start) out.push({ ts: Number(e.ts) || 0, previous: Number(e.previous_daily_cny) || 0, daily: Number(e.daily_cny) || 0, source: String(e.source || "chat") });
+      } catch (e) {}
+    }
+  } catch (e) {}
+  return out;
+}
 function estimateTokens(text) { return Math.ceil(String(text || "").length * 0.6); }
 /* P1：从 usage 精确拆「未命中/命中/输出」。字段齐就直接读；缺命中字段才用 prompt_tokens 扣减；全缺才整包估算。 */
 function usageParts(u, messages, text) {
@@ -172,7 +184,7 @@ module.exports = {
     budget: {
       budgetCfg, dailyCny, isPeakHour, loadBudget, saveBudget, recordSpend,
       isBudgetExhausted, budgetLevel, budgetTier, canAfford, budgetLevelText,
-      budgetLine, usageLine, estimateTokens, usageParts, ACTION_COST,
+      budgetLine, usageLine, estimateTokens, usageParts, budgetAdjustments, ACTION_COST,
     },
   },
   apiSpec: {
@@ -192,6 +204,7 @@ module.exports = {
       usageLine: { input: "无", output: "token 用量+账单", sideEffect: "只读" },
       estimateTokens: { input: "文本", output: "估算 token", sideEffect: "只读" },
       usageParts: { input: "usage,messages,text", output: "{miss,hit,out}", sideEffect: "只读" },
+      budgetAdjustments: { input: "起始时间戳", output: "预算调整记录（previous/daily/source）", sideEffect: "只读" },
       ACTION_COST: { input: "无", output: "动作花费档表", sideEffect: "只读" },
     },
   },

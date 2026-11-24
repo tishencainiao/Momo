@@ -27,6 +27,11 @@
 | [v2.0.0-validation.md](v2.0.0-validation.md) | v2.0.0「事实与稳定性底座」验收矩阵（A01–A24）与交付状态 | 🤖 | 版本大里程碑验收时 |
 | [v2.1.0-validation.md](v2.1.0-validation.md) | v2.1.0「连续存在底座 I」验收矩阵（B01–B24）与交付状态 | 🤖 | 版本大里程碑验收时 |
 | [v2.2.0-validation.md](v2.2.0-validation.md) | v2.2.0「连续存在底座 II」验收矩阵（C01–C32）与交付状态 | 🤖 | 版本大里程碑验收时 |
+| [v3.0.0-master-plan.md](v3.0.0-master-plan.md) | v3.0.0「连续存在与受限自主生长」唯一总计划、硬边界与 46 项矩阵 | 🤖👤 | 总计划目标/边界变化时 |
+| [v3.0.0-validation.md](v3.0.0-validation.md) | v3.0.0 主刀自测证据、A/C/L/G/S 矩阵、DSH 与真实运行待验项 | 🤖👤 | 独立复验/真实运行后 |
+| [v3.1.0-master-plan.md](v3.1.0-master-plan.md) | v3.1.0「应用化+共同生活」总计划、落地清单与验收边界 | 🤖👤 | 总计划目标/边界变化时 |
+| [v3.1.0-validation.md](v3.1.0-validation.md) | v3.1.0 主刀自测证据、APP/LIFE/SENSE/BUDGET/SEC/REG 矩阵与待真实验收项 | 🤖👤 | 独立复验/真实运行后 |
+| [v3.1.0-user-guide.md](v3.1.0-user-guide.md) | v3.1.0 主人使用指南（主界面/聊天/共同活动/免打扰/生活费） | 👤 | 功能或入口变化时 |
 | [roles-and-permissions.md](roles-and-permissions.md) | 角色/权限/参数级权限约定 | 🤖 | 改权限判断时 |
 
 ### 指南（怎么做 · 流程/规范）

@@ -98,7 +98,8 @@ class PetWindow(QWidget):
         self._squash_timer.setInterval(16)
         self._squash_timer.timeout.connect(self._tick_squash)
 
-        # 感官（v0.4）：键鼠空闲 / 前台窗口 / 锁屏；截图由大脑按需触发
+        # 感官（v0.4）：键鼠空闲 / 前台窗口 / 锁屏；截图由主人显式开启后才允许
+        self.dnd_manual = bool(self.cfg.get("dnd_manual"))
         from sense import Sense
 
         self.sense = Sense(
@@ -106,9 +107,13 @@ class PetWindow(QWidget):
             look_dir=os.path.join(cfg.DATA_DIR, "body-shots"),
             away_after_s=float(self.cfg.get("away_after_s") or 180),
             interval_ms=int(self.cfg.get("sense_interval_ms") or 5000),
+            title_enabled=self.cfg.get("window_title_enabled", True) is not False,
+            screenshot_enabled=bool(self.cfg.get("screenshot_enabled", False)),
+            dnd_provider=self.in_dnd,
             parent=self,
         )
         self.sense.changed.connect(self._on_sense)
+        self.set_dnd(None)                  # 广播初始免打扰/隐私状态，清掉启动前可能采到的标题
         self.setAcceptDrops(True)
 
         # ---------- 物理 / 移动 / 情绪（v0.5） ----------
@@ -123,7 +128,6 @@ class PetWindow(QWidget):
         self._phys_timer.setInterval(16)
         self._phys_timer.timeout.connect(self._step_physics)
         self.mood = {"mood": 0, "boredom": 0, "emotion": ""}
-        self.dnd_manual = bool(self.cfg.get("dnd_manual"))
         self._idle_timer = QTimer(self)
         self._idle_timer.setInterval(25000)
         self._idle_timer.timeout.connect(self._maybe_self_play)
@@ -175,6 +179,9 @@ class PetWindow(QWidget):
                 self._snap(locked=data.get("locked"))
             elif event == "foreground":
                 self._snap(foreground=data)
+            elif event == "dnd_state":
+                self._snap(dnd=bool(data.get("active")))
+                self._publish("dnd", active=bool(data.get("active")), manual=self.dnd_manual)
             elif event == "drop":
                 self._snap(last_drop=data.get("files"))
         except Exception:
@@ -196,7 +203,7 @@ class PetWindow(QWidget):
         event.acceptProposedAction()
         self._publish("drop", files=files)
         name = os.path.basename(files[0])
-        self.say("收到啦：%s" % (name if len(files) == 1 else "%d 个文件" % len(files)), 4000)
+        self.say("收到啦：%s" % (name if len(files) == 1 else "%d 个文件" % len(files)), 4000, force=True)
 
     def _keep_on_top(self) -> None:
         if self.cfg.get("always_on_top", True):
@@ -274,7 +281,9 @@ class PetWindow(QWidget):
                     return clip
         return None
 
-    def say(self, text: str, duration_ms: int = 5000) -> None:
+    def say(self, text: str, duration_ms: int = 5000, force: bool = False) -> None:
+        if self.in_dnd() and not force:       # 免打扰不弹主动聊天气泡；用户本地操作可明确 force
+            return False
         from bubble import SpeechBubble
 
         if self.bubble is None:
@@ -288,6 +297,7 @@ class PetWindow(QWidget):
             self._publish("anim", name=clip.key, category=clip.category)
         self._snap(state="talk", anim=(clip.key if clip else ""), last_say=str(text)[:80])
         self._publish("say", text=str(text)[:200])
+        return True
 
     # ---------- 语音（复用大脑合成好的音频文件） ----------
     def _voice(self):
@@ -323,8 +333,8 @@ class PetWindow(QWidget):
             text = str(payload.get("text") or "").strip()
             if not text:
                 return {"ok": False, "error": "empty text"}
-            self.say(text, int(payload.get("duration_ms") or 5000))
-            return {"ok": True, "said": text[:80]}
+            shown = self.say(text, int(payload.get("duration_ms") or 5000))
+            return {"ok": shown is not False, "said": text[:80], "dnd": shown is False}
 
         if cmd == "speak":
             path = str(payload.get("path") or "").strip()
@@ -440,9 +450,23 @@ class PetWindow(QWidget):
         active = self.in_dnd()
         if active and getattr(self, "_voice_out", None) is not None:
             self._voice_out.stop()
+        if active and self.bubble is not None:
+            self.bubble.hide()
+        if hasattr(self, "sense"):
+            self.sense.sample()             # 立即清除并不再采集新标题，不等下一轮采样
         self._publish("dnd", active=active, manual=self.dnd_manual)
         self._snap(dnd=active)
         return active
+
+    def open_chat(self) -> None:
+        cb = self.cfg.get("_open_chat")
+        if callable(cb):
+            cb()
+
+    def open_main_window(self) -> None:
+        cb = self.cfg.get("_open_main")
+        if callable(cb):
+            cb()
 
     def open_settings(self) -> None:
         from settings_dialog import SettingsDialog
@@ -474,6 +498,9 @@ class PetWindow(QWidget):
         self._click_through = bool(new_cfg.get("click_through"))
         self.setAttribute(Qt.WA_TransparentForMouseEvents, self._click_through)
         self.dnd_manual = bool(new_cfg.get("dnd_manual"))
+        if hasattr(self, "sense"):
+            self.sense.title_enabled = self.cfg.get("window_title_enabled", True) is not False
+            self.sense.screenshot_enabled = bool(self.cfg.get("screenshot_enabled", False))
         self.set_dnd(self.dnd_manual)
         self._publish("settings", changed=sorted(new_cfg.keys())[:20])
         self._log("设置已应用：大小 %.2f，音效 %d，语音 %d，免打扰 %s"
@@ -824,6 +851,13 @@ class PetWindow(QWidget):
     # ---------- 右键菜单 ----------
     def contextMenuEvent(self, event) -> None:                     # noqa: N802
         menu = QMenu(self)
+        chat_act = QAction("和 Momo 聊天", self)
+        chat_act.triggered.connect(self.open_chat)
+        menu.addAction(chat_act)
+        main_act = QAction("打开主界面", self)
+        main_act.triggered.connect(self.open_main_window)
+        menu.addAction(main_act)
+        menu.addSeparator()
         actions_menu = menu.addMenu("点播动作")
         for cat in ("random", "click", "turn", "move", "drag"):
             items = self._cat(cat)
@@ -860,9 +894,9 @@ class PetWindow(QWidget):
         settings_act = QAction("设置…", self)
         settings_act.triggered.connect(self.open_settings)
         menu.addAction(settings_act)
-        dnd_act = QAction("免打扰", self, checkable=True)
-        dnd_act.setChecked(self.in_dnd())
-        dnd_act.triggered.connect(lambda checked=False: self.set_dnd(not self.dnd_manual))
+        dnd_act = QAction("免打扰（停止标题采集和主动气泡）", self, checkable=True)
+        dnd_act.setChecked(self.dnd_manual)
+        dnd_act.triggered.connect(lambda checked=False: self.set_dnd(bool(checked)))
         menu.addAction(dnd_act)
         menu.addSeparator()
         hide_act = QAction("隐藏身体（托盘可叫回）", self)

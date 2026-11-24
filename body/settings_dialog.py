@@ -55,6 +55,17 @@ class SettingsDialog(QDialog):
             bv.addWidget(w)
         root.addWidget(box_behave)
 
+        # ---- 存在感知与隐私 ----
+        box_privacy = QGroupBox("存在感知与隐私")
+        pv = QVBoxLayout(box_privacy)
+        self.chk_titles = QCheckBox("允许读取当前窗口标题（默认开，不保存长期历史）")
+        self.chk_titles.setChecked(self.cfg.get("window_title_enabled", True) is not False)
+        self.chk_shots = QCheckBox("允许按需截图（默认关；免打扰时仍禁止）")
+        self.chk_shots.setChecked(bool(self.cfg.get("screenshot_enabled", False)))
+        pv.addWidget(self.chk_titles)
+        pv.addWidget(self.chk_shots)
+        root.addWidget(box_privacy)
+
         # ---- 免打扰 ----
         box_dnd = QGroupBox("免打扰")
         df = QFormLayout(box_dnd)
@@ -120,6 +131,8 @@ class SettingsDialog(QDialog):
             "click_response": bool(self.chk_click.isChecked()),
             "squash_enabled": bool(self.chk_squash.isChecked()),
             "click_through": bool(self.chk_through.isChecked()),
+            "window_title_enabled": bool(self.chk_titles.isChecked()),
+            "screenshot_enabled": bool(self.chk_shots.isChecked()),
             "dnd_manual": bool(self.chk_dnd.isChecked()),
             "dnd_auto": bool(self.chk_dnd_auto.isChecked()),
             "dnd_from": self.dnd_from.time().toString("HH:mm"),

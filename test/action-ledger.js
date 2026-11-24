@@ -408,9 +408,26 @@ check("plugin-host 透传 propose/cancel/verify/tryBegin", () => {
   assert.ok(p.includes("tryBeginAction: (m) => core.tryBeginAction(m)"));
 });
 
+check("A01：行动状态写盘失败，真实发送零副作用", async () => {
+  const calls = [];
+  const sandbox = Object.assign(mkCtx(fs.mkdtempSync(path.join(os.tmpdir(), "momo-state-write-fail-"))), {
+    module: { exports: {} }, console, process, Buffer, setTimeout, clearTimeout, fs, path, crypto: require("crypto"),
+    require: (m) => (m === "crypto" ? require("crypto") : undefined),
+    writeJsonAtomic: () => { throw new Error("disk full"); },
+    loadSession: () => [], saveSession: () => {}, saveMsgTime: () => {}, trimHistory: (h) => h,
+    sendPrivate: async (u, t) => { calls.push(t); }, host: { runBeforeSend: () => {} }, undefined,
+  });
+  vm.runInNewContext(recLoadSrc + "\n" + ledgerSrc + "\n" + sendSrc + "\nthis.__send = recordAndSend; this.__begin = tryBeginAction;", sandbox, { filename: "state-write-fail.js" });
+  const b = sandbox.__begin({ action: "send", userId: 1 });
+  assert.strictEqual(b.acquired, false); assert.strictEqual(b.duplicateOf, "state_write_failed");
+  const r = await sandbox.__send(1, "不能假装已经发出", true);
+  assert.strictEqual(r.result, "unavailable"); assert.strictEqual(calls.length, 0);
+});
+
 check("Kimi 三轮：proactive/share_fun 消费发送结果，失败不记已发送", () => {
   const idx = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
-  assert.ok(idx.includes('_sr.result !== "succeeded" && _sr.result !== "duplicate_succeeded"'), "消费真实结果");
+  assert.ok(idx.includes("function finishAutonomousMessage(tx, result)"), "主动意图统一消费真实发送结果");
+  assert.ok(idx.includes('const ok = r.result === "succeeded" || r.result === "duplicate_succeeded"'), "只认成功或已成功去重");
   assert.ok(idx.includes("主动搭话发送未成功"));
   assert.ok(idx.includes("心智分享趣图发送未成功，不记已分享"));
   assert.ok(idx.includes("const _sendInFlight = new Map();"), "并发同键共享同一发送 Promise");
@@ -423,7 +440,7 @@ check("Kimi 三轮：usedTools 结构化 ok，审计只认明确成功", () => {
 });
 check("Kimi 六缺口 A12：recordAndSend 直发审计载荷带真实 userId（旧无主凭据不背书）", () => {
   const idx = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
-  assert.ok(idx.includes('channel: "private", userId: userId || 0, usedTools: []'), "直发载荷补 userId，scope 缺 userId 时审计不背书");
+  assert.ok(idx.includes('channel: _channel, userId: userId || 0, usedTools: []'), "直发载荷带真实动态渠道与 userId，scope 缺 userId 时审计不背书");
 });
 check("Kimi 三轮：qzone 日报幂等命中不标记「今天已发」", () => {
   const q = fs.readFileSync(path.join(__dirname, "..", "plugins", "qzone.js"), "utf8");

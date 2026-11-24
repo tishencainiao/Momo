@@ -10,7 +10,7 @@ const T = (name, ok, extra) => { if (ok) pass++; else { fail++; console.log("FAI
 T("buildPersonContext 定义", /function buildPersonContext\(env, opts\)/.test(src));
 T("群聊分支按群过滤记忆", /env\.channel === "group"/.test(src) && /filterMemoriesForGroup\(loadMemories\(userId\), groupId\)/.test(src));
 T("群聊 max_tokens 上限 250 在装配器内", /settings\.max_tokens = Math\.min\(settings\.max_tokens \|\| 2048, 250\);/.test(src));
-T("pet 分支 petMode+无摘要", /extraInfo = \{ petMode: true \}/.test(src) && /summaryKey = null;/.test(src));
+T("pet 分支 petMode+渠道+无摘要", /extraInfo = \{ petMode: true, channel: "pet" \}/.test(src) && /summaryKey = null;/.test(src));
 T("agentChatOnce 两参信封签名", /async function agentChatOnce\(history, userText, pctx\)/.test(src));
 T("旧 11 参签名已不存在", !/agentChatOnce\(history, userText, settings, memories, persona, call, userId, taskCtx, shortMemories, summaryKey, extraInfo\)/.test(src));
 const n = (src.match(/buildPersonContext\(\{ sender:/g) || []).length;
@@ -43,7 +43,7 @@ T("pet 入口带 taskCtx", /buildPersonContext\(\{ sender: master, room: 0, chan
     T("group 装配", grp.summaryKey === "g42_7" && grp.extraInfo.groupId === 42 && grp.extraInfo.messageId === "m1" && grp.taskCtx === "gctx" && grp.settings.max_tokens === 250 && grp.memories[0].content === "g42m7" && grp.shortMemories[0].content === "g42s7");
     T("group 渠道透传", grp.channel === "group");
     const pet = f({ sender: 9, room: 0, channel: "pet" }, { taskCtx: "petCtx" });
-    T("pet 装配", pet.summaryKey === null && pet.extraInfo.petMode === true && pet.taskCtx === "petCtx" && pet.call === "U9" && pet.userId === 9);
+    T("pet 装配", pet.summaryKey === null && pet.extraInfo.petMode === true && pet.extraInfo.channel === "pet" && pet.taskCtx === "petCtx" && pet.call === "U9" && pet.userId === 9);
     T("pet 渠道透传", pet.channel === "pet");
     const pro = f({ sender: 7, room: 0, channel: "proactive" }, {});
     T("proactive 装配", pro.summaryKey === undefined && pro.taskCtx === "" && pro.call === "U7" && pro.extraInfo === null);

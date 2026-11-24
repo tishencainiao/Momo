@@ -78,11 +78,16 @@ class Sense(QObject):
     changed = Signal(str, dict)          # (事件名, 数据)
 
     def __init__(self, log=print, look_dir: str = "", away_after_s: float = 180.0,
-                 interval_ms: int = 5000, parent=None):
+                 interval_ms: int = 5000, title_enabled: bool = True,
+                 screenshot_enabled: bool = False, dnd_provider=None, parent=None):
         super().__init__(parent)
         self.log = log
         self.look_dir = look_dir
         self.away_after_s = float(away_after_s)
+        self.title_enabled = bool(title_enabled)
+        self.screenshot_enabled = bool(screenshot_enabled)
+        self.dnd_provider = dnd_provider or (lambda: False)
+        self.dnd = None
         self.idle_s = 0.0
         self.presence = "active"          # active / away
         self.foreground = {"title": "", "pid": 0, "app": ""}
@@ -99,18 +104,29 @@ class Sense(QObject):
     # ---------- 采样 ----------
     def sample(self) -> None:
         self.idle_s = idle_seconds()
-        presence = "away" if self.idle_s >= self.away_after_s else "active"
-        if presence != self.presence:
-            self.presence = presence
-            self.changed.emit("presence", {"presence": presence, "idle_s": round(self.idle_s, 1)})
-        fg = foreground_window()
-        if fg["app"] != self.foreground.get("app") or fg["title"] != self.foreground.get("title"):
-            self.foreground = fg
-            self.changed.emit("foreground", dict(fg))
         locked = is_locked()
         if locked != self.locked:
             self.locked = locked
             self.changed.emit("lock", {"locked": locked})
+        # 锁屏优先于键鼠空闲；鼠标没动只表示最近无输入，不能据此断言主人已离开。
+        presence = "locked" if locked else ("away" if self.idle_s >= self.away_after_s else "active")
+        if presence != self.presence:
+            self.presence = presence
+            self.changed.emit("presence", {"presence": presence, "idle_s": round(self.idle_s, 1)})
+        try:
+            private = bool(self.dnd_provider())
+        except Exception:
+            private = True                 # 隐私门禁状态不明时失败关闭
+        if private != self.dnd:
+            self.dnd = private
+            self.changed.emit("dnd_state", {"active": private})
+        if private or locked or not self.title_enabled:
+            fg = {"title": "", "pid": 0, "app": ""}
+        else:
+            fg = foreground_window()
+        if fg["app"] != self.foreground.get("app") or fg["title"] != self.foreground.get("title"):
+            self.foreground = fg
+            self.changed.emit("foreground", dict(fg))
 
     # ---------- 快照 ----------
     def snapshot(self) -> dict:
@@ -120,11 +136,21 @@ class Sense(QObject):
             "foreground": dict(self.foreground),
             "locked": self.locked,
             "last_look": self.last_look,
+            "title_enabled": self.title_enabled,
+            "screenshot_enabled": self.screenshot_enabled,
+            "dnd": bool(self.dnd_provider()),
         }
 
     # ---------- 截图 ----------
     def capture(self, max_width: int = 1280, quality: int = 78) -> dict:
-        """抓一张全屏（缩放保存为 jpg），返回 {path, width, height, ts}。"""
+        """仅在用户显式开启且非免打扰时抓一张全屏；默认直接拒绝。"""
+        if not self.screenshot_enabled:
+            return {"ok": False, "error": "screenshot_disabled"}
+        try:
+            if self.dnd_provider():
+                return {"ok": False, "error": "dnd"}
+        except Exception:
+            return {"ok": False, "error": "privacy_state_unknown"}
         from PySide6.QtGui import QGuiApplication
 
         screen = QGuiApplication.primaryScreen()

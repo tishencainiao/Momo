@@ -144,7 +144,19 @@ def run(config: dict) -> int:
         check("截图在 offscreen 下跳过（无真实屏幕）", True)
     else:
         shot = sn.capture()
-        check("截图能生成文件", bool(shot.get("ok")) and os.path.exists(shot.get("path", "")), str(shot))
+        check("默认截图被隐私门禁拒绝", shot.get("error") == "screenshot_disabled", str(shot))
+    check("默认截图配置关闭", sn.screenshot_enabled is False)
+    old_fg = sense_mod.foreground_window
+    try:
+        def forbidden_fg():
+            raise AssertionError("免打扰时不应读取窗口标题")
+        sense_mod.foreground_window = forbidden_fg
+        private_sense = sense_mod.Sense(log=lambda *a: None, interval_ms=60000,
+                                        screenshot_enabled=True, dnd_provider=lambda: True)
+        check("免打扰不读取或保存新标题", private_sense.snapshot()["foreground"]["title"] == "")
+        check("免打扰即使截图开关开也拒绝", private_sense.capture().get("error") == "dnd")
+    finally:
+        sense_mod.foreground_window = old_fg
 
     print("== 8) 物理（v0.5） ==")
     import physics as ph
@@ -172,6 +184,9 @@ def run(config: dict) -> int:
     check("时段解析坏值回落", dnd_mod.parse_hhmm("xx", 60) == 60)
     check("跨午夜时段命中（01:00 在 23:00~08:00 内）", dnd_mod.in_window(60, 23 * 60, 8 * 60))
     check("跨午夜时段不命中（12:00 不在 23:00~08:00）", not dnd_mod.in_window(12 * 60, 23 * 60, 8 * 60))
+    check("到午夜结束（23:30 在 23:00~00:00 内）", dnd_mod.in_window(23 * 60 + 30, 23 * 60, 0))
+    check("到午夜结束（00:00 整点已结束）", not dnd_mod.in_window(0, 23 * 60, 0))
+    check("到午夜结束（02:00 不在 23:00~00:00）", not dnd_mod.in_window(2 * 60, 23 * 60, 0))
     check("同起止时间不算免打扰", not dnd_mod.in_window(23 * 60, 23 * 60, 23 * 60))
     check("手动开关优先", dnd_mod.dnd_active(True, {"dnd_auto": False}, 12 * 60))
     check("关掉自动时段后不触发", not dnd_mod.dnd_active(False, {"dnd_auto": False}, 23 * 60 + 30))
@@ -221,6 +236,30 @@ def run(config: dict) -> int:
               "MOMO_BODY_CONFIG" in open(cfg_src, encoding="utf-8").read())
     else:
         check("配置路径支持覆盖（打包版无源码，跳过源码检查）", hasattr(cfg_mod, "CONFIG_PATH"))
+
+    print("\n== 11) v3.1 应用外壳 ==")
+    from app_window import MainWindow
+    from chat_window import ChatWindow
+    class FakeBrain:
+        def status(self):
+            return {"ok": True, "version": "3.1.0", "pid": 1, "uptime_s": 120, "boot": "ready",
+                    "health": [{"name": "onebot", "status": "fresh", "evidence": ""}], "life": {"phase": "day", "internal_actions": {"attempts": 2, "succeeded": 1, "by_kind": {"search": 1}}},
+                    "budget": {"daily_cny": 3, "spent_cny": 1, "remaining_cny": 2, "level": "normal", "tier": "low"}}
+        def companion(self):
+            return {"ok": True, "current_activity_id": None, "activities": []}
+        def set_budget(self, amount):
+            return {"ok": True}
+        def set_autonomy_paused(self, paused):
+            return {"ok": True, "autonomy_paused": paused}
+    mw = MainWindow(actions={}, api=FakeBrain(), get_body_state=lambda: {"visible": True, "dnd_manual": False, "dnd_auto_active": False, "weather_city": "北京"})
+    cw = ChatWindow(api=FakeBrain())
+    check("主控制窗口可构造", mw.centralWidget() is not None)
+    check("主界面健康/生活/共同活动卡片存在", hasattr(mw, "health_box") and hasattr(mw, "companion_detail") and hasattr(mw, "weather_label"))
+    check("打包/源码都定位同一大脑根目录", os.path.isfile(os.path.join(cfg_mod.ROOT_DIR, "index.js")) and os.path.isdir(os.path.join(cfg_mod.ROOT_DIR, "plugins")))
+    check("聊天窗口可构造且不直接持密钥", cw.transcript.isReadOnly() and not hasattr(cw, "api_key"))
+    check("聊天窗口支持连发（防抖计时器在）", cw._flush_timer.interval() == 2500 and cw._pending_msgs == [])
+    check("主界面生活费使用统一金额控件", mw.budget_spin.maximum() == 50.0)
+    mw.deleteLater(); cw.deleteLater()
 
     print("\n自检结果：%d 过 / %d 失败" % (_ok, _fail))
     return 0 if _fail == 0 else 1

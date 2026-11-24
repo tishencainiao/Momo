@@ -17,12 +17,14 @@ def parse_hhmm(text: str, default: int = 0) -> int:
 
 
 def in_window(minutes_now: int, start_min: int, end_min: int) -> bool:
-    """当前分钟是否落在 [start, end) 内；跨午夜也能判。"""
+    """当前分钟是否落在 [start, end) 内；跨午夜也能判。
+    约定：end=00:00（0 分钟）表示「到午夜 24:00 为止」，按 1440 处理。"""
     if start_min == end_min:
         return False
-    if start_min < end_min:
-        return start_min <= minutes_now < end_min
-    return minutes_now >= start_min or minutes_now < end_min
+    eff_end = 1440 if end_min == 0 else end_min
+    if start_min < eff_end:
+        return start_min <= minutes_now < eff_end
+    return minutes_now >= start_min or minutes_now < eff_end
 
 
 def dnd_active(manual: bool, config: dict, minutes_now: int) -> bool:
